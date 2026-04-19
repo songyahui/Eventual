@@ -1,6 +1,5 @@
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Monoid (Sum(..))
+import Dict
 
 clean :: Double -> Double -> Double -> Double
 clean dirty accruals initial = dirty - accruals + initial
@@ -19,10 +18,22 @@ comp2 dirty accruals initial =
 
 comp3 ::
     String
-    -> Map String (Sum Double)
-    -> Map String (Sum Double)
-    -> Map String (Sum Double)
+    -> Dict String (Sum Double)
+    -> Dict String (Sum Double)
+    -> Dict String (Sum Double)
     -> Maybe Double
 comp3 key dirty accruals initial =
-    let cleans = dirty <> Map.map negate accruals <> initial
-    in fmap getSum (Map.lookup key cleans)
+    let cleans = dirty <> Dict.map negate accruals <> initial
+    in fmap getSum (Dict.lookup key cleans)
+
+main :: IO ()
+main = do
+    let dirty = Just 100.0
+        accruals = Just 20.0
+        initial = Nothing
+    print $ comp1 dirty accruals initial
+    print $ comp2 dirty accruals initial
+    let dirtyDict = Dict.fromList [("account1", Sum 100.0)]
+        accrualsDict = Dict.fromList [("account1", Sum 20.0)]
+        initialDict = Dict.empty
+    print $ comp3 "account1" dirtyDict accrualsDict initialDict

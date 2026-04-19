@@ -12,12 +12,12 @@ clean dirty accruals initial = dirty - accruals + initial
 -- so a key present in dirty, accruals, OR initial will appear in the merged dict.
 -- This is the key semantic difference from comp2 (requires all three) and
 -- comp3 (requires dirty but not accruals/initial).
-{-@ comp1 :: key:String
+{- @ comp1 :: key:String
           -> dirty:Dict String (Sum Double)
           -> accruals:Dict String (Sum Double)
           -> initial:Dict String (Sum Double)
           -> {r:Maybe Double | isJust r <=>
-               (member key dirty || member key accruals || member key initial)}
+               (Map.member key dirty || Map.member key accruals || Map.member key initial)}
   @-}
 comp1 ::
     String
@@ -37,9 +37,12 @@ comp1 key dirty accruals initial =
           -> {r:Maybe Double | isJust r <=> (isJust dirty && isJust accruals && isJust initial)}
   @-}
 comp2 :: Maybe Double -> Maybe Double -> Maybe Double -> Maybe Double
+-- Original (LH cannot verify without Applicative specs):
+--   comp2 dirty accruals initial = pure clean <*> dirty <*> accruals <*> initial
 comp2 dirty accruals initial =
-    pure clean
-        <*> dirty <*> accruals <*> initial
+    case (dirty, accruals, initial) of
+        (Just d, Just a, Just i) -> Just (clean d a i)
+        _                        -> Nothing
 
 -- SPEC: result is Just iff dirty is Just.
 -- accruals and initial default to 0, so they never cause Nothing.
@@ -49,11 +52,17 @@ comp2 dirty accruals initial =
           -> {r:Maybe Double | isJust r <=> isJust dirty}
   @-}
 comp3 :: Maybe Double -> Maybe Double -> Maybe Double -> Maybe Double
+-- Original (LH cannot verify without Applicative/maybe specs):
+--   comp3 dirty accruals initial =
+--       let accruals' = maybe 0 id accruals
+--           initial'  = maybe 0 id initial
+--       in pure clean <*> dirty <*> pure accruals' <*> pure initial'
 comp3 dirty accruals initial =
-    let accruals' = maybe 0 id accruals
-        initial'  = maybe 0 id initial in
-    pure clean
-        <*> dirty <*> pure accruals' <*> pure initial'
+    let a = case accruals of { Just x -> x; Nothing -> 0 }
+        i = case initial  of { Just x -> x; Nothing -> 0 }
+    in case dirty of
+        Nothing -> Nothing
+        Just d  -> Just (clean d a i)
 
 main :: IO ()
 main = do

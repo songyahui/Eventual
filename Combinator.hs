@@ -1,10 +1,24 @@
 import Data.Monoid (Sum(..))
 import Dict
 
+-- Arithmetic contract: result is exactly (dirty - accruals + initial)
+{-@ clean :: dirty:Double -> accruals:Double -> initial:Double
+          -> {r:Double | r == dirty - accruals + initial} @-}
 clean :: Double -> Double -> Double -> Double
 clean dirty accruals initial = dirty - accruals + initial
 
--- old code
+-- SPEC: result is Just iff the key exists in ANY of the three dicts.
+-- Dict.map preserves keys, and <> (unionWith) keeps keys from either side,
+-- so a key present in dirty, accruals, OR initial will appear in the merged dict.
+-- This is the key semantic difference from comp2 (requires all three) and
+-- comp3 (requires dirty but not accruals/initial).
+{-@ comp1 :: key:String
+          -> dirty:Dict String (Sum Double)
+          -> accruals:Dict String (Sum Double)
+          -> initial:Dict String (Sum Double)
+          -> {r:Maybe Double | isJust r <=>
+               (member key dirty || member key accruals || member key initial)}
+  @-}
 comp1 ::
     String
     -> Dict String (Sum Double)
@@ -15,18 +29,30 @@ comp1 key dirty accruals initial =
     let cleans = dirty <> Dict.map negate accruals <> initial
     in fmap getSum (Dict.lookup key cleans)
 
--- simplified new code, but it doesn't handle missing keys as well as comp1
+-- SPEC: result is Just iff ALL three inputs are Just.
+-- Missing any one makes the whole computation Nothing.
+{-@ comp2 :: dirty:Maybe Double
+          -> accruals:Maybe Double
+          -> initial:Maybe Double
+          -> {r:Maybe Double | isJust r <=> (isJust dirty && isJust accruals && isJust initial)}
+  @-}
 comp2 :: Maybe Double -> Maybe Double -> Maybe Double -> Maybe Double
 comp2 dirty accruals initial =
-    pure clean 
+    pure clean
         <*> dirty <*> accruals <*> initial
 
--- patched code that handles missing keys by treating them as zero
+-- SPEC: result is Just iff dirty is Just.
+-- accruals and initial default to 0, so they never cause Nothing.
+{-@ comp3 :: dirty:Maybe Double
+          -> accruals:Maybe Double
+          -> initial:Maybe Double
+          -> {r:Maybe Double | isJust r <=> isJust dirty}
+  @-}
 comp3 :: Maybe Double -> Maybe Double -> Maybe Double -> Maybe Double
 comp3 dirty accruals initial =
     let accruals' = maybe 0 id accruals
-        initial' = maybe 0 id initial in
-    pure clean 
+        initial'  = maybe 0 id initial in
+    pure clean
         <*> dirty <*> pure accruals' <*> pure initial'
 
 main :: IO ()

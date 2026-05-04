@@ -178,7 +178,9 @@ instance Composable RE where
 
     -- Quotient r1 \ r2: the residual future obligation in r2 after trace r1.
     -- Base: if r1 = ε (nothing consumed), r2 is unchanged.
-    subtraction Epsilon r2 = r2
+    -- Σ* (Not Bot) trivially satisfies any precondition: residual is ε.
+    subtraction Epsilon   r2 = r2
+    subtraction (Not Bot) _  = Epsilon
     subtraction r1 r2 =
         let evts   = first r1
             step e = subtraction (normalize (derivative e r1))

@@ -3,49 +3,46 @@ module Examples.CryptoSession where
 import Prelude hiding ((<>))
 import Future
 
--- Initiate an encrypted session: future = eventually finalizeSession
 initSession :: String -> Effectful RE ()
 initSession sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("initSession", [Str sid])
-    , future = finally ("finalizeSession", [Str sid])
+    , post   = Single (Atom "initSession" [Str sid])
+    , future = finally (Atom "finalizeSession" [Str sid])
     }
 
--- Finalize session: discharges initSession obligation
 finalizeSession :: String -> Effectful RE ()
 finalizeSession sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("finalizeSession", [Str sid])
-    , future = anything
+    , post   = Single (Atom "finalizeSession" [Str sid])
+    , future = universe
     }
 
--- Generate a nonce: future = eventually consumeNonce (use-once enforcement)
+-- Nonce must be consumed exactly once (use-once enforcement via future)
 generateNonce :: Int -> Effectful RE ()
 generateNonce nid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("generateNonce", [Num nid])
-    , future = finally ("consumeNonce", [Num nid])
+    , post   = Single (Atom "generateNonce" [Num nid])
+    , future = finally (Atom "consumeNonce" [Num nid])
     }
 
--- Consume the nonce: discharges generateNonce obligation
+-- Precondition: nonce must have just been generated
 consumeNonce :: Int -> Effectful RE ()
 consumeNonce nid = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("consumeNonce", [Num nid])
-    , future = anything
+    , pre    = Single (Atom "generateNonce" [Num nid])
+    , post   = Single (Atom "consumeNonce" [Num nid])
+    , future = universe
     }
 
--- Encrypt data within a session: no new obligation
 encrypt :: String -> String -> Effectful RE ()
 encrypt sid msg = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("encrypt", [Str sid, Str msg])
-    , future = anything
+    , post   = Single (Atom "encrypt" [Str sid, Str msg])
+    , future = universe
     }
 
 -- Good: session opened, nonce generated and consumed, session closed
@@ -53,11 +50,11 @@ goodHandshake :: Effectful RE ()
 goodHandshake = do
     initSession "sess-1"
     generateNonce 42
-    encrypt "sess-1" "hello"
     consumeNonce 42
+    encrypt "sess-1" "hello"
     finalizeSession "sess-1"
 
--- Bad: nonce generated but never consumed (replay attack risk)
+-- Bad: nonce generated but never consumed (replay attack risk) — future remains
 nonceLeak :: Effectful RE ()
 nonceLeak = do
     initSession "sess-2"
@@ -65,7 +62,7 @@ nonceLeak = do
     encrypt "sess-2" "secret"
     finalizeSession "sess-2"
 
--- Bad: session never finalized (key material not wiped)
+-- Bad: session never finalized — future remains
 unclosedSession :: Effectful RE ()
 unclosedSession = do
     initSession "sess-3"
@@ -76,7 +73,8 @@ unclosedSession = do
 printResult :: String -> Effectful RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Post:   " ++ show (post prog)
+    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
+    putStrLn $ "Post:   " ++ show (normalize (post   prog))
     putStrLn $ "Future: " ++ show (normalize (future prog))
     putStrLn ""
 

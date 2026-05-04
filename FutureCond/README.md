@@ -15,54 +15,111 @@ Pre- and post-conditions reason about a single call boundary. Many real-world co
 
 ## Core Idea
 
-Every effectful operation is annotated with three fields:
+Every effectful operation carries three trace specifications:
 
 ```haskell
 data Effectful eff a = Effectful
     { ret    :: a    -- return value
-    , pre    :: eff  -- what must have happened before
+    , pre    :: eff  -- what must have happened immediately before
     , post   :: eff  -- what this operation produces
     , future :: eff  -- what the rest of the program must eventually do
     }
 ```
 
-`eff` is instantiated to `RE` — a regular expression over events. A `future` condition is a regular expression that the **remaining trace** of the program must match.
+`eff` is instantiated to `RE` — a regular expression over events, extended with complement.
 
-When two operations are sequenced via `>>=`, future conditions are composed as:
+### Precondition propagation (Hoare-logic style)
+
+When operations are sequenced via `>>=`, the composed precondition is:
+
+```
+pre(e >>= f)  =  pre(e)  <>  (pre(f(ret e)) \\ post(e))
+```
+
+The term `pre(f) \\ post(e)` is the **residual** precondition of `f` not discharged by `e`'s postcondition.
+When `post(e)` fully satisfies `pre(f)`, the quotient collapses to `ε` and the overall precondition is just `pre(e)`.
+When `post(e)` does not satisfy `pre(f)`, the residual is `∅` and the composed `pre` becomes `∅` — flagging the violation.
+
+### Future condition propagation
 
 ```
 future(e >>= f)  =  (post(f(ret e)) \\ future(e))  /\  future(f(ret e))
 ```
 
-- `\\` (subtraction) removes from `future(e)` the obligations that `f` will satisfy via its own `post`
-- `/\` (conjunction) intersects the remaining obligations with `f`'s own future condition
+- `\\` (subtraction / Brzozowski quotient) removes from `future(e)` the obligations discharged by `f`'s `post`
+- `/\` (conjunction) intersects the remaining obligation with `f`'s own future condition
 
-The result: obligations accumulate and propagate compositionally. When `future` normalises to `anything` (`_*`), all obligations are discharged.
+When `future` normalises to `¬∅` (the universal language), all obligations are discharged.
 
-## Regular Expression Language
+## Events and the RE Language
 
-Events are `(String, [Term])` pairs. The `RE` type builds specifications over them:
+Events are named occurrences with typed arguments:
+
+```haskell
+data Term  = Var String | Str String | Num Int
+data Event = Atom String [Term]   -- e.g.  Atom "send" [Num 42]
+           | Wildcard             -- matches any single event (used in RE patterns)
+```
+
+The `RE` type is an **extended regular expression** — regular expressions with complement as a first-class operator:
 
 | Constructor | Meaning |
 |---|---|
-| `Bot` | no trace satisfies this (∅) |
-| `Epsilon` | empty trace (ε) |
-| `Single e` | exactly the event `e` |
-| `Wildcard` | any single event |
+| `Bot` | empty language ∅ |
+| `Epsilon` | empty word ε |
+| `Single e` | exactly the event `e` (with `Wildcard` matching any event) |
 | `Seq r1 r2` | `r1` followed by `r2` |
-| `Or r1 r2` | `r1` or `r2` |
-| `And r1 r2` | traces satisfying both `r1` and `r2` |
-| `Star r` | zero or more repetitions of `r` |
+| `Or r1 r2` | union `r1 ∨ r2` |
+| `And r1 r2` | intersection `r1 ∧ r2` |
+| `Star r` | Kleene star `r*` |
+| `Not r` | complement `¬r` |
 
-Two derived combinators are provided:
+Complement is handled **algebraically** via two laws, without automaton construction:
+
+```
+∂_a(¬r)  =  ¬(∂_a(r))          -- derivative commutes with complement
+ν(¬r)    =  ¬ν(r)               -- nullability inverts under complement
+```
+
+The normaliser applies De Morgan laws (`¬(r₁ ∨ r₂) = ¬r₁ ∧ ¬r₂`) and double-negation elimination (`¬¬r = r`) during simplification.
+
+Two key derived values:
 
 ```haskell
-anything :: FutureCond
-anything = Star Wildcard          -- matches any trace (obligation discharged)
+anything :: RE          -- Σ* = ¬∅  (universal language; obligation discharged)
+anything = Not Bot
 
-finally :: Event -> FutureCond
-finally e = anything `Seq` Single e `Seq` anything  -- e must occur eventually
+finally :: Event -> RE  -- eventually e  =  Σ* · e · Σ*
+finally e = Seq anything (Seq (Single e) anything)
+
+globally :: Event -> RE -- always e  =  e*
+globally e = Star (Single e)
 ```
+
+## LTL to RE Translation
+
+LTL formulae over finite traces can be translated algebraically to `RE`:
+
+```haskell
+data LTL
+    = LTLTrue | LTLFalse
+    | LTLAtom  Event
+    | LTLNot   LTL
+    | LTLAnd   LTL LTL  |  LTLOr  LTL LTL
+    | LTLNext  LTL                       -- X φ
+    | LTLUntil LTL LTL                  -- φ U ψ
+    | LTLFinally  LTL                   -- F φ  ≜  Σ* · ⟦φ⟧
+    | LTLGlobally LTL                   -- G φ  ≜  ¬(Σ* · ¬⟦φ⟧)
+```
+
+```haskell
+ltl_to_re (LTLNot l)        = Not (ltl_to_re l)               -- ¬⟦l⟧
+ltl_to_re (LTLNext l)       = Seq (Single Wildcard) (ltl_to_re l)  -- Σ · ⟦l⟧
+ltl_to_re (LTLFinally l)    = Seq anything (ltl_to_re l)      -- Σ* · ⟦l⟧
+ltl_to_re (LTLGlobally l)   = Not (Seq anything (Not (ltl_to_re l))) -- ¬(Σ*·¬⟦l⟧)
+```
+
+No automaton construction is required; `Not` carries the complement through the RE algebra.
 
 ## Operators
 
@@ -70,24 +127,57 @@ finally e = anything `Seq` Single e `Seq` anything  -- e must occur eventually
 |---|---|---|
 | `<>` | 6 (left) | concatenation (`Seq`) |
 | `/\` | 7 (left) | conjunction (`And`) |
-| `\\` | 5 (left) | subtraction (Brzozowski-style derivative) |
+| `\\` | 5 (left) | subtraction (Brzozowski quotient) |
 
 ## File Layout
 
 ```
 FutureCond/
-├── Future.hs          -- library: RE, Composable, Effectful monad
-├── Main.hs            -- standalone demo (malloc/free)
+├── Future.hs              -- RE, Composable, Effectful monad, LTL
 └── Examples/
-    ├── Main.hs        -- runs all examples
-    ├── Memory.hs      -- malloc / free
-    ├── FileHandle.hs  -- open / close
-    ├── Mutex.hs       -- acquire / release
-    ├── Transaction.hs -- beginTx / commit / rollback
-    ├── CryptoSession.hs -- initSession / nonce lifecycle
-    ├── NetworkProtocol.hs -- TCP-like handshake
-    ├── Capability.hs  -- token / privilege lifecycle
-    └── Sensor.hs      -- IoT sensor / motor control
+    ├── Main.hs            -- runs all examples
+    ├── Memory.hs          -- malloc / free
+    ├── FileHandle.hs      -- open / read / close  (precondition chain)
+    ├── Mutex.hs           -- acquire / release
+    ├── Transaction.hs     -- beginTx / commit / rollback
+    ├── CryptoSession.hs   -- initSession / nonce lifecycle
+    ├── NetworkProtocol.hs -- TCP-like three-way handshake
+    ├── Capability.hs      -- token / privilege lifecycle
+    └── Sensor.hs          -- IoT sensor / motor control
+```
+
+## Defining Your Own Operations
+
+```haskell
+openFile :: String -> Effectful RE ()
+openFile path = Effectful
+    { ret    = ()
+    , pre    = universe                              -- no precondition
+    , post   = Single (Atom "open" [Str path])
+    , future = finally (Atom "close" [Str path])   -- close must occur eventually
+    }
+
+-- Precondition: the last event must have been open or read
+closeFile :: String -> Effectful RE ()
+closeFile path = Effectful
+    { ret    = ()
+    , pre    = Or (Single (Atom "open" [Str path]))
+                  (Single (Atom "read" [Str path]))
+    , post   = Single (Atom "close" [Str path])
+    , future = universe                              -- obligation discharged
+    }
+```
+
+Sequence them in the `Effectful` monad:
+
+```haskell
+program :: Effectful RE ()
+program = do
+    openFile "data.txt"
+    closeFile "data.txt"
+
+-- normalize (pre    program) == universe  =>  all preconditions satisfied
+-- normalize (future program) == anything  =>  all future obligations met
 ```
 
 ## Running the Examples
@@ -95,51 +185,27 @@ FutureCond/
 From the `FutureCond/` directory:
 
 ```bash
-# Run all examples
-runghc Examples/Main.hs
-
-# Run a single example
-runghc Examples/Memory.hs
-runghc Examples/Mutex.hs
+runghc -i. Examples/Main.hs      -- all examples
+runghc -i. Examples/Memory.hs    -- memory management only
+runghc -i. Examples/Mutex.hs     -- mutex lifecycle only
 ```
 
-Each example prints the normalised `future` condition of each test program. A result of `(_)*` means all temporal obligations are satisfied. Anything else identifies which obligation remains outstanding.
+Each example prints three fields for every test program:
 
-## Defining Your Own Operations
+| Field | Meaning |
+|---|---|
+| `Pre` | `universe` (¬∅) = all preconditions satisfied; `∅` = precondition violated |
+| `Post` | trace of events produced by the computation |
+| `Future` | `¬∅` = all obligations discharged; any other RE = outstanding obligation |
+
+## Checking Results Programmatically
 
 ```haskell
--- An operation that must eventually be followed by its counterpart
-openFile :: String -> Effectful RE ()
-openFile path = Effectful
-    { ret    = ()
-    , pre    = universe
-    , post   = Single ("open",  [Str path])
-    , future = finally ("close", [Str path])
-    }
+preOk :: Effectful RE () -> Bool
+preOk prog = normalize (pre prog) == universe
 
-closeFile :: String -> Effectful RE ()
-closeFile path = Effectful
-    { ret    = ()
-    , pre    = universe
-    , post   = Single ("close", [Str path])
-    , future = anything                       -- obligation discharged
-    }
-
-program :: Effectful RE ()
-program = do
-    openFile "a.txt"
-    openFile "b.txt"
-    closeFile "a.txt"
-    closeFile "b.txt"
-
--- normalize (future program) == anything  =>  all obligations met
+futureOk :: Effectful RE () -> Bool
+futureOk prog = normalize (future prog) == anything
 ```
 
-## Checking Results
-
-```haskell
-check :: Effectful RE () -> Bool
-check prog = normalize (future prog) == anything
-```
-
-If `check` returns `False`, inspect `normalize (future prog)` — the remaining `finally(...)` terms name the unmet obligations precisely.
+If `futureOk` returns `False`, inspect `normalize (future prog)` — the remaining `finally(...)` terms name the unmet obligations precisely.

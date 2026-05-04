@@ -3,116 +3,102 @@ module Examples.Sensor where
 import Prelude hiding ((<>))
 import Future
 
--- IoT sensor / actuator lifecycle.
--- Activating a device creates a future obligation to deactivate it.
--- Turning a motor on requires it to be turned off.
-
--- Initialise a sensor: future = eventually sensorSleep(id)
 sensorInit :: Int -> Effectful RE ()
 sensorInit sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("sensorInit", [Num sid])
-    , future = finally ("sensorSleep", [Num sid])
+    , post   = Single (Atom "sensorInit" [Num sid])
+    , future = finally (Atom "sensorSleep" [Num sid])
     }
 
--- Read from a sensor: no new obligation
 sensorRead :: Int -> Effectful RE ()
 sensorRead sid = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("sensorRead", [Num sid])
-    , future = anything
+    , pre    = Or (Single (Atom "sensorInit" [Num sid]))
+                  (Single (Atom "sensorRead" [Num sid]))
+    , post   = Single (Atom "sensorRead" [Num sid])
+    , future = universe
     }
 
--- Put sensor to sleep: discharges sensorInit obligation
+-- Precondition: sensor must have been initialised or read before sleeping
 sensorSleep :: Int -> Effectful RE ()
 sensorSleep sid = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("sensorSleep", [Num sid])
-    , future = anything
+    , pre    = Or (Single (Atom "sensorInit" [Num sid]))
+                  (Single (Atom "sensorRead" [Num sid]))
+    , post   = Single (Atom "sensorSleep" [Num sid])
+    , future = universe
     }
 
--- Turn motor on: future = eventually motorOff(id)
 motorOn :: Int -> Effectful RE ()
 motorOn mid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("motorOn", [Num mid])
-    , future = finally ("motorOff", [Num mid])
+    , post   = Single (Atom "motorOn" [Num mid])
+    , future = finally (Atom "motorOff" [Num mid])
     }
 
--- Turn motor off: discharges motorOn obligation
 motorOff :: Int -> Effectful RE ()
 motorOff mid = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("motorOff", [Num mid])
-    , future = anything
+    , pre    = Single (Atom "motorOn" [Num mid])
+    , post   = Single (Atom "motorOff" [Num mid])
+    , future = universe
     }
 
--- Actuate output device: no obligation
 actuate :: String -> Int -> Effectful RE ()
 actuate device level = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("actuate", [Str device, Num level])
-    , future = anything
+    , post   = Single (Atom "actuate" [Str device, Num level])
+    , future = universe
     }
 
--- Good: sensor init, read, sleep
+-- Good: init, read, sleep
 safeSensorCycle :: Effectful RE ()
 safeSensorCycle = do
     sensorInit 1
     sensorRead 1
-    sensorRead 1
     sensorSleep 1
 
--- Good: motor on, work done, motor off
+-- Good: motor on, actuate, motor off
 safeMotorCycle :: Effectful RE ()
 safeMotorCycle = do
     motorOn 1
     actuate "pump" 80
     motorOff 1
 
--- Good: multi-device workflow — sensor triggers motor, both cleaned up
-coordinatedWorkflow :: Effectful RE ()
-coordinatedWorkflow = do
-    sensorInit 1
-    motorOn 2
-    sensorRead 1
-    actuate "valve" 100
-    motorOff 2
-    sensorSleep 1
-
--- Bad: sensor never put to sleep (power drain, resource leak)
+-- Bad: sensor 2 never slept — future pending
 sensorLeftOn :: Effectful RE ()
 sensorLeftOn = do
     sensorInit 1
-    sensorRead 1
+    sensorSleep 1
     sensorInit 2
     sensorRead 2
-    sensorSleep 1
-    -- sensor 2 never slept
+    -- sensorSleep 2 missing
 
--- Bad: motor left running (safety hazard)
+-- Bad: motor left running — future pending
 motorLeftRunning :: Effectful RE ()
 motorLeftRunning = do
     motorOn 3
     actuate "fan" 50
 
+-- Bad: sensorRead without init — precondition violated
+readWithoutInit :: Effectful RE ()
+readWithoutInit = sensorRead 5
+
 printResult :: String -> Effectful RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Post:   " ++ show (post prog)
+    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
+    putStrLn $ "Post:   " ++ show (normalize (post   prog))
     putStrLn $ "Future: " ++ show (normalize (future prog))
     putStrLn ""
 
 main :: IO ()
 main = do
-    printResult "safeSensorCycle"      safeSensorCycle
-    printResult "safeMotorCycle"       safeMotorCycle
-    printResult "coordinatedWorkflow"  coordinatedWorkflow
-    printResult "sensorLeftOn"         sensorLeftOn
-    printResult "motorLeftRunning"     motorLeftRunning
+    printResult "safeSensorCycle"  safeSensorCycle
+    printResult "safeMotorCycle"   safeMotorCycle
+    printResult "sensorLeftOn"     sensorLeftOn
+    printResult "motorLeftRunning" motorLeftRunning
+    printResult "readWithoutInit"  readWithoutInit

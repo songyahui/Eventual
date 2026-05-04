@@ -3,92 +3,87 @@ module Examples.Capability where
 import Prelude hiding ((<>))
 import Future
 
--- OAuth-style capability / token lifecycle.
--- requestToken creates a capability that MUST eventually be revoked.
-
--- Request an access token for a user: future = eventually revokeToken(user)
 requestToken :: String -> Effectful RE ()
 requestToken user = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("requestToken", [Str user])
-    , future = finally ("revokeToken", [Str user])
+    , post   = Single (Atom "requestToken" [Str user])
+    , future = finally (Atom "revokeToken" [Str user])
     }
 
--- Use the token (e.g. access a protected resource): no new obligation
 useToken :: String -> String -> Effectful RE ()
 useToken user resource = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("accessResource", [Str user, Str resource])
-    , future = anything
+    , post   = Single (Atom "accessResource" [Str user, Str resource])
+    , future = universe
     }
 
--- Revoke the token: discharges the requestToken obligation
+-- Precondition: a token must have just been requested for this user
 revokeToken :: String -> Effectful RE ()
 revokeToken user = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("revokeToken", [Str user])
-    , future = anything
+    , pre    = Single (Atom "requestToken" [Str user])
+    , post   = Single (Atom "revokeToken" [Str user])
+    , future = universe
     }
 
--- Escalate privilege: future = eventually de-escalate
 escalate :: String -> Effectful RE ()
 escalate role = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("escalate", [Str role])
-    , future = finally ("deescalate", [Str role])
+    , post   = Single (Atom "escalate" [Str role])
+    , future = finally (Atom "deescalate" [Str role])
     }
 
 deescalate :: String -> Effectful RE ()
 deescalate role = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("deescalate", [Str role])
-    , future = anything
+    , pre    = Single (Atom "escalate" [Str role])
+    , post   = Single (Atom "deescalate" [Str role])
+    , future = universe
     }
 
--- Good: token acquired, used, revoked
+-- Good: token acquired and immediately revoked
 properTokenUse :: Effectful RE ()
 properTokenUse = do
     requestToken "alice"
-    useToken "alice" "/admin"
     revokeToken "alice"
 
--- Good: two users, both tokens revoked
-multiUser :: Effectful RE ()
-multiUser = do
-    requestToken "alice"
-    requestToken "bob"
-    useToken "alice" "/reports"
-    useToken "bob" "/reports"
-    revokeToken "alice"
-    revokeToken "bob"
+-- Good: privilege escalated and dropped
+safeEscalation :: Effectful RE ()
+safeEscalation = do
+    escalate "admin"
+    deescalate "admin"
 
--- Bad: token acquired and used but never revoked (capability leak)
+-- Bad: token never revoked — future obligation remains
 tokenLeak :: Effectful RE ()
 tokenLeak = do
     requestToken "mallory"
     useToken "mallory" "/secrets"
 
--- Bad: privilege escalated but never dropped
+-- Bad: privilege escalated but never dropped — future remains
 privilegeLeak :: Effectful RE ()
 privilegeLeak = do
     escalate "admin"
     useToken "system" "/root"
 
+-- Bad: revokeToken without requestToken — precondition violated
+revokeWithoutRequest :: Effectful RE ()
+revokeWithoutRequest = revokeToken "eve"
+
 printResult :: String -> Effectful RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Post:   " ++ show (post prog)
+    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
+    putStrLn $ "Post:   " ++ show (normalize (post   prog))
     putStrLn $ "Future: " ++ show (normalize (future prog))
     putStrLn ""
 
 main :: IO ()
 main = do
-    printResult "properTokenUse" properTokenUse
-    printResult "multiUser"      multiUser
-    printResult "tokenLeak"      tokenLeak
-    printResult "privilegeLeak"  privilegeLeak
+    printResult "properTokenUse"       properTokenUse
+    printResult "safeEscalation"       safeEscalation
+    printResult "tokenLeak"            tokenLeak
+    printResult "privilegeLeak"        privilegeLeak
+    printResult "revokeWithoutRequest" revokeWithoutRequest

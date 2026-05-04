@@ -8,35 +8,34 @@ beginTx :: Effectful RE ()
 beginTx = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("beginTx", [])
-    , future = Or (finally ("commit", [])) (finally ("rollback", []))
+    , post   = Single (Atom "beginTx" [])
+    , future = Or (finally (Atom "commit" [])) (finally (Atom "rollback" []))
     }
 
--- Write within a transaction: no new obligation
 dbWrite :: String -> Int -> Effectful RE ()
 dbWrite key val = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("write", [Str key, Num val])
-    , future = anything
+    , post   = Single (Atom "write" [Str key, Num val])
+    , future = universe
     }
 
--- Commit: discharges the beginTx future obligation
+-- Precondition: a write must have just occurred (commit requires at least one write)
 commit :: Effectful RE ()
 commit = Effectful
     { ret    = ()
-    , pre    = universe
-    , post   = Single ("commit", [])
-    , future = anything
+    , pre    = Or (Single (Atom "beginTx" []))
+                  (Single (Atom "write"   []))  -- wildcard args checked by RE matching
+    , post   = Single (Atom "commit" [])
+    , future = universe
     }
 
--- Rollback: also discharges the beginTx future obligation
 rollback :: Effectful RE ()
 rollback = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single ("rollback", [])
-    , future = anything
+    , post   = Single (Atom "rollback" [])
+    , future = universe
     }
 
 -- Good: begin, write, commit
@@ -53,7 +52,7 @@ rolledBackTx = do
     dbWrite "balance" 100
     rollback
 
--- Bad: begin and write but no commit or rollback
+-- Bad: begin and write but no commit or rollback — future obligation remains
 openTx :: Effectful RE ()
 openTx = do
     beginTx
@@ -62,7 +61,8 @@ openTx = do
 printResult :: String -> Effectful RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Post:   " ++ show (post prog)
+    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
+    putStrLn $ "Post:   " ++ show (normalize (post   prog))
     putStrLn $ "Future: " ++ show (normalize (future prog))
     putStrLn ""
 

@@ -1,10 +1,8 @@
 import Lake
 open Lake DSL
 
+-- No external dependencies: FutureCond.lean uses only Lean 4 core (Init).
 package «futurecond» where
-
-require mathlib from git
-  "https://github.com/leanprover-community/mathlib4" @ "v4.14.0"
 
 lean_lib «FutureCond» where
   roots := #[`FutureCond]

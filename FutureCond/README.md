@@ -204,18 +204,17 @@ lake --version
 
 ### Build
 
+The formalization has **no external dependencies** — it uses only Lean 4's
+built-in `Init` library.
+
 ```bash
 cd FutureCond/Formalization
 
-# 1. Download Mathlib and other dependencies (first time only; ~10 min)
-lake update
-
-# 2. Fetch pre-built Mathlib oleans (avoids recompiling Mathlib from source)
-lake exe cache get
-
-# 3. Build the FutureCond library
+# One step: just build
 lake build FutureCond
 ```
+
+No `lake update`, no `lake exe cache get`, no internet connection required.
 
 A successful build produces no errors. Theorems marked `sorry` emit
 a warning (`declaration uses sorry`) — these are documented work-in-progress

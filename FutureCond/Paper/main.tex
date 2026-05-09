@@ -295,10 +295,62 @@ derivative e (Star r)     = Seq (derivative e r) (Star r)
 derivative _ _            = Bot
 \end{lstlisting}
 
-The \lstinline{first} function returns the set of events that can begin
-a word in $L(r)$, driving the subtraction algorithm.
-For complement, \lstinline{first (Not r) = first r} (an approximation
-sufficient for our examples---the same finite alphabet is explored).
+The \lstinline{firstWith} function returns the set of events---drawn from
+a supplied finite alphabet $\Sigma_0$---that can begin a word in $L(r)$,
+driving the subtraction algorithm.
+The complement case requires care.
+Naively writing \lstinline{first (Not r) = first r} is \emph{unsound}:
+$L(\neg r)$ can begin with events \emph{not} in $\mathit{first}(r)$,
+so the na\"ive rule explores the wrong direction.
+The correct characterisation is:
+
+\begin{equation}
+  e \in \mathit{first}(\neg r,\,\Sigma_0)
+  \;\iff\;
+  e \in \Sigma_0
+  \;\wedge\;
+  \lceil\partial_e(r)\rceil \neq \univ
+  \label{eq:first-not}
+\end{equation}
+
+That is, $e$ can open a word in $L(\neg r)$ iff after consuming $e$,
+the residual $\partial_e(r)$ does \emph{not} cover the whole future---there
+exists some continuation that stays outside $L(r)$.
+The alphabet $\Sigma_0$ is collected from an RE via \lstinline{atoms},
+which recursively gathers all concrete (\lstinline{Atom}) events,
+excluding \lstinline{Wildcard}.
+
+\begin{lstlisting}
+atoms :: RE -> [Event]
+atoms (Single Wildcard) = []
+atoms (Single e)        = [e]
+atoms (Seq r1 r2)       = atoms r1 `union` atoms r2
+atoms (Or  r1 r2)       = atoms r1 `union` atoms r2
+atoms (And r1 r2)       = atoms r1 `union` atoms r2
+atoms (Star r)          = atoms r
+atoms (Not r)           = atoms r
+atoms _                 = []
+
+firstWith :: [Event] -> RE -> [Event]
+firstWith _    Bot               = []
+firstWith _    Epsilon           = []
+firstWith _    (Single e)        = [e]
+firstWith alph (Seq r1 r2)
+    | nullable r1                = firstWith alph r1 `union` firstWith alph r2
+    | otherwise                  = firstWith alph r1
+firstWith alph (Or  r1 r2)      = firstWith alph r1 `union` firstWith alph r2
+firstWith alph (And r1 r2)      = [e | e <- firstWith alph r1,
+                                        e `elem` firstWith alph r2]
+firstWith alph (Star r)         = firstWith alph r
+firstWith alph (Not r)          = [e | e <- alph,
+                                        not (isTotal (normalize (derivative e r)))]
+  where isTotal (Not Bot) = True; isTotal _ = False
+\end{lstlisting}
+
+\noindent
+The function \lstinline{first r = firstWith (atoms r) r} is a convenient
+wrapper for standalone use; inside \lstinline{subtraction} both operands
+contribute to the alphabet (see \S\ref{sec:re-instance}).
 
 \subsection{LTL\textsubscript{f} to RE Translation}
 \label{sec:ltl}
@@ -316,10 +368,54 @@ data LTL = LTLTrue | LTLFalse | LTLAtom Event
          | LTLGlobally LTL         -- G phi  =  Not(F(Not phi))
 \end{lstlisting}
 
+The Until case requires a separate helper.
+Using $\sem{\phi}^*$ directly is wrong when $\phi$ is compound:
+$\sem{\phi}$ may contain words of length $>1$
+(e.g.\ $\sem{X\,\psi} = \Sigma^1\cdot\sem{\psi}$),
+so $\sem{\phi}^*$ iterates over \emph{multi-event matches} rather than
+individual steps.
+$\phi\,U\,\psi$ requires $\phi$ to hold at each \emph{individual step}
+before $\psi$, so the correct building block is the
+\emph{single-step projection} $\mathit{step}(\phi)$:
+
+\begin{equation}
+  \sem{\phi \,U\, \psi}
+  \;=\;
+  \mathit{step}(\phi)^* \cdot \sem{\psi}
+  \label{eq:until-re}
+\end{equation}
+
+\noindent
+$\mathit{step}(\phi)$ is a length-1 RE representing ``one event satisfying $\phi$'':
+
+\begin{lstlisting}
+toSingleStep :: LTL -> RE
+toSingleStep LTLTrue        = Single Wildcard           -- any single event
+toSingleStep LTLFalse       = Bot                       -- no event satisfies False
+toSingleStep (LTLAtom e)    = Single e                  -- exactly event e
+toSingleStep (LTLNot l)     = And (Single Wildcard)     -- Sigma^1 cap neg step(l)
+                                  (Not (toSingleStep l))
+toSingleStep (LTLAnd l1 l2) = And (toSingleStep l1) (toSingleStep l2)
+toSingleStep (LTLOr  l1 l2) = Or  (toSingleStep l1) (toSingleStep l2)
+toSingleStep _              = Bot   -- temporal operators: no single-step projection
+\end{lstlisting}
+
+\noindent
+The \lstinline{LTLNot} case intersects with \lstinline{Single Wildcard}
+($\Sigma^1$) to keep the result length-1: bare
+$\neg\,\mathit{step}(\phi)$ would include $\varepsilon$ and all
+multi-event words.
+Temporal operators as the left-hand side of Until
+(\lstinline{LTLNext}, \lstinline{LTLFinally}, \lstinline{LTLGlobally},
+nested \lstinline{LTLUntil}) have no single-step projection;
+\lstinline{Bot} is returned as a conservative error signal, making the
+enclosing Until unsatisfiable and surfacing the limitation rather than
+silently producing an incorrect RE.
+
 \begin{lstlisting}
 ltl_to_re (LTLNot l)       = Not (ltl_to_re l)
 ltl_to_re (LTLNext l)      = Seq (Single Wildcard) (ltl_to_re l)
-ltl_to_re (LTLUntil l1 l2) = Seq (Star (ltl_to_re l1)) (ltl_to_re l2)
+ltl_to_re (LTLUntil l1 l2) = Seq (Star (toSingleStep l1)) (ltl_to_re l2)
 ltl_to_re (LTLFinally l)   = Seq anything (ltl_to_re l)
 ltl_to_re (LTLGlobally l)  = Not (Seq anything (Not (ltl_to_re l)))
 \end{lstlisting}
@@ -328,6 +424,12 @@ The globally case deserves a note:
 $G\,\phi \triangleq \neg F\neg\phi \triangleq
  \neg(\univ \cdot \neg\sem{\phi})$---``there is no suffix where
 $\phi$ fails''---expressed directly using the $\neg$ constructor.
+For the propositional cases of Until, Equation~\eqref{eq:until-re}
+recovers the expected identities: $\mathit{True}\,U\,\psi = F\psi$
+(since $\mathit{step}(\mathit{True}) = \Sigma^1$ and
+$(\Sigma^1)^* = \Sigma^*$) and $\mathit{False}\,U\,\psi = \psi$
+(since $\mathit{step}(\mathit{False}) = \varnothing$ and
+$\varnothing^* = \varepsilon$).
 
 %% =========================================================================
 \section{The \texttt{Effectful} Monad}
@@ -487,7 +589,8 @@ instance Composable RE where
   subtraction Epsilon   r2 = r2
   subtraction (Not Bot) _  = Epsilon   -- Sigma* \\ r = eps (trivially satisfied)
   subtraction r1 r2 =
-    let evts   = first r1
+    let alph   = atoms r1 `union` atoms r2   -- combined alphabet
+        evts   = firstWith alph r1
         step e = subtraction (normalize (derivative e r1))
                               (normalize (derivative e r2))
     in foldr Or Bot (map step evts)
@@ -495,6 +598,14 @@ instance Composable RE where
 
 The third clause handles the universal-precondition case:
 $\univ \setminus r = \varepsilon$ for any $r$.
+The general clause collects the alphabet from \emph{both} operands
+before calling \lstinline{firstWith}: this ensures that an event
+appearing only in $r_2$ (e.g.\ a future obligation) is still considered
+as a potential first step when $r_1$ contains a complement.
+Equation~\eqref{eq:first-not} then checks, for each candidate $e$,
+whether $\lceil\partial_e(r_1)\rceil \neq \univ$---confirming that
+$e$ can genuinely open a word outside $L(r_1)$---before the
+derivative pair is explored.
 
 The \lstinline{normalize} function applies the following laws, exploiting
 the complement constructor:
@@ -1071,11 +1182,18 @@ Lifting FutureCond into an effect-handler framework
 specifications to be composed alongside algebraic effect rows, opening
 the door to modular verification of larger programs.
 
-\paragraph{First-set approximation for complement.}
-The current \lstinline{first (Not r) = first r} approximation is sound
-for positive RE inputs but may miss events for deeply nested complements.
-A full implementation would maintain an explicit alphabet $\Sigma$ and
-use set complement for \lstinline{first (Not r)}.
+\paragraph{Closed-world alphabet assumption.}
+The \lstinline{firstWith} function handles complement soundly via
+Equation~\eqref{eq:first-not}, using the union of both operands' atoms as the
+working alphabet $\Sigma_0 = \mathit{atoms}(r_1)\cup\mathit{atoms}(r_2)$.
+This is sound under the \emph{closed-world assumption}: every event that
+could appear is mentioned somewhere in the two REs being subtracted.
+An event entirely absent from both operands is never explored, so
+a complement RE that accepts traces beginning with such an event
+will under-approximate.
+A fully open-world implementation would accept an explicit $\Sigma$
+declaration, enabling complement over an unrestricted event domain
+and removing the closed-world restriction.
 
 \paragraph{Tool support.}
 The normalised future condition is a human-readable diagnostic. Tooling

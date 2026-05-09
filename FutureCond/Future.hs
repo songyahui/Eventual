@@ -3,6 +3,7 @@
 module Future where
 
 import Prelude hiding ((<>))
+import Data.List (union)
 
 -- ── Terms ─────────────────────────────────────────────────────────────────────
 
@@ -87,18 +88,45 @@ derivative e (And r1 r2)  = And (derivative e r1) (derivative e r2)
 derivative e (Star r)     = Seq (derivative e r) (Star r)
 derivative e (Not r)      = Not (derivative e r)   -- ∂_a(¬r) = ¬(∂_a(r))
 
--- ── First Set ─────────────────────────────────────────────────────────────────
--- Events that can begin a word in L(r); drives the subtraction algorithm.
+-- ── Alphabet extraction ───────────────────────────────────────────────────────
+-- Collect all concrete (non-Wildcard) events mentioned in an RE.
+-- This forms the effective alphabet for complement unfolding in firstWith.
 
+atoms :: RE -> [Event]
+atoms Bot               = []
+atoms Epsilon           = []
+atoms (Single Wildcard) = []
+atoms (Single e)        = [e]
+atoms (Seq r1 r2)       = atoms r1 `union` atoms r2
+atoms (Or  r1 r2)       = atoms r1 `union` atoms r2
+atoms (And r1 r2)       = atoms r1 `union` atoms r2
+atoms (Star r)          = atoms r
+atoms (Not r)           = atoms r
+
+-- ── First Set ─────────────────────────────────────────────────────────────────
+-- firstWith alph r: events in alph that can begin a word in L(r).
+-- For Not r: e ∈ first(¬r)  iff  ∂_e(r) ≠ Σ*, i.e. some continuation after e
+-- stays outside L(r).  We check this for every event in the supplied alphabet.
+
+firstWith :: [Event] -> RE -> [Event]
+firstWith _    Bot               = []
+firstWith _    Epsilon           = []
+firstWith _    (Single e)        = [e]
+firstWith alph (Seq r1 r2)
+    | nullable r1                = firstWith alph r1 `union` firstWith alph r2
+    | otherwise                  = firstWith alph r1
+firstWith alph (Or  r1 r2)      = firstWith alph r1 `union` firstWith alph r2
+firstWith alph (And r1 r2)      = [e | e <- firstWith alph r1, e `elem` firstWith alph r2]
+firstWith alph (Star r)         = firstWith alph r
+firstWith alph (Not r)          = [e | e <- alph, not (isTotal (normalize (derivative e r)))]
+  where
+    isTotal (Not Bot) = True
+    isTotal _         = False
+
+-- first r: convenience wrapper that uses the events in r itself as the alphabet.
+-- subtraction passes the combined alphabet of both operands for completeness.
 first :: RE -> [Event]
-first Bot          = []
-first Epsilon      = []
-first (Single e)   = [e]
-first (Seq r1 r2)  = if nullable r1 then first r1 ++ first r2 else first r1
-first (Or  r1 r2)  = first r1 ++ first r2
-first (And r1 r2)  = [e | e <- first r1, e `elem` first r2]
-first (Star r)     = first r
-first (Not r)      = first r   -- approximation: explore same alphabet as inner r
+first r = firstWith (atoms r) r
 
 -- ── LTL ───────────────────────────────────────────────────────────────────────
 
@@ -115,6 +143,34 @@ data LTL
     | LTLGlobally LTL          -- G φ  ≜  ¬F¬φ    ≡  ¬(Σ* · ¬⟦φ⟧)
     deriving (Eq, Show)
 
+-- ── Single-step projection ────────────────────────────────────────────────────
+-- toSingleStep l: the RE for a single event satisfying l at the current step.
+-- This is the correct building block for LTLUntil:
+--   ⟦φ U ψ⟧  =  toSingleStep(φ)* · ⟦ψ⟧
+--
+-- Using ltl_to_re l1 directly would be wrong: ⟦l1⟧ may contain words of
+-- length > 1 (e.g. LTLNext, LTLFinally), so Star ⟦l1⟧ iterates over
+-- multi-event matches rather than individual steps.
+--
+-- Well-defined for propositional l (Boolean combinations of LTLAtom).
+-- For temporal operators inside the Until left-hand side (LTLNext, LTLFinally,
+-- LTLGlobally, nested LTLUntil) there is no single-step projection; Bot is
+-- returned as a conservative error signal that makes the enclosing Until
+-- unsatisfiable, surfacing the limitation rather than silently mis-specifying.
+--
+-- The LTLNot case intersects with Single Wildcard (Σ^1) to keep the result
+-- length-1: bare Not (toSingleStep l) would include ε and multi-event words.
+
+toSingleStep :: LTL -> RE
+toSingleStep LTLTrue         = Single Wildcard                      -- any single event
+toSingleStep LTLFalse        = Bot                                  -- no event satisfies False
+toSingleStep (LTLAtom e)     = Single e                             -- exactly event e
+toSingleStep (LTLNot l)      = And (Single Wildcard)               -- Σ^1 ∩ ¬step(l)
+                                   (Not (toSingleStep l))
+toSingleStep (LTLAnd l1 l2)  = And (toSingleStep l1) (toSingleStep l2)
+toSingleStep (LTLOr  l1 l2)  = Or  (toSingleStep l1) (toSingleStep l2)
+toSingleStep _               = Bot  -- temporal operators not representable as a single step
+
 -- Algebraic translation LTLf → RE (no automaton construction needed).
 -- Complement is handled by the Not constructor directly.
 ltl_to_re :: LTL -> RE
@@ -125,7 +181,7 @@ ltl_to_re (LTLNot l)         = Not (ltl_to_re l)                    -- ¬⟦l⟧
 ltl_to_re (LTLAnd l1 l2)     = And (ltl_to_re l1) (ltl_to_re l2)   -- ⟦l1⟧ ∩ ⟦l2⟧
 ltl_to_re (LTLOr  l1 l2)     = Or  (ltl_to_re l1) (ltl_to_re l2)   -- ⟦l1⟧ ∪ ⟦l2⟧
 ltl_to_re (LTLNext l)        = Seq (Single Wildcard) (ltl_to_re l)  -- Σ · ⟦l⟧
-ltl_to_re (LTLUntil l1 l2)   = Seq (Star (ltl_to_re l1))           -- ⟦l1⟧* · ⟦l2⟧
+ltl_to_re (LTLUntil l1 l2)   = Seq (Star (toSingleStep l1))        -- step(l1)* · ⟦l2⟧
                                     (ltl_to_re l2)
 ltl_to_re (LTLFinally l)     = Seq anything (ltl_to_re l)           -- Σ* · ⟦l⟧
 ltl_to_re (LTLGlobally l)    = Not (Seq anything                    -- ¬(Σ* · ¬⟦l⟧)
@@ -182,7 +238,8 @@ instance Composable RE where
     subtraction Epsilon   r2 = r2
     subtraction (Not Bot) _  = Epsilon
     subtraction r1 r2 =
-        let evts   = first r1
+        let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
+            evts   = firstWith alph r1
             step e = subtraction (normalize (derivative e r1))
                                  (normalize (derivative e r2))
         in foldr Or Bot (map step evts)

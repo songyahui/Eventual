@@ -180,6 +180,112 @@ program = do
 -- normalize (future program) == anything  =>  all future obligations met
 ```
 
+## Lean 4 Formalization
+
+The `Formalization/` directory contains a Lean 4 mechanization of the core
+FutureCond theory, covering syntax, denotational semantics, nullability,
+Brzozowski derivatives, normalization soundness, the `Composable` algebra,
+and the `Effectful` monad laws.
+
+### Prerequisites
+
+| Tool | Version | Install |
+|---|---|---|
+| **Lean 4** (via `elan`) | ≥ 4.14.0 | `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \| sh` |
+| **Lake** (bundled with Lean 4) | — | included with `elan` |
+| **Git** | any | for fetching Mathlib |
+
+Verify your installation:
+
+```bash
+lean --version   # should print Lean 4.x.x
+lake --version
+```
+
+### Build
+
+```bash
+cd FutureCond/Formalization
+
+# 1. Download Mathlib and other dependencies (first time only; ~10 min)
+lake update
+
+# 2. Fetch pre-built Mathlib oleans (avoids recompiling Mathlib from source)
+lake exe cache get
+
+# 3. Build the FutureCond library
+lake build FutureCond
+```
+
+A successful build produces no errors. Theorems marked `sorry` emit
+a warning (`declaration uses sorry`) — these are documented work-in-progress
+steps and do not block compilation.
+
+### Interactive Exploration
+
+Open `FutureCond.lean` in **VS Code** with the
+[lean4 extension](https://marketplace.visualstudio.com/items?itemName=leanprover.lean4)
+installed. The extension uses the project's `lakefile.lean` automatically:
+no additional configuration is needed.
+
+Hover over any theorem name to see its type and proof state.
+Place the cursor inside a `by` block to inspect goals step by step.
+
+Alternatively, use **Emacs** with
+[`lean4-mode`](https://github.com/leanprover/lean4-mode).
+
+### Checking a Single File
+
+```bash
+# Type-check only, without a full lake build
+lean --project FutureCond.lean
+```
+
+### Project Structure
+
+```
+Formalization/
+├── lakefile.lean          -- Lake project: declares mathlib dependency
+├── FutureCond.lean        -- All formalization (single file)
+└── .lake/                 -- Lake build cache (auto-generated)
+    └── packages/
+        └── mathlib/       -- Mathlib4 source (fetched by lake update)
+```
+
+### Dependency
+
+The formalization depends on
+[Mathlib4 v4.14.0](https://github.com/leanprover-community/mathlib4/tree/v4.14.0),
+imported via:
+
+```lean
+import Mathlib.Data.List.Basic
+import Mathlib.Logic.Basic
+import Mathlib.Tactic
+```
+
+Only a small slice of Mathlib is used (list lemmas, basic logic, and
+the `simp`/`tauto` tactic infrastructure).
+
+### Proof Status
+
+| Section | Fully proved | With `sorry` |
+|---|---|---|
+| Syntax & semantics (`inL`, `InStar`, `langEquiv`) | ✓ | — |
+| Nullability (`nullable_iff`) | ✓ | — |
+| Derivative correctness (all non-star cases + `not`) | ✓ | — |
+| Derivative correctness (star/nil subcase) | — | ✓ |
+| Normalization soundness (seq-ε, not, star cases) | ✓ | — |
+| Normalization soundness (or/and cases) | — | ✓ |
+| `InStar` normalization lemmas | ✓ | — |
+| Algebraic language laws (De Morgan, distributivity, …) | ✓ | — |
+| Monad laws: left/right identity | ✓ | — |
+| Monad laws: associativity of `post` | ✓ | — |
+| Monad laws: associativity of `future` | — | ✓ |
+| Hoare-rule precondition collapse/violation | ✓ | — |
+| Future-condition propagation correctness | ✓ | — |
+| Temporal correctness (`no_leak_iff`) | ✓ | — |
+
 ## Running the Examples
 
 From the `FutureCond/` directory:

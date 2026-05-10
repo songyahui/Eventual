@@ -8,15 +8,15 @@ beginTx :: Effectful RE ()
 beginTx = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "beginTx" [])
-    , future = Or (finally (Atom "commit" [])) (finally (Atom "rollback" []))
+    , post   = Single (Atom "beginTx" (List []))
+    , future = Or (finally (Atom "commit" (List []))) (finally (Atom "rollback" (List [])))
     }
 
 dbWrite :: String -> Int -> Effectful RE ()
 dbWrite key val = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "write" [Str key, Num val])
+    , post   = Single (Atom "write" (List [Str key, Num val]))
     , future = universe
     }
 
@@ -24,9 +24,9 @@ dbWrite key val = Effectful
 commit :: Effectful RE ()
 commit = Effectful
     { ret    = ()
-    , pre    = Or (Single (Atom "beginTx" []))
-                  (Single (Atom "write"   []))  -- wildcard args checked by RE matching
-    , post   = Single (Atom "commit" [])
+    , pre    = Or (Single (Atom "beginTx" (List [])))
+                  (Single (Atom "write"   (List [])))  -- wildcard args checked by RE matching
+    , post   = Single (Atom "commit" (List []))
     , future = universe
     }
 
@@ -34,7 +34,7 @@ rollback :: Effectful RE ()
 rollback = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "rollback" [])
+    , post   = Single (Atom "rollback" (List []))
     , future = universe
     }
 

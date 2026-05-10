@@ -10,15 +10,15 @@ malloc :: Int -> Effectful RE ()
 malloc addr = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "malloc" [Num addr])
-    , future = finally (Atom "free" [Num addr])
+    , post   = Single (Atom "malloc" (List [Num addr]))
+    , future = finally (Atom "free" (List [Num addr]))
     }
 
 free :: Int -> Effectful RE ()
 free addr = Effectful
     { ret    = ()
-    , pre    = Single (Atom "malloc" [Num addr])   -- malloc(addr) must have just occurred
-    , post   = Single (Atom "free" [Num addr])
+    , pre    = Single (Atom "malloc" (List [Num addr]))   -- malloc(addr) must have just occurred
+    , post   = Single (Atom "free" (List [Num addr]))
     , future = universe
     }
 

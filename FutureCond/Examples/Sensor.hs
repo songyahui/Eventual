@@ -7,16 +7,16 @@ sensorInit :: Int -> Effectful RE ()
 sensorInit sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "sensorInit" [Num sid])
-    , future = finally (Atom "sensorSleep" [Num sid])
+    , post   = Single (Atom "sensorInit" (List [Num sid]))
+    , future = finally (Atom "sensorSleep" (List [Num sid]))
     }
 
 sensorRead :: Int -> Effectful RE ()
 sensorRead sid = Effectful
     { ret    = ()
-    , pre    = Or (Single (Atom "sensorInit" [Num sid]))
-                  (Single (Atom "sensorRead" [Num sid]))
-    , post   = Single (Atom "sensorRead" [Num sid])
+    , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
+                  (Single (Atom "sensorRead" (List [Num sid])))
+    , post   = Single (Atom "sensorRead" (List [Num sid]))
     , future = universe
     }
 
@@ -24,9 +24,9 @@ sensorRead sid = Effectful
 sensorSleep :: Int -> Effectful RE ()
 sensorSleep sid = Effectful
     { ret    = ()
-    , pre    = Or (Single (Atom "sensorInit" [Num sid]))
-                  (Single (Atom "sensorRead" [Num sid]))
-    , post   = Single (Atom "sensorSleep" [Num sid])
+    , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
+                  (Single (Atom "sensorRead" (List [Num sid])))
+    , post   = Single (Atom "sensorSleep" (List [Num sid]))
     , future = universe
     }
 
@@ -34,15 +34,15 @@ motorOn :: Int -> Effectful RE ()
 motorOn mid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "motorOn" [Num mid])
-    , future = finally (Atom "motorOff" [Num mid])
+    , post   = Single (Atom "motorOn" (List [Num mid]))
+    , future = finally (Atom "motorOff" (List [Num mid]))
     }
 
 motorOff :: Int -> Effectful RE ()
 motorOff mid = Effectful
     { ret    = ()
-    , pre    = Single (Atom "motorOn" [Num mid])
-    , post   = Single (Atom "motorOff" [Num mid])
+    , pre    = Single (Atom "motorOn" (List [Num mid]))
+    , post   = Single (Atom "motorOff" (List [Num mid]))
     , future = universe
     }
 
@@ -50,7 +50,7 @@ actuate :: String -> Int -> Effectful RE ()
 actuate device level = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "actuate" [Str device, Num level])
+    , post   = Single (Atom "actuate" (List [Str device, Num level]))
     , future = universe
     }
 

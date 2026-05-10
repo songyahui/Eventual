@@ -217,7 +217,6 @@ class Composable a where
     empty         :: a
     universe      :: a
     subtraction   :: a -> a -> a
-    normalize     :: a -> a
 
 infixl 6 <>
 (<>) :: Composable a => a -> a -> a
@@ -249,54 +248,54 @@ instance Composable RE where
                                  (normalize (derivative e r2))
         in foldr Or Bot (map step evts)
 
-    -- Normalization: simplify using RE algebra + De Morgan laws for Not.
-    normalize r = case r of
+-- Normalization: simplify using RE algebra + De Morgan laws for Not.
+normalize :: RE -> RE
+normalize r = case r of
+    Seq r1 r2 -> case (normalize r1, normalize r2) of
+        (Bot, _)      -> Bot
+        (_, Bot)      -> Bot
+        (Epsilon, r') -> r'
+        (r', Epsilon) -> r'
+        (r1', r2')    -> Seq r1' r2'
 
-        Seq r1 r2 -> case (normalize r1, normalize r2) of
-            (Bot, _)      -> Bot
-            (_, Bot)      -> Bot
-            (Epsilon, r') -> r'
-            (r', Epsilon) -> r'
-            (r1', r2')    -> Seq r1' r2'
+    Or r1 r2 -> case (normalize r1, normalize r2) of
+        (Bot, r')        -> r'
+        (r', Bot)        -> r'
+        (r1', r2')
+            | r1' == r2'  -> r1'
+            | isUniv r1'  -> anything
+            | isUniv r2'  -> anything
+        (r1', r2')       -> Or r1' r2'
 
-        Or r1 r2 -> case (normalize r1, normalize r2) of
-            (Bot, r')        -> r'
-            (r', Bot)        -> r'
-            (r1', r2')
-                | r1' == r2'  -> r1'
-                | isUniv r1'  -> anything
-                | isUniv r2'  -> anything
-            (r1', r2')       -> Or r1' r2'
+    And r1 r2 -> case (normalize r1, normalize r2) of
+        (Bot, _)         -> Bot
+        (_, Bot)         -> Bot
+        (r1', r2')
+            | r1' == r2'  -> r1'
+            | isUniv r1'  -> r2'
+            | isUniv r2'  -> r1'
+        (Epsilon, r')    -> if nullable r' then Epsilon else Bot
+        (r', Epsilon)    -> if nullable r' then Epsilon else Bot
+        (r1', r2')       -> And r1' r2'
 
-        And r1 r2 -> case (normalize r1, normalize r2) of
-            (Bot, _)         -> Bot
-            (_, Bot)         -> Bot
-            (r1', r2')
-                | r1' == r2'  -> r1'
-                | isUniv r1'  -> r2'
-                | isUniv r2'  -> r1'
-            (Epsilon, r')    -> if nullable r' then Epsilon else Bot
-            (r', Epsilon)    -> if nullable r' then Epsilon else Bot
-            (r1', r2')       -> And r1' r2'
+    -- Complement: involution + De Morgan laws
+    Not r1 -> case normalize r1 of
+        Not r'       -> r'                                    -- ¬¬r = r
+        Or  r1' r2'  -> normalize (And (Not r1') (Not r2'))  -- De Morgan
+        And r1' r2'  -> normalize (Or  (Not r1') (Not r2'))  -- De Morgan
+        Bot          -> anything                              -- ¬∅  = Σ*
+        r' | isUniv r' -> Bot                                -- ¬Σ* = ∅
+        r'             -> Not r'
 
-        -- Complement: involution + De Morgan laws
-        Not r1 -> case normalize r1 of
-            Not r'       -> r'                                    -- ¬¬r = r
-            Or  r1' r2'  -> normalize (And (Not r1') (Not r2'))  -- De Morgan
-            And r1' r2'  -> normalize (Or  (Not r1') (Not r2'))  -- De Morgan
-            Bot          -> anything                              -- ¬∅  = Σ*
-            r' | isUniv r' -> Bot                                -- ¬Σ* = ∅
-            r'             -> Not r'
+    Star r1 -> case normalize r1 of
+        Bot     -> Epsilon   -- ∅* = ε
+        Epsilon -> Epsilon   -- ε* = ε
+        r'      -> Star r'
 
-        Star r1 -> case normalize r1 of
-            Bot     -> Epsilon   -- ∅* = ε
-            Epsilon -> Epsilon   -- ε* = ε
-            r'      -> Star r'
-
-        _ -> r
-      where
-        isUniv (Not Bot) = True
-        isUniv _         = False
+    _ -> r
+  where
+    isUniv (Not Bot) = True
+    isUniv _         = False
 
 -- ── Effectful monad ───────────────────────────────────────────────────────────
 

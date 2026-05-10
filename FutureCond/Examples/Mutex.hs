@@ -7,16 +7,16 @@ acquire :: Int -> Effectful RE ()
 acquire mid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "acquire" [Num mid])
-    , future = finally (Atom "release" [Num mid])
+    , post   = Single (Atom "acquire" (List [Num mid]))
+    , future = finally (Atom "release" (List [Num mid]))
     }
 
 -- Precondition: acquire(mid) must have been the immediately preceding event
 release :: Int -> Effectful RE ()
 release mid = Effectful
     { ret    = ()
-    , pre    = Single (Atom "acquire" [Num mid])
-    , post   = Single (Atom "release" [Num mid])
+    , pre    = Single (Atom "acquire" (List [Num mid]))
+    , post   = Single (Atom "release" (List [Num mid]))
     , future = universe
     }
 
@@ -24,7 +24,7 @@ criticalWork :: Effectful RE ()
 criticalWork = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "work" [])
+    , post   = Single (Atom "work" (List []))
     , future = universe
     }
 

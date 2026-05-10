@@ -7,15 +7,15 @@ requestToken :: String -> Effectful RE ()
 requestToken user = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "requestToken" [Str user])
-    , future = finally (Atom "revokeToken" [Str user])
+    , post   = Single (Atom "requestToken" (List [Str user]))
+    , future = finally (Atom "revokeToken" (List [Str user]))
     }
 
 useToken :: String -> String -> Effectful RE ()
 useToken user resource = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "accessResource" [Str user, Str resource])
+    , post   = Single (Atom "accessResource" (List [Str user, Str resource]))
     , future = universe
     }
 
@@ -23,8 +23,8 @@ useToken user resource = Effectful
 revokeToken :: String -> Effectful RE ()
 revokeToken user = Effectful
     { ret    = ()
-    , pre    = Single (Atom "requestToken" [Str user])
-    , post   = Single (Atom "revokeToken" [Str user])
+    , pre    = Single (Atom "requestToken" (List [Str user]))
+    , post   = Single (Atom "revokeToken" (List [Str user]))
     , future = universe
     }
 
@@ -32,15 +32,15 @@ escalate :: String -> Effectful RE ()
 escalate role = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "escalate" [Str role])
-    , future = finally (Atom "deescalate" [Str role])
+    , post   = Single (Atom "escalate" (List [Str role]))
+    , future = finally (Atom "deescalate" (List [Str role]))
     }
 
 deescalate :: String -> Effectful RE ()
 deescalate role = Effectful
     { ret    = ()
-    , pre    = Single (Atom "escalate" [Str role])
-    , post   = Single (Atom "deescalate" [Str role])
+    , pre    = Single (Atom "escalate" (List [Str role]))
+    , post   = Single (Atom "deescalate" (List [Str role]))
     , future = universe
     }
 

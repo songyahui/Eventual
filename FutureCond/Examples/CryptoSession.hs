@@ -7,15 +7,15 @@ initSession :: String -> Effectful RE ()
 initSession sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "initSession" [Str sid])
-    , future = finally (Atom "finalizeSession" [Str sid])
+    , post   = Single (Atom "initSession" (List [Str sid]))
+    , future = finally (Atom "finalizeSession" (List [Str sid]))
     }
 
 finalizeSession :: String -> Effectful RE ()
 finalizeSession sid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "finalizeSession" [Str sid])
+    , post   = Single (Atom "finalizeSession" (List [Str sid]))
     , future = universe
     }
 
@@ -24,16 +24,16 @@ generateNonce :: Int -> Effectful RE ()
 generateNonce nid = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "generateNonce" [Num nid])
-    , future = finally (Atom "consumeNonce" [Num nid])
+    , post   = Single (Atom "generateNonce" (List [Num nid]))
+    , future = finally (Atom "consumeNonce" (List [Num nid]))
     }
 
 -- Precondition: nonce must have just been generated
 consumeNonce :: Int -> Effectful RE ()
 consumeNonce nid = Effectful
     { ret    = ()
-    , pre    = Single (Atom "generateNonce" [Num nid])
-    , post   = Single (Atom "consumeNonce" [Num nid])
+    , pre    = Single (Atom "generateNonce" (List [Num nid]))
+    , post   = Single (Atom "consumeNonce" (List [Num nid]))
     , future = universe
     }
 
@@ -41,7 +41,7 @@ encrypt :: String -> String -> Effectful RE ()
 encrypt sid msg = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "encrypt" [Str sid, Str msg])
+    , post   = Single (Atom "encrypt" (List [Str sid, Str msg]))
     , future = universe
     }
 

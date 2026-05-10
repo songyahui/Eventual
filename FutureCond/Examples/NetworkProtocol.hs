@@ -9,25 +9,25 @@ sendSYN :: Effectful RE ()
 sendSYN = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "sendSYN" [])
-    , future = finally (Atom "recvSYNACK" [])
+    , post   = Single (Atom "sendSYN" (List []))
+    , future = finally (Atom "recvSYNACK" (List []))
     }
 
 -- Precondition: sendSYN must have just occurred
 recvSYNACK :: Effectful RE ()
 recvSYNACK = Effectful
     { ret    = ()
-    , pre    = Single (Atom "sendSYN" [])
-    , post   = Single (Atom "recvSYNACK" [])
-    , future = finally (Atom "sendACK" [])
+    , pre    = Single (Atom "sendSYN" (List []))
+    , post   = Single (Atom "recvSYNACK" (List []))
+    , future = finally (Atom "sendACK" (List []))
     }
 
 -- Precondition: recvSYNACK must have just occurred
 sendACK :: Effectful RE ()
 sendACK = Effectful
     { ret    = ()
-    , pre    = Single (Atom "recvSYNACK" [])
-    , post   = Single (Atom "sendACK" [])
+    , pre    = Single (Atom "recvSYNACK" (List []))
+    , post   = Single (Atom "sendACK" (List []))
     , future = universe
     }
 
@@ -35,7 +35,7 @@ sendData :: String -> Effectful RE ()
 sendData payload = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "sendData" [Str payload])
+    , post   = Single (Atom "sendData" (List [Str payload]))
     , future = universe
     }
 
@@ -43,15 +43,15 @@ sendFIN :: Effectful RE ()
 sendFIN = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "sendFIN" [])
-    , future = finally (Atom "recvFINACK" [])
+    , post   = Single (Atom "sendFIN" (List []))
+    , future = finally (Atom "recvFINACK" (List []))
     }
 
 recvFINACK :: Effectful RE ()
 recvFINACK = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "recvFINACK" [])
+    , post   = Single (Atom "recvFINACK" (List []))
     , future = universe
     }
 

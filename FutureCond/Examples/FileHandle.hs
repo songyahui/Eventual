@@ -7,17 +7,17 @@ openFile :: String -> Effectful RE ()
 openFile path = Effectful
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "open" [Str path])
-    , future = finally (Atom "close" [Str path])
+    , post   = Single (Atom "open" (List [Str path]))
+    , future = finally (Atom "close" (List [Str path]))
     }
 
 -- Precondition: last event was open or read (file must be open)
 readFile' :: String -> Effectful RE ()
 readFile' path = Effectful
     { ret    = ()
-    , pre    = Or (Single (Atom "open" [Str path]))
-                  (Single (Atom "read" [Str path]))
-    , post   = Single (Atom "read" [Str path])
+    , pre    = Or (Single (Atom "open" (List [Str path])))
+                  (Single (Atom "read" (List [Str path])))
+    , post   = Single (Atom "read" (List [Str path]))
     , future = universe
     }
 
@@ -25,9 +25,9 @@ readFile' path = Effectful
 closeFile :: String -> Effectful RE ()
 closeFile path = Effectful
     { ret    = ()
-    , pre    = Or (Single (Atom "open" [Str path]))
-                  (Single (Atom "read" [Str path]))
-    , post   = Single (Atom "close" [Str path])
+    , pre    = Or (Single (Atom "open" (List [Str path])))
+                  (Single (Atom "read" (List [Str path])))
+    , post   = Single (Atom "close" (List [Str path]))
     , future = universe
     }
 

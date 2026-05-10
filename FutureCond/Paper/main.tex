@@ -453,8 +453,27 @@ class Composable a where
   empty         :: a             -- identity for <>  (varepsilon)
   universe      :: a             -- identity for /\  (neg-emptyset)
   subtraction   :: a -> a -> a   -- (\\)
-  normalize     :: a -> a
 \end{lstlisting}
+
+\noindent
+The five operations form exactly the interface required by the bind
+formula---no more, no less.
+\lstinline{concatenation} sequences effects (used for \lstinline{post}
+and \lstinline{pre}); \lstinline{conjunction} combines simultaneous
+constraints (used for \lstinline{future}); \lstinline{subtraction}
+computes the residual obligation (the Brzozowski quotient for the RE
+instance).
+\lstinline{empty} and \lstinline{universe} are the respective identity
+elements and appear in \lstinline{pure}.
+The class assumes \lstinline{(<>)} is associative with unit
+\lstinline{empty}, and \lstinline{universe} is the unit for
+\lstinline{(/\\)}; \lstinline{subtraction} satisfies
+$\varepsilon \setminus r = r$ and $\univ \setminus r = \varepsilon$.
+
+Normalization is \emph{not} part of the class.
+It is an RE-specific simplification called internally by
+\lstinline{subtraction}; a different \lstinline{Composable} instance
+need not define it at all.
 
 \subsection{The \texttt{Effectful} Type}
 
@@ -600,6 +619,9 @@ instance Composable RE where
         step e = subtraction (normalize (derivative e r1))
                               (normalize (derivative e r2))
     in foldr Or Bot (map step evts)
+
+normalize :: RE -> RE   -- RE-specific; not part of Composable
+normalize r = {- ... algebraic simplification ... -}
 \end{lstlisting}
 
 The third clause handles the universal-precondition case:
@@ -613,8 +635,8 @@ whether $\lceil\partial_e(r_1)\rceil \neq \univ$---confirming that
 $e$ can genuinely open a word outside $L(r_1)$---before the
 derivative pair is explored.
 
-The \lstinline{normalize} function applies the following laws, exploiting
-the complement constructor:
+\lstinline{normalize} sits outside the instance and applies the
+following RE-specific laws, exploiting the complement constructor:
 
 \begin{center}
 \begin{tabular}{ll}

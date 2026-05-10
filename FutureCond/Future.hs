@@ -3,7 +3,9 @@
 module Future where
 
 import Prelude hiding ((<>))
-import Data.List (union, intercalate)
+import Data.List (union, intercalate, subsequences)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set        as Set
 
 -- ── Terms ─────────────────────────────────────────────────────────────────────
 
@@ -338,3 +340,66 @@ instance Composable eff => Monad (Effectful eff) where
         , post   = post e <> post fe
         , future = (post fe \\ future e) /\ future fe
         }
+
+
+-- ── Separation Logic ──────────────────────────────────────────────────────────
+-- Symbolic separation-logic predicates over integer-addressed heaps.
+-- Parallels the RE instance: Star/Emp play the role of Seq/Epsilon,
+-- Conj/Top play the role of And/(Not Bot), and Wand plays the role of
+-- the Brzozowski quotient.
+
+type Addr = Int
+type Val  = Int
+type Heap = Map.Map Addr Val
+
+data SL
+    = Emp              -- empty heap                  (identity for Sep)
+    | Top              -- any heap (universe)          (identity for Conj)
+    | Cell Addr Val    -- singleton: address l holds value v
+    | SepStar SL SL       -- P * Q   separating conjunction
+    | Conj SL SL       -- P ∧ Q   ordinary conjunction
+    | Wand SL SL       -- P -* Q  magic wand (residual)
+    deriving (Eq, Show)
+
+-- ── Semantic interpretation ───────────────────────────────────────────────────
+-- satisfies world heap predicate
+-- The Wand case quantifies over sub-heaps of the supplied world, bounding
+-- the search to a finite domain for decidable checking.
+
+satisfies :: Heap -> Heap -> SL -> Bool
+satisfies _ h Emp        = Map.null h
+satisfies _ _ Top        = True
+satisfies _ h (Cell l v) = h == Map.singleton l v
+satisfies w h (SepStar p q) = any split (subHeaps h)
+  where
+    split h1 = let h2 = Map.difference h h1
+               in  heapDisjoint h1 h2
+                && satisfies w h1 p
+                && satisfies w h2 q
+satisfies w h (Conj p q) = satisfies w h p && satisfies w h q
+satisfies w h (Wand p q) = all step (subHeaps w)
+  where
+    step h' = not (heapDisjoint h h' && satisfies w h' p)
+           || satisfies w (Map.union h h') q
+
+-- All sub-heaps of a heap (powerset of key-value pairs).
+subHeaps :: Heap -> [Heap]
+subHeaps = map Map.fromList . subsequences . Map.toList
+
+heapDisjoint :: Heap -> Heap -> Bool
+heapDisjoint h1 h2 = Set.disjoint (Map.keysSet h1) (Map.keysSet h2)
+
+-- ── Composable instance ───────────────────────────────────────────────────────
+
+instance Composable SL where
+    concatenation = SepStar
+    conjunction   = Conj
+    empty         = Emp
+    universe      = Top
+
+    -- emp -* Q = Q: providing nothing leaves the obligation unchanged.
+    subtraction Emp q = q
+    -- Contract convention: ⊤ precondition is trivially discharged.
+    subtraction Top _ = Emp
+    -- General case: symbolic magic wand.
+    subtraction p   q = Wand p q

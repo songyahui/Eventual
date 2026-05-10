@@ -1,3 +1,8 @@
+TODO:
+seperation logic or other logic how to fit into future condition
+
+
+
 # FutureCond
 
 A Haskell library for effectful computations with **temporal specifications**: pre-conditions, post-conditions, and *future conditions* that enforce what must happen later in program execution.

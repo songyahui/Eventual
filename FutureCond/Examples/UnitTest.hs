@@ -10,9 +10,9 @@ import Future
 
 -- Convenience events used throughout
 a, b, c :: Event
-a = Atom "a" []
-b = Atom "b" []
-c = Atom "c" []
+a = Atom "a" (List [])
+b = Atom "b" (List [])
+c = Atom "c" (List [])
 
 -- Report pass/fail; increment counter; crash on first failure so the culprit is visible.
 check :: IORef Int -> String -> Bool -> IO ()
@@ -32,6 +32,63 @@ sameSet xs ys = sort (map show xs) == sort (map show ys)
 matches :: RE -> [Event] -> Bool
 matches r []     = nullable r
 matches r (e:es) = matches (normalize (derivative e r)) es
+
+-- ── subsumesEvent ─────────────────────────────────────────────────────────────
+-- subsumesEvent e p: does occurrence e match pattern p?
+-- Wildcard as pattern accepts everything; Wildcard as occurrence matches nothing specific.
+
+test_subsumesEvent :: IORef Int -> IO ()
+test_subsumesEvent counter = do
+    putStrLn "\n── subsumesEvent ────────────────────────────────────────────────"
+
+    let x = Var "x"
+        sendX = Atom "send" x
+        recvX = Atom "recv" x
+        sendY = Atom "send" (Var "y")
+        send1 = Atom "send" (Num 1)
+        sendL = Atom "send" (List [Num 1, Num 2])
+
+    -- Wildcard pattern subsumes any occurrence
+    check counter "subsumesEvent a        Wildcard = True   (concrete event matches wildcard)" $
+        subsumesEvent a Wildcard == True
+
+    check counter "subsumesEvent Wildcard Wildcard = True   (wildcard occurrence matches wildcard pattern)" $
+        subsumesEvent Wildcard Wildcard == True
+
+    check counter "subsumesEvent send(x)  Wildcard = True   (any atom matches wildcard)" $
+        subsumesEvent sendX Wildcard == True
+
+    -- Wildcard occurrence vs concrete pattern
+    check counter "subsumesEvent Wildcard send(x) = False  (wildcard occ ≠ specific pattern)" $
+        subsumesEvent Wildcard sendX == False
+
+    -- Identical atoms
+    check counter "subsumesEvent send(x) send(x) = True    (same name, same arg)" $
+        subsumesEvent sendX sendX == True
+
+    check counter "subsumesEvent send(1) send(1) = True    (same name, Num arg)" $
+        subsumesEvent send1 send1 == True
+
+    -- Different names
+    check counter "subsumesEvent send(x) recv(x) = False   (different name)" $
+        subsumesEvent sendX recvX == False
+
+    -- Same name, different args
+    check counter "subsumesEvent send(x) send(y) = False   (same name, different Var arg)" $
+        subsumesEvent sendX sendY == False
+
+    check counter "subsumesEvent send(x) send(1) = False   (Var vs Num arg)" $
+        subsumesEvent sendX send1 == False
+
+    -- List term
+    check counter "subsumesEvent send([1,2]) send([1,2]) = True    (List arg equal)" $
+        subsumesEvent sendL sendL == True
+
+    check counter "subsumesEvent send([1,2]) send(x) = False   (List vs Var)" $
+        subsumesEvent sendL sendX == False
+
+    check counter "subsumesEvent send([1,2]) Wildcard = True   (List atom matches wildcard)" $
+        subsumesEvent sendL Wildcard == True
 
 -- ── nullable ──────────────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r).
@@ -180,8 +237,8 @@ test_derivative counter = do
     -- derivative of finally(free(1)) after free(1) normalises to Σ* (universe)
     -- (this is the original test_derivative example, preserved)
     check counter "∂_free(1)(finally(free(1))) normalises to Σ*"  $
-        let r = finally (Atom "free" [Num 1])
-            e = Atom "free" [Num 1]
+        let r = finally (Atom "free" (List [Num 1]))
+            e = Atom "free" (List [Num 1])
         in normalize (derivative e r) == universe
 
 -- ── atoms ─────────────────────────────────────────────────────────────────────
@@ -327,9 +384,10 @@ main :: IO ()
 main = do
     putStrLn "=== Future.hs unit tests ==================================================="
     counter <- newIORef (0 :: Int)
-    test_nullable   counter
-    test_derivative counter
-    test_atoms      counter
-    test_first      counter
+    test_subsumesEvent counter
+    test_nullable      counter
+    test_derivative    counter
+    test_atoms         counter
+    test_first         counter
     n <- readIORef counter
     putStrLn $ "\n=== All " ++ show n ++ " assertions passed =================================="

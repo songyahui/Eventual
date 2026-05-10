@@ -3,35 +3,36 @@
 module Future where
 
 import Prelude hiding ((<>))
-import Data.List (union)
+import Data.List (union, intercalate)
 
 -- ── Terms ─────────────────────────────────────────────────────────────────────
 
-data Term = Var String | Str String | Num Int
+data Term = Var String | Str String | Num Int | List [Term]
     deriving (Eq)
 
 instance Show Term where
     show (Var s) = s
     show (Str s) = "\"" ++ s ++ "\""
     show (Num n) = show n
+    show (List ts) = "[" ++ intercalate ", " (map show ts) ++ "]"
 
 -- ── Events ────────────────────────────────────────────────────────────────────
 
 -- An Event is either a concrete named call or a wildcard pattern (Σ).
 -- Wildcard is used only inside RE patterns (Single Wildcard ≡ Σ, any one step).
-data Event = Atom String [Term]  -- e.g. send(x)
+data Event = Atom String Term    -- e.g. send(x)
            | Wildcard            -- matches any single event
     deriving (Eq)
 
 instance Show Event where
-    show (Atom name args) = name ++ "(" ++ concatMap show args ++ ")"
+    show (Atom name arg) = name ++ "(" ++ show arg ++ ")"
     show Wildcard         = "_"
 
 -- Does a concrete event occurrence match an event pattern in a Single?
-matchEvent :: Event -> Event -> Bool
-matchEvent _            Wildcard      = True   -- any occurrence matches wildcard pattern
-matchEvent (Atom n1 a1) (Atom n2 a2) = n1 == n2 && a1 == a2
-matchEvent Wildcard     (Atom _ _)   = False   -- wildcard occurrence ≠ specific pattern
+subsumesEvent :: Event -> Event -> Bool
+subsumesEvent _            Wildcard      = True   -- any occurrence matches wildcard pattern
+subsumesEvent (Atom n1 a1) (Atom n2 a2) = n1 == n2 && a1 == a2
+subsumesEvent Wildcard     (Atom _ _)   = False   -- wildcard occurrence ≠ specific pattern
 
 -- ── Regular Expressions ───────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ nullable (Not r)      = not (nullable r)   -- ν(¬r) = ¬ν(r)
 derivative :: Event -> RE -> RE
 derivative _ Bot          = Bot
 derivative _ Epsilon      = Bot
-derivative e (Single p)   = if matchEvent e p then Epsilon else Bot
+derivative e (Single p)   = if subsumesEvent e p then Epsilon else Bot
 derivative e (Seq r1 r2)
     | nullable r1           = Or (Seq (derivative e r1) r2) (derivative e r2)
     | otherwise             = Seq (derivative e r1) r2

@@ -162,31 +162,35 @@ data LTL
 -- The LTLNot case intersects with Single Wildcard (Σ^1) to keep the result
 -- length-1: bare Not (toSingleStep l) would include ε and multi-event words.
 
-toSingleStep :: LTL -> RE
-toSingleStep LTLTrue         = Single Wildcard                      -- any single event
-toSingleStep LTLFalse        = Bot                                  -- no event satisfies False
-toSingleStep (LTLAtom e)     = Single e                             -- exactly event e
-toSingleStep (LTLNot l)      = And (Single Wildcard)               -- Σ^1 ∩ ¬step(l)
-                                   (Not (toSingleStep l))
-toSingleStep (LTLAnd l1 l2)  = And (toSingleStep l1) (toSingleStep l2)
-toSingleStep (LTLOr  l1 l2)  = Or  (toSingleStep l1) (toSingleStep l2)
-toSingleStep _               = Bot  -- temporal operators not representable as a single step
+-- Returns Nothing for temporal operators (LTLNext, LTLUntil, LTLFinally,
+-- LTLGlobally), which have no single-step projection.
+toSingleStep :: LTL -> Maybe RE
+toSingleStep LTLTrue         = Just (Single Wildcard)               -- any single event
+toSingleStep LTLFalse        = Just Bot                             -- no event satisfies False
+toSingleStep (LTLAtom e)     = Just (Single e)                      -- exactly event e
+toSingleStep (LTLNot l)      = And (Single Wildcard) . Not          -- Σ^1 ∩ ¬step(l)
+                                   <$> toSingleStep l
+toSingleStep (LTLAnd l1 l2)  = And <$> toSingleStep l1 <*> toSingleStep l2
+toSingleStep (LTLOr  l1 l2)  = Or  <$> toSingleStep l1 <*> toSingleStep l2
+toSingleStep _               = Nothing  -- temporal operators not representable as a single step
 
 -- Algebraic translation LTLf → RE (no automaton construction needed).
 -- Complement is handled by the Not constructor directly.
-ltl_to_re :: LTL -> RE
-ltl_to_re LTLTrue            = anything                              -- ¬∅  = Σ*
-ltl_to_re LTLFalse           = Bot                                   -- ∅
-ltl_to_re (LTLAtom e)        = Single e
-ltl_to_re (LTLNot l)         = Not (ltl_to_re l)                    -- ¬⟦l⟧
-ltl_to_re (LTLAnd l1 l2)     = And (ltl_to_re l1) (ltl_to_re l2)   -- ⟦l1⟧ ∩ ⟦l2⟧
-ltl_to_re (LTLOr  l1 l2)     = Or  (ltl_to_re l1) (ltl_to_re l2)   -- ⟦l1⟧ ∪ ⟦l2⟧
-ltl_to_re (LTLNext l)        = Seq (Single Wildcard) (ltl_to_re l)  -- Σ · ⟦l⟧
-ltl_to_re (LTLUntil l1 l2)   = Seq (Star (toSingleStep l1))        -- step(l1)* · ⟦l2⟧
-                                    (ltl_to_re l2)
-ltl_to_re (LTLFinally l)     = Seq anything (ltl_to_re l)           -- Σ* · ⟦l⟧
-ltl_to_re (LTLGlobally l)    = Not (Seq anything                    -- ¬(Σ* · ¬⟦l⟧)
-                                        (Not (ltl_to_re l)))
+-- LTLUntil returns Nothing when the left-hand side contains a temporal
+-- operator with no single-step projection.
+ltl_to_re :: LTL -> Maybe RE
+ltl_to_re LTLTrue            = Just anything                         -- ¬∅  = Σ*
+ltl_to_re LTLFalse           = Just Bot                              -- ∅
+ltl_to_re (LTLAtom e)        = Just (Single e)
+ltl_to_re (LTLNot l)         = Not <$> ltl_to_re l                  -- ¬⟦l⟧
+ltl_to_re (LTLAnd l1 l2)     = And <$> ltl_to_re l1 <*> ltl_to_re l2  -- ⟦l1⟧ ∩ ⟦l2⟧
+ltl_to_re (LTLOr  l1 l2)     = Or  <$> ltl_to_re l1 <*> ltl_to_re l2  -- ⟦l1⟧ ∪ ⟦l2⟧
+ltl_to_re (LTLNext l)        = Seq (Single Wildcard) <$> ltl_to_re l   -- Σ · ⟦l⟧
+ltl_to_re (LTLUntil l1 l2)   = Seq . Star <$> toSingleStep l1          -- step(l1)* · ⟦l2⟧
+                                           <*> ltl_to_re l2
+ltl_to_re (LTLFinally l)     = Seq anything <$> ltl_to_re l            -- Σ* · ⟦l⟧
+ltl_to_re (LTLGlobally l)    = Not . Seq anything . Not                 -- ¬(Σ* · ¬⟦l⟧)
+                                   <$> ltl_to_re l
 
 -- ── Shorthands ────────────────────────────────────────────────────────────────
 

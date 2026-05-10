@@ -95,9 +95,8 @@ precondition normalising to $\varnothing$ flags a violation.
 The regular-expression language is extended with a complement operator
 whose derivative commutes algebraically with negation---no automaton
 construction is required.
-We demonstrate the approach across eight domains---memory management,
-file handles, mutexes, database transactions, cryptographic sessions,
-network protocols, IoT sensor control, and capability tokens---showing
+We demonstrate the approach across three domains---memory management,
+mutexes, and database transactions---showing
 that resource-lifecycle and ordering properties invisible to
 pre/post reasoning become statically visible as residual annotations.
 \end{abstract}
@@ -187,16 +186,11 @@ postcondition.
   \item We instantiate the algebra to extended regular expressions over
         events with complement, using Brzozowski derivatives to implement
         subtraction---the core of future-condition propagation
-        (\S\ref{sec:re}).
-  \item We show an algebraic translation from LTL\textsubscript{f} to
-        extended RE that avoids automaton construction (\S\ref{sec:ltl}).
-  \item We demonstrate the approach on eight real-world use cases
+        (\S\ref{sec:re})---and show that LTL\textsubscript{f} operators
+        embed directly as RE terms (\S\ref{sec:ltl}).
+  \item We demonstrate the approach on three use cases
         (\S\ref{sec:examples}), showing that both resource leaks and
         precondition violations surface as non-trivial residual annotations.
-  \item We provide a mechanized Lean~4 formalization of the core theory
-        (\S\ref{sec:formalization}), proving nullability correctness,
-        Brzozowski derivative correctness, normalization soundness, and
-        the monad laws for the $(\ret, \post, \fut)$ triple.
 \end{enumerate}
 
 %% =========================================================================
@@ -352,84 +346,96 @@ The function \lstinline{first r = firstWith (atoms r) r} is a convenient
 wrapper for standalone use; inside \lstinline{subtraction} both operands
 contribute to the alphabet (see \S\ref{sec:re-instance}).
 
-\subsection{LTL\textsubscript{f} to RE Translation}
+\paragraph{Illustrative cases.}
+Table~\ref{tab:firstwith-not} gives representative evaluations of
+\lstinline{firstWith} with \lstinline{Not}, ordered from simple to
+non-trivial.
+The first three rows confirm that the complement of a single pattern,
+a sequence, or a union does not exclude any alphabet event---every event
+can open some word in the complement.
+The double-negation row shows that \lstinline{firstWith} correctly restores
+the original first set: $\partial_b(\neg a) = \neg\varnothing = \Sigma^*$
+is total, so $b$ is filtered out by the $\lceil\cdot\rceil \neq \univ$
+check.
+The last two rows are the most instructive.
+In $\neg(a \cdot \Sigma^*)$ (words not starting with $a$), the derivative
+$\partial_a(a \cdot \Sigma^*)$ normalises to $\Sigma^*$---consuming $a$
+leaves every future possible---so $a$ is \emph{excluded}; only $b$ survives.
+Similarly, $\neg(a\cdot\Sigma^* \vee b\cdot\Sigma^*)$ excludes both $a$
+and $b$, leaving only $c$.
+The De Morgan row checks that \lstinline{firstWith} handles complement
+pushed inside a conjunction: $\neg(\neg a \wedge \neg b) = a \vee b$
+(by De Morgan and double negation), and indeed only $a$ and $b$ appear.
+
+\begin{table}[h]
+\caption{Selected \lstinline{firstWith} evaluations with \lstinline{Not}.
+         $\Sigma_0$ is the explicitly supplied alphabet.
+         Rows marked $\dagger$ produce a \emph{strict} subset of $\Sigma_0$.}
+\label{tab:firstwith-not}
+\begin{tabular}{llll}
+\toprule
+RE $r$ & $\Sigma_0$ & \lstinline{firstWith} $\Sigma_0\;(\neg r)$ & Rationale \\
+\midrule
+$a$                     & $\{a,b\}$   & $\{a,b\}$  & $\partial_a(a)=\varepsilon$, $\partial_b(a)=\varnothing$; neither $\Sigma^*$ \\
+$a \cdot b$             & $\{a,b,c\}$ & $\{a,b,c\}$ & all derivatives non-$\Sigma^*$ \\
+$a \vee b$              & $\{a,b,c\}$ & $\{a,b,c\}$ & $\partial_c(a\vee b)=\varnothing$, still non-$\Sigma^*$ \\
+$a^*$                   & $\{a,b\}$   & $\{a,b\}$  & $\partial_a(a^*)=a^*$, non-$\Sigma^*$; $b$ starts $[b]$ \\
+$\neg a$ (double neg.)  & $\{a,b\}$   & $[a]$      & $\partial_b(\neg a)=\Sigma^*$ $\Rightarrow$ $b$ excluded$^\dagger$ \\
+$a \cdot \Sigma^*$      & $\{a,b\}$   & $[b]$      & $\partial_a(a\cdot\Sigma^*)=\Sigma^*$ $\Rightarrow$ $a$ excluded$^\dagger$ \\
+$a\cdot\Sigma^*\vee b\cdot\Sigma^*$ & $\{a,b,c\}$ & $[c]$ & both $a,b$ excluded; only $c$ avoids$^\dagger$ \\
+$\neg a \wedge \neg b$  & $\{a,b,c\}$ & $\{a,b\}$  & De Morgan: $=\neg(a\vee b)$; $\partial_c$ is $\Sigma^*$$^\dagger$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Embedding LTL\textsubscript{f}}
 \label{sec:ltl}
 
-Because the library supports complement algebraically, the standard
-translation from LTL over finite traces~\cite{degiacomo2013} to RE
-becomes fully syntactic---no automaton is required.
+Because complement is a first-class constructor, the standard
+LTL\textsubscript{f} operators translate directly into RE---no
+automaton construction is needed.
+Table~\ref{tab:ltl} gives the full mapping.
 
-\begin{lstlisting}
-data LTL = LTLTrue | LTLFalse | LTLAtom Event
-         | LTLNot LTL | LTLAnd LTL LTL | LTLOr LTL LTL
-         | LTLNext LTL              -- X phi
-         | LTLUntil LTL LTL        -- phi U psi
-         | LTLFinally  LTL         -- F phi  =  True U phi
-         | LTLGlobally LTL         -- G phi  =  Not(F(Not phi))
-\end{lstlisting}
+\begin{table}[h]
+\caption{LTL\textsubscript{f} to RE translation.
+         $\Sigma^1 \triangleq \mathtt{Single\;Wildcard}$,
+         $\univ \triangleq \neg\varnothing$.}
+\label{tab:ltl}
+\begin{tabular}{ll}
+\toprule
+LTL formula & RE $\sem{\cdot}$ \\
+\midrule
+$\top$              & $\univ$ \\
+$\bot$              & $\varnothing$ \\
+$e$                 & $\{e\}$ \\
+$\neg\phi$          & $\neg\sem{\phi}$ \\
+$\phi \wedge \psi$  & $\sem{\phi} \cap \sem{\psi}$ \\
+$\phi \vee \psi$    & $\sem{\phi} \cup \sem{\psi}$ \\
+$X\,\phi$           & $\Sigma^1 \cdot \sem{\phi}$ \\
+$F\,\phi$           & $\univ \cdot \sem{\phi}$ \\
+$G\,\phi$           & $\neg(\univ \cdot \neg\sem{\phi})$ \\
+$\phi\,U\,\psi$     & $\mathit{step}(\phi)^* \cdot \sem{\psi}$
+                      \quad ($\phi$ propositional) \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-The Until case requires a separate helper.
-Using $\sem{\phi}^*$ directly is wrong when $\phi$ is compound:
-$\sem{\phi}$ may contain words of length $>1$
-(e.g.\ $\sem{X\,\psi} = \Sigma^1\cdot\sem{\psi}$),
-so $\sem{\phi}^*$ iterates over \emph{multi-event matches} rather than
-individual steps.
-$\phi\,U\,\psi$ requires $\phi$ to hold at each \emph{individual step}
-before $\psi$, so the correct building block is the
-\emph{single-step projection} $\mathit{step}(\phi)$:
+The complement operator does the heavy lifting.
+$\neg\phi$ maps to $\neg\sem{\phi}$ in one step.
+$G\,\phi \triangleq \neg F\neg\phi$ unfolds to
+$\neg(\univ\cdot\neg\sem{\phi})$---``no suffix violates
+$\phi$''---using two applications of $\neg$ and no auxiliary
+construction.
+$F\,\phi$ and $X\,\phi$ need only concatenation.
 
-\begin{equation}
-  \sem{\phi \,U\, \psi}
-  \;=\;
-  \mathit{step}(\phi)^* \cdot \sem{\psi}
-  \label{eq:until-re}
-\end{equation}
-
-\noindent
-$\mathit{step}(\phi)$ is a length-1 RE representing ``one event satisfying $\phi$'':
-
-\begin{lstlisting}
-toSingleStep :: LTL -> RE
-toSingleStep LTLTrue        = Single Wildcard           -- any single event
-toSingleStep LTLFalse       = Bot                       -- no event satisfies False
-toSingleStep (LTLAtom e)    = Single e                  -- exactly event e
-toSingleStep (LTLNot l)     = And (Single Wildcard)     -- Sigma^1 cap neg step(l)
-                                  (Not (toSingleStep l))
-toSingleStep (LTLAnd l1 l2) = And (toSingleStep l1) (toSingleStep l2)
-toSingleStep (LTLOr  l1 l2) = Or  (toSingleStep l1) (toSingleStep l2)
-toSingleStep _              = Bot   -- temporal operators: no single-step projection
-\end{lstlisting}
-
-\noindent
-The \lstinline{LTLNot} case intersects with \lstinline{Single Wildcard}
-($\Sigma^1$) to keep the result length-1: bare
-$\neg\,\mathit{step}(\phi)$ would include $\varepsilon$ and all
-multi-event words.
-Temporal operators as the left-hand side of Until
-(\lstinline{LTLNext}, \lstinline{LTLFinally}, \lstinline{LTLGlobally},
-nested \lstinline{LTLUntil}) have no single-step projection;
-\lstinline{Bot} is returned as a conservative error signal, making the
-enclosing Until unsatisfiable and surfacing the limitation rather than
-silently producing an incorrect RE.
-
-\begin{lstlisting}
-ltl_to_re (LTLNot l)       = Not (ltl_to_re l)
-ltl_to_re (LTLNext l)      = Seq (Single Wildcard) (ltl_to_re l)
-ltl_to_re (LTLUntil l1 l2) = Seq (Star (toSingleStep l1)) (ltl_to_re l2)
-ltl_to_re (LTLFinally l)   = Seq anything (ltl_to_re l)
-ltl_to_re (LTLGlobally l)  = Not (Seq anything (Not (ltl_to_re l)))
-\end{lstlisting}
-
-The globally case deserves a note:
-$G\,\phi \triangleq \neg F\neg\phi \triangleq
- \neg(\univ \cdot \neg\sem{\phi})$---``there is no suffix where
-$\phi$ fails''---expressed directly using the $\neg$ constructor.
-For the propositional cases of Until, Equation~\eqref{eq:until-re}
-recovers the expected identities: $\mathit{True}\,U\,\psi = F\psi$
-(since $\mathit{step}(\mathit{True}) = \Sigma^1$ and
-$(\Sigma^1)^* = \Sigma^*$) and $\mathit{False}\,U\,\psi = \psi$
-(since $\mathit{step}(\mathit{False}) = \varnothing$ and
-$\varnothing^* = \varepsilon$).
+The $U$ case is the exception.
+$\phi\,U\,\psi$ requires $\phi$ to hold at each individual step
+before $\psi$, so the translation uses
+$\mathit{step}(\phi)$---the length-1 RE for a single event
+satisfying $\phi$.
+This is well-defined when $\phi$ is propositional; for temporal
+$\phi$ (e.g.\ $X\,\phi'$) there is no valid single-step projection,
+and the translation is undefined.
 
 %% =========================================================================
 \section{The \texttt{Effectful} Monad}
@@ -632,7 +638,7 @@ $\varnothing^* = \varepsilon$, $\varepsilon^* = \varepsilon$ & \lstinline{Star} 
 \label{sec:examples}
 %% =========================================================================
 
-We demonstrate FutureCond across eight domains.
+We demonstrate FutureCond across three domains.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
 composes them in the \lstinline{Effectful} monad, and inspects the
@@ -668,25 +674,6 @@ leak = do { malloc 1; free 1; malloc 2 }
 freeWithoutMalloc = free 1
 \end{lstlisting}
 
-\subsection{File Handle Lifecycle}
-
-\lstinline{readFile} and \lstinline{closeFile} carry preconditions
-requiring the file to be open (last event was \lstinline{open} or
-\lstinline{read}):
-
-\begin{lstlisting}
-closeFile :: String -> Effectful RE ()
-closeFile p = Effectful
-  { ret = ()
-  , pre    = Or (Single (Atom "open" [Str p]))
-                (Single (Atom "read" [Str p]))
-  , post   = Single (Atom "close" [Str p])
-  , future = universe }
-
--- Bad pre: readFile' called without open
-readWithoutOpen = readFile' "secret.txt"
-\end{lstlisting}
-
 \subsection{Mutex / Lock Lifecycle}
 
 \begin{lstlisting}
@@ -720,57 +707,11 @@ A program ending with neither \lstinline{commit} nor \lstinline{rollback}
 retains the full disjunction as its residual future, naming both
 outstanding alternatives.
 
-\subsection{Cryptographic Sessions and Nonces}
-
-\lstinline{consumeNonce} requires that \lstinline{generateNonce} was the
-immediately preceding event:
-
-\begin{lstlisting}
-nonceLeak = do
-  initSession "s"; generateNonce 42
-  encrypt "s" "msg"; finalizeSession "s"
--- future = finally(consumeNonce(42)): replay attack risk
-\end{lstlisting}
-
-\subsection{Network Protocol (TCP-like)}
-
-Each handshake step carries the precondition that the preceding step
-occurred:
-
-\begin{lstlisting}
-recvSYNACK = Effectful { pre = Single (Atom "sendSYN" []), ... }
-sendACK    = Effectful { pre = Single (Atom "recvSYNACK" []), ... }
-
--- Bad pre: recvSYNACK without sendSYN
-outOfOrder = do { recvSYNACK; sendACK }
-\end{lstlisting}
-
-\subsection{IoT Sensor and Actuator Control}
-
-\lstinline{sensorRead} and \lstinline{sensorSleep} require
-initialisation as precondition; \lstinline{motorOff} requires
-\lstinline{motorOn}:
-
-\begin{lstlisting}
-motorLeftRunning = do { motorOn 3; actuate "fan" 50 }
--- future = finally(motorOff(3)): safety hazard
-\end{lstlisting}
-
-\subsection{Capability / Token Lifecycle}
-
-\begin{lstlisting}
-revokeToken :: String -> Effectful RE ()
-revokeToken u = Effectful
-  { pre    = Single (Atom "requestToken" [Str u])
-  , post   = Single (Atom "revokeToken"  [Str u])
-  , future = universe, ret = () }
-
--- Bad pre: revokeToken without requestToken
-revokeWithoutRequest = revokeToken "eve"
-\end{lstlisting}
-
 \paragraph{Summary.}
-Table~\ref{tab:examples} summarises the eight domains.
+Table~\ref{tab:examples} summarises the three domains.
+Each bad instance surfaces as a non-trivial residual annotation:
+a leaked resource yields a non-$\univ$ \lstinline{future},
+and a missing precondition collapses \lstinline{pre} to $\varnothing$.
 
 \begin{table}[h]
 \caption{Example programs, bad instances, and residual annotations.}
@@ -781,16 +722,9 @@ Domain & Bad program & Residual \lstinline{future} & Residual \lstinline{pre} \\
 \midrule
 Memory      & \lstinline{malloc 2} not freed    & \lstinline{finally(free(2))} & $\univ$ \\
 Memory      & \lstinline{free} without malloc   & $\univ$ & $\varnothing$ \\
-File handle & \lstinline{open b} not closed     & \lstinline{finally(close(b))} & $\univ$ \\
-File handle & read without open                 & $\univ$ & $\varnothing$ \\
 Mutex       & \lstinline{acquire 1} leaked      & \lstinline{finally(release(1))} & $\univ$ \\
 Mutex       & release without acquire           & $\univ$ & $\varnothing$ \\
 Transaction & no commit/rollback                & \lstinline{finally(commit)$\vee$finally(rollback)} & $\univ$ \\
-Crypto      & nonce not consumed               & \lstinline{finally(consumeNonce(42))} & $\univ$ \\
-Network     & handshake stalled                 & \lstinline{finally(recvSYNACK)} & $\univ$ \\
-Network     & out-of-order steps               & $\univ$ & $\varnothing$ \\
-IoT         & motor never off                   & \lstinline{finally(motorOff(3))} & $\univ$ \\
-Capability  & revoke without request            & $\univ$ & $\varnothing$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -852,260 +786,9 @@ In general, the residual $\pre(e_2)\setminus\post(e)$ records precisely
 which precondition obligations of the continuation remain unmet.
 
 %% =========================================================================
-\section{Mechanized Verification in Lean~4}
-\label{sec:formalization}
-%% =========================================================================
-
-The core theory of FutureCond has been mechanized in Lean~4 using
-Mathlib~\cite{mathlib4}.
-The formalization covers the full pipeline from syntax through the
-\lstinline{Effectful} monad and its correctness properties.
-
-\subsection{Syntax and Semantics}
-
-The Lean development mirrors the Haskell types exactly.
-\lstinline{Term}, \lstinline{Event}, and \lstinline{RE} are defined as
-inductive types; \lstinline{matchEvent} is a decision procedure for
-whether a concrete event satisfies a pattern.
-The denotational semantics is the predicate
-$\mathit{inL} : \mathsf{RE} \to \mathsf{List}\;\mathsf{Event} \to \mathsf{Prop}$,
-with Kleene-star membership given by the inductive predicate
-$\mathsf{InStar}$.
-Language equivalence $r \simeq s$ is defined as $\forall w,\,
-\mathit{inL}(r,w) \leftrightarrow \mathit{inL}(s,w)$ and shown to be a
-congruence (reflexivity, symmetry, transitivity).
-
-\subsection{Key Theorems}
-
-\paragraph{Theorem 1 (Nullability Correctness).}
-
-\begin{equation}
-  \nu(r) = \mathsf{true} \;\iff\; \varepsilon \in L(r)
-  \label{eq:nullable}
-\end{equation}
-
-Proved by structural induction on $r$.
-All cases close without auxiliary lemmas; the \lstinline{not} case uses the
-equivalence $\nu(\neg r) = \neg\,\nu(r)$ and splits on the boolean value of
-\lstinline{nullable r}.
-
-\paragraph{Theorem 2 (Derivative Correctness).}
-
-\begin{equation}
-  w \in L(\partial_e(r)) \;\iff\; e\mathbin{::}w \in L(r)
-  \label{eq:deriv-correct}
-\end{equation}
-
-Proved by structural induction, including the complement case:
-$w \in L(\neg\,\partial_e(r)) \iff \neg(e\mathbin{::}w \in L(r))
- \iff e\mathbin{::}w \in L(\neg r)$, which closes in one line via
-\lstinline{Iff.not}.
-The Kleene-star case requires an auxiliary lemma
-(\lstinline{seq_nullable_split}) about how \lstinline{InStar} interacts
-with a head event; the non-nullable subcases are fully proved, and the
-nullable subcase for star carries a \lstinline{sorry} (routine but
-tedious concatenation bookkeeping on lists).
-
-\paragraph{Theorem 3 (Normalization Soundness).}
-
-\begin{equation}
-  L(\lceil r \rceil) = L(r)
-  \label{eq:norm-sound}
-\end{equation}
-
-The normalizer is proved sound by structural induction, using
-the proved algebraic language lemmas:
-$L(\varepsilon \cdot r) = L(r)$,
-$L(r \cdot \varepsilon) = L(r)$,
-$L(\varnothing \vee r) = L(r)$,
-$L(r \wedge \univ) = L(r)$,
-$L(\varnothing^*) = L(\varepsilon)$, $L(\varepsilon^*) = L(\varepsilon)$,
-and the De Morgan laws at the language level.
-The \lstinline{not/not} and \lstinline{star/bot/epsilon} branches are
-fully closed; a small number of $\varepsilon$-introduction cases in
-\lstinline{seq} and \lstinline{or/and} carry \lstinline{sorry}
-annotations pending routine case splits.
-
-\subsection{The \texttt{Composable} Class and Monad Laws}
-
-The abstract \lstinline{Composable} typeclass and its axioms
-(\lstinline{ComposableAxioms}) are formalized in Lean; the concrete RE
-instance is provided.
-The following monad-law theorems are proved \emph{without} any
-\lstinline{sorry}:
-
-\begin{center}
-\begin{tabular}{ll}
-\toprule
-Theorem & Statement \\
-\midrule
-\lstinline{left_id_ret_post}  & $\ret$ and $\post$ of $\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f$ equal those of $f\,x$ \\
-\lstinline{left_id_future}    & $\fut(\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f) = \fut(f\,x)$ \\
-\lstinline{right_id_ret_post} & $\ret$ and $\post$ of $e \mathbin{>\!\!>\!\!=} \mathtt{pure}$ equal those of $e$ \\
-\lstinline{right_id_future}   & $\fut(e \mathbin{>\!\!>\!\!=} \mathtt{pure}) = \fut(e)$ \\
-\lstinline{assoc_ret}         & ret is trivially associative \\
-\lstinline{assoc_post}        & $\post$ associativity via \lstinline{cat_assoc} \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-The \lstinline{assoc_future} proof requires the distributivity law
-$(r_1 \mathbin{<>} r_2) \setminus r_3 = r_2 \setminus (r_1 \setminus r_3)$
-as a hypothesis; the algebraic manipulation reduces both sides to the
-same normal form and is left as a \lstinline{sorry} pending the
-formalization of the full derivative chain rule.
-
-\subsection{Future-Condition Correctness}
-
-Three additional theorems formalize the key correctness properties of
-future-condition propagation:
-
-\begin{itemize}
-  \item \textbf{Obligation Discharge} (\lstinline{future_discharged}):
-        if $\post(e_2) \setminus \fut(e) = \univ$, then
-        $\fut(e \mathbin{>\!\!>\!\!=} f) = \fut(e_2)$.
-  \item \textbf{Obligation Persistence} (\lstinline{future_composed}):
-        if $\post(e_2) \setminus \fut(e) = \fut(e)$, then
-        $\fut(e \mathbin{>\!\!>\!\!=} f) = \fut(e) \wedge \fut(e_2)$.
-  \item \textbf{Temporal Correctness} (\lstinline{no_leak_iff}):
-        $\fut(e \mathbin{>\!\!>\!\!=} f) = \univ \iff
-         \post(e_2)\setminus\fut(e) = \univ \;\wedge\; \fut(e_2) = \univ$.
-\end{itemize}
-
-Additionally, \lstinline{hoare_pre_discharge} and
-\lstinline{hoare_pre_violation} prove the Hoare-rule pre\-condition
-collapse and violation cases, respectively.
-All five theorems are proved without \lstinline{sorry}.
-
-\subsection{Formalization Insights}
-\label{sec:form-insights}
-
-The Lean development revealed four non-obvious insights about the theory.
-
-\paragraph{Insight A: Complement derivative is definitional.}
-We chose the definition
-$\partial_e(\neg r) \mathrel{:=} \neg(\partial_e(r))$,
-making Equation~\eqref{eq:deriv-not} a \emph{definitional} equality rather
-than a propositional one.
-The semantic proof (\lstinline{deriv_complement_definitional}) then reduces
-to \lstinline{Iff.rfl}---both sides evaluate to the identical term without
-any rewriting.
-This contrasts with automaton-based approaches, where complement requires
-explicit DFA powerset construction.
-The lesson: when an algebraic law can be made definitional by a judicious
-choice of recursion equations, subsequent proofs collapse to reflexivity.
-
-\paragraph{Insight B: The empty-segment problem in Kleene star.}
-The \lstinline{InStar} inductive admits \lstinline{InStar.cons [] v hu hv},
-which inserts an empty first segment.
-In the backward direction of the star case of Theorem~2 (Derivative
-Correctness), a naive \lstinline{cases} on \lstinline{InStar} may
-produce this degenerate form and loop: the empty-segment case yields
-the same proof obligation as the original.
-The fix is \lstinline{InStar_nonempty_or_nil}:
-
-\begin{quote}
-\emph{Every word in $\mathsf{InStar}\,P$ is either $\varepsilon$ or a
-concatenation of \textbf{non-empty} words each satisfying $P$.}
-\end{quote}
-
-This normalization lemma is proved by induction on the \lstinline{InStar}
-derivation, dropping empty-segment \lstinline{cons} steps.
-The normalized form then guarantees a non-empty head segment,
-enabling the split $e\mathbin{::}w \in L(r^*)$ into
-$e\mathbin{::}u \in L(r)$ and $v \in L(r^*)$ via
-\lstinline{InStar_head_split}.
-The general lesson: inductive predicates indexed by lists must
-account for degenerate empty-component constructors; normalization
-lemmas are the systematic remedy.
-
-\paragraph{Insight C: Distributivity explains the \texttt{meet}/\texttt{cat} asymmetry.}
-The bind formula uses \emph{intersection} for futures but
-\emph{concatenation} for posts.
-The distributivity theorems
-\lstinline{lang_seq_or_distrib_left/right} make the semantic reason
-explicit: concatenation distributes over union, so post-effects compose
-sequentially as $\post(e) \cdot \post(e_2)$.
-Future obligations, by contrast, are \emph{independent constraints on the
-same future trace}---both must hold simultaneously---which is precisely
-intersection.
-Formally:
-
-\begin{align*}
-  \post(e \mathbin{>\!\!>\!\!=} f)
-    &= \post(e) \cdot \post(e_2)
-    &&\text{(sequential: one trace, two parts)} \\
-  \fut(e \mathbin{>\!\!>\!\!=} f)
-    &= \bigl(\post(e_2) \setminus \fut(e)\bigr) \wedge \fut(e_2)
-    &&\text{(simultaneous: one trace, two constraints)}
-\end{align*}
-
-\paragraph{Insight D: Temporal correctness is decidable.}
-Because \lstinline{RE} derives \lstinline{DecidableEq} and
-\lstinline{normalize} is a computable function,
-checking \lstinline{normalize r = anything} (i.e.\ $\lceil r \rceil = \neg\varnothing$)
-is decidable.
-Combined with \lstinline{bind_temporal_correctness}
-(which states that $\fut(e \mathbin{>\!\!>\!\!=} f) = \Sigma^*$ iff both the
-residual $\post(e_2) \setminus \fut(e)$ and $\fut(e_2)$ are $\Sigma^*$),
-this means the temporal correctness of any composed
-\lstinline{Effectful RE} computation is \emph{decidable at the term
-level}---no SMT solver or model checker is required.
-
-\subsection{Summary}
-
-Table~\ref{tab:lean} lists the formalization status of every theorem.
-
-\begin{table}[h]
-\caption{Lean~4 formalization status. \checkmark = fully proved;
-         $\circ$ = proved with one or more \lstinline{sorry} stubs.}
-\label{tab:lean}
-\begin{tabular}{lll}
-\toprule
-Theorem & Status & Note \\
-\midrule
-\multicolumn{3}{l}{\textit{Core RE theory}} \\
-\lstinline{nullable_iff} / \lstinline{nullable_not_iff}
-                                    & \checkmark & complete induction \\
-\lstinline{derivative_correct}      & $\circ$    & star/nil subcase (see Insight B) \\
-\lstinline{deriv_complement_definitional}
-                                    & \checkmark & one-line \lstinline{Iff.rfl} (Insight A) \\
-\lstinline{normalize_sound}         & $\circ$    & \lstinline{seq}-$\varepsilon$ fixed; \lstinline{or}/\lstinline{and} pending \\
-\midrule
-\multicolumn{3}{l}{\textit{InStar / Kleene star machinery (Insight B)}} \\
-\lstinline{InStar_nonempty_or_nil}  & \checkmark & normalization of empty segments \\
-\lstinline{InStar_mono}             & \checkmark & monotonicity of \lstinline{InStar} \\
-\lstinline{InStar_head_split}       & $\circ$    & list-equation extraction step \\
-\midrule
-\multicolumn{3}{l}{\textit{Algebraic language laws}} \\
-De Morgan, $\neg\neg r$, star laws  & \checkmark & \\
-\lstinline{lang_seq_or_distrib_{left,right}} & \checkmark & Insight C \\
-RE \lstinline{cat}/\lstinline{meet} associativity/commutativity
-                                    & \checkmark & \\
-\midrule
-\multicolumn{3}{l}{\textit{Monad laws}} \\
-\lstinline{left_id_*}, \lstinline{right_id_*}
-                                    & \checkmark & \\
-\lstinline{assoc_ret}, \lstinline{assoc_post}
-                                    & \checkmark & \\
-\lstinline{assoc_future}            & $\circ$    & chain rule as hypothesis \\
-\lstinline{hoare_pre_discharge/violation}
-                                    & \checkmark & \\
-\midrule
-\multicolumn{3}{l}{\textit{Future-condition correctness}} \\
-\lstinline{future_discharged/composed}
-                                    & \checkmark & \\
-\lstinline{no_leak_iff} / \lstinline{bind_temporal_correctness}
-                                    & \checkmark & Insight D \\
-\lstinline{pure_future_is_univ}     & \checkmark & \lstinline{rfl} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-%% =========================================================================
 \section{Related Work}
+
 \label{sec:related}
-%% =========================================================================
 
 \paragraph{Future conditions.}
 Song et al.\ propose future conditions as a first-class extension to
@@ -1135,13 +818,13 @@ at the type level, including ordering constraints. FutureCond is more
 lightweight: it operates at the value level, uses regular expressions
 rather than types, and can be applied to any domain beyond communication.
 
-\paragraph{Runtime monitoring and LTL.}
+\paragraph{Runtime monitoring.}
 Runtime verification~\cite{leucker2009} checks temporal properties of
-execution traces against LTL or regular-language specifications.
-Our algebraic LTL\textsubscript{f}--to--RE translation
-(\S\ref{sec:ltl}) avoids automata, building directly on the complement
-RE constructor. FutureCond is a \emph{static} approach: future conditions
-are computed before any execution takes place.
+execution traces against regular-language specifications.
+FutureCond is a \emph{static} approach: future conditions
+are computed before any execution takes place, and the embedding of
+LTL\textsubscript{f} into RE (\S\ref{sec:ltl}) avoids automata
+entirely.
 
 \paragraph{Typestate.}
 Typestate systems~\cite{strom1986,bierhoff2007} track resource lifecycle
@@ -1195,11 +878,6 @@ A fully open-world implementation would accept an explicit $\Sigma$
 declaration, enabling complement over an unrestricted event domain
 and removing the closed-world restriction.
 
-\paragraph{Tool support.}
-The normalised future condition is a human-readable diagnostic. Tooling
-to visualise the automaton structure of residual conditions and relate
-them back to source locations would further improve usability.
-
 %% =========================================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -1208,11 +886,12 @@ them back to source locations would further improve usability.
 We have presented FutureCond, a Haskell library that extends effectful
 computations with future conditions---extended regular expressions with
 complement that specify temporal obligations on the remainder of a program.
-Two technical contributions support the design.
-First, complement is integrated into the RE language with the algebraic law
-$\partial_a(\neg r) = \neg(\partial_a r)$, enabling the LTL\textsubscript{f}
-translation and making the universal language $\univ = \neg\varnothing$ a
-natural identity for future obligations---all without automaton construction.
+Two design choices make the approach work.
+First, complement is integrated into the RE language with the single
+algebraic law $\partial_a(\neg r) = \neg(\partial_a r)$, making the
+universal language $\univ = \neg\varnothing$ a natural identity for
+discharged obligations and enabling globally assertions---all without
+automaton construction.
 Second, the bind operator propagates preconditions in the Hoare-rule style:
 the residual $\pre(e_2)\setminus\post(e)$ records which precondition
 obligations of the continuation are not yet discharged.

@@ -378,6 +378,71 @@ test_first counter = do
     check counter "firstWith {a,b} (¬_) = {a,b}   (both events can start length-≠1 words)"  $
         sameSet (firstWith [a, b] (Not (Single Wildcard))) [a, b]
 
+    -- ── Not-specific firstWith cases ──────────────────────────────────────────
+
+    -- Double negation: ¬¬a = a, so only a can start words in L(a).
+    -- ∂_a(¬a) = ¬ε  → not Σ* → a included
+    -- ∂_b(¬a) = ¬∅ = Σ* → isTotal → b excluded
+    check counter "firstWith {a,b} (¬¬a) = [a]   (double negation restores original first set)"  $
+        firstWith [a, b] (Not (Not (Single a))) == [a]
+
+    -- Not of Seq: ¬(a·b) excludes only the word [a,b]; every event in {a,b,c}
+    -- can begin some word in the complement (e.g. a·a, b, c ∈ ¬(a·b)).
+    -- ∂_a(a·b) = b  (not Σ*) → a included
+    -- ∂_b(a·b) = ∅  (not Σ*) → b included
+    -- ∂_c(a·b) = ∅  (not Σ*) → c included
+    check counter "firstWith {a,b,c} (¬(a·b)) = {a,b,c}   (all events can start words in complement of seq)"  $
+        sameSet (firstWith [a, b, c] (Not (Seq (Single a) (Single b)))) [a, b, c]
+
+    -- Not of Star: ¬(a*) accepts any word with at least one non-a event.
+    -- ∂_a(a*) = a* (not Σ*) → a included  (e.g. a·b ∈ ¬(a*))
+    -- ∂_b(a*) = ∅  (not Σ*) → b included  (e.g. b   ∈ ¬(a*))
+    check counter "firstWith {a,b} (¬(a*)) = {a,b}   (both events can start words outside a*)"  $
+        sameSet (firstWith [a, b] (Not (Star (Single a)))) [a, b]
+
+    -- Not of Or: ¬(a ∨ b) excludes single-event words [a] and [b]; multi-event
+    -- words and [c] remain.  All three events can open such continuations.
+    -- ∂_a(a ∨ b) = ε (not Σ*) → a included  (e.g. a·a ∈ ¬(a∨b))
+    -- ∂_b(a ∨ b) = ε (not Σ*) → b included  (e.g. b·b ∈ ¬(a∨b))
+    -- ∂_c(a ∨ b) = ∅ (not Σ*) → c included  (e.g. c   ∈ ¬(a∨b))
+    check counter "firstWith {a,b,c} (¬(a ∨ b)) = {a,b,c}   (complement of union)"  $
+        sameSet (firstWith [a, b, c] (Not (Or (Single a) (Single b)))) [a, b, c]
+
+    -- Not of And with disjoint languages: L(a) ∩ L(b) = ∅, so ¬(a ∧ b) = ¬∅ = Σ*.
+    -- Every event starts some word in Σ*.
+    -- ∂_a(a ∧ b) = ε ∧ ∅ = ∅ (not Σ*) → a included
+    -- ∂_b(a ∧ b) = ∅ ∧ ε = ∅ (not Σ*) → b included
+    check counter "firstWith {a,b} (¬(a ∧ b)) = {a,b}   (¬∅ = Σ*, every event is a first event)"  $
+        sameSet (firstWith [a, b] (Not (And (Single a) (Single b)))) [a, b]
+
+    -- Alphabet strictly smaller than the atoms of the inner RE:
+    -- only events in the supplied alphabet are candidates.
+    -- ∂_a(b) = ∅ (not Σ*) → a included; b is not in the alphabet so never checked.
+    check counter "firstWith {a} (¬b) = [a]   (event outside alphabet is not a candidate)"  $
+        firstWith [a] (Not (Single b)) == [a]
+
+    -- Not of (a · Σ*): ¬(a·Σ*) = words that do NOT start with a.
+    -- ∂_a(a·Σ*) = Σ* → isTotal → a excluded
+    -- ∂_b(a·Σ*) = ∅ (not Σ*) → b included  (e.g. b ∈ ¬(a·Σ*))
+    check counter "firstWith {a,b} (¬(a·Σ*)) = [b]   (only b can start words not beginning with a)"  $
+        firstWith [a, b] (Not (Seq (Single a) (Not Bot))) == [b]
+
+    -- Not of (a·Σ* ∨ b·Σ*): excludes all words starting with a or b; only c remains.
+    -- ∂_a(...) = Σ* → a excluded
+    -- ∂_b(...) = Σ* → b excluded
+    -- ∂_c(...) = ∅  (not Σ*) → c included  (e.g. c ∈ ¬(a·Σ* ∨ b·Σ*))
+    check counter "firstWith {a,b,c} (¬(a·Σ* ∨ b·Σ*)) = [c]   (only c avoids both excluded prefixes)"  $
+        firstWith [a, b, c]
+            (Not (Or (Seq (Single a) (Not Bot))
+                     (Seq (Single b) (Not Bot)))) == [c]
+
+    -- De Morgan unfolding: ¬(¬a ∧ ¬b) = ¬¬(a ∨ b) = a ∨ b.
+    -- ∂_a(¬a ∧ ¬b) = ¬ε ∧ Σ* = ¬ε (not Σ*) → a included
+    -- ∂_b(¬a ∧ ¬b) = Σ* ∧ ¬ε = ¬ε (not Σ*) → b included
+    -- ∂_c(¬a ∧ ¬b) = Σ* ∧ Σ* = Σ* → isTotal → c excluded
+    check counter "firstWith {a,b,c} (¬(¬a ∧ ¬b)) = {a,b}   (De Morgan: equivalent to first (a ∨ b))"  $
+        sameSet (firstWith [a, b, c] (Not (And (Not (Single a)) (Not (Single b))))) [a, b]
+
 -- ── Main ──────────────────────────────────────────────────────────────────────
 
 main :: IO ()

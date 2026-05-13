@@ -443,6 +443,391 @@ test_first counter = do
     check counter "firstWith {a,b,c} (¬(¬a ∧ ¬b)) = {a,b}   (De Morgan: equivalent to first (a ∨ b))"  $
         sameSet (firstWith [a, b, c] (Not (And (Not (Single a)) (Not (Single b))))) [a, b]
 
+-- ── normalize ─────────────────────────────────────────────────────────────────
+-- Simplify an RE using RE algebra + De Morgan laws.
+-- Base cases (Bot, Epsilon, Single) are returned unchanged.
+
+test_normalize :: IORef Int -> IO ()
+test_normalize counter = do
+    putStrLn "\n── normalize ────────────────────────────────────────────────────"
+
+    -- Base cases: atoms are already normal
+    check counter "normalize ∅ = ∅" $
+        normalize Bot == Bot
+
+    check counter "normalize ε = ε" $
+        normalize Epsilon == Epsilon
+
+    check counter "normalize a = a" $
+        normalize (Single a) == Single a
+
+    -- ── Seq ───────────────────────────────────────────────────────────────────
+
+    check counter "normalize (∅ · a) = ∅   (Bot left absorbs)" $
+        normalize (Seq Bot (Single a)) == Bot
+
+    check counter "normalize (a · ∅) = ∅   (Bot right absorbs)" $
+        normalize (Seq (Single a) Bot) == Bot
+
+    check counter "normalize (ε · a) = a   (Epsilon left identity)" $
+        normalize (Seq Epsilon (Single a)) == Single a
+
+    check counter "normalize (a · ε) = a   (Epsilon right identity)" $
+        normalize (Seq (Single a) Epsilon) == Single a
+
+    check counter "normalize (a · b) = a · b   (no simplification)" $
+        normalize (Seq (Single a) (Single b)) == Seq (Single a) (Single b)
+
+    -- nested: inner Bot propagates outward
+    check counter "normalize ((∅ · a) · b) = ∅   (nested Bot collapses)" $
+        normalize (Seq (Seq Bot (Single a)) (Single b)) == Bot
+
+    -- ── Or ────────────────────────────────────────────────────────────────────
+
+    check counter "normalize (∅ ∨ a) = a   (Bot left identity for Or)" $
+        normalize (Or Bot (Single a)) == Single a
+
+    check counter "normalize (a ∨ ∅) = a   (Bot right identity for Or)" $
+        normalize (Or (Single a) Bot) == Single a
+
+    check counter "normalize (a ∨ a) = a   (idempotent)" $
+        normalize (Or (Single a) (Single a)) == Single a
+
+    check counter "normalize (a ∨ Σ*) = Σ*   (top absorbs on right)" $
+        normalize (Or (Single a) (Not Bot)) == Not Bot
+
+    check counter "normalize (Σ* ∨ a) = Σ*   (top absorbs on left)" $
+        normalize (Or (Not Bot) (Single a)) == Not Bot
+
+    check counter "normalize (a ∨ b) = a ∨ b   (no simplification)" $
+        normalize (Or (Single a) (Single b)) == Or (Single a) (Single b)
+
+    -- ── And ───────────────────────────────────────────────────────────────────
+
+    check counter "normalize (∅ ∧ a) = ∅   (Bot left zero for And)" $
+        normalize (And Bot (Single a)) == Bot
+
+    check counter "normalize (a ∧ ∅) = ∅   (Bot right zero for And)" $
+        normalize (And (Single a) Bot) == Bot
+
+    check counter "normalize (a ∧ a) = a   (idempotent)" $
+        normalize (And (Single a) (Single a)) == Single a
+
+    check counter "normalize (Σ* ∧ a) = a   (top left identity for And)" $
+        normalize (And (Not Bot) (Single a)) == Single a
+
+    check counter "normalize (a ∧ Σ*) = a   (top right identity for And)" $
+        normalize (And (Single a) (Not Bot)) == Single a
+
+    -- ε ∧ r: keep ε only if r is nullable
+    check counter "normalize (ε ∧ a*) = ε   (ε ∧ nullable = ε)" $
+        normalize (And Epsilon (Star (Single a))) == Epsilon
+
+    check counter "normalize (ε ∧ a) = ∅   (ε ∧ non-nullable = ∅)" $
+        normalize (And Epsilon (Single a)) == Bot
+
+    check counter "normalize (a ∧ ε) = ∅   (non-nullable ∧ ε = ∅)" $
+        normalize (And (Single a) Epsilon) == Bot
+
+    check counter "normalize (a ∧ b) = a ∧ b   (no simplification)" $
+        normalize (And (Single a) (Single b)) == And (Single a) (Single b)
+
+    -- ── Not ───────────────────────────────────────────────────────────────────
+
+    check counter "normalize (¬¬a) = a   (double negation)" $
+        normalize (Not (Not (Single a))) == Single a
+
+    check counter "normalize (¬∅) = Σ*   (complement of empty = top)" $
+        normalize (Not Bot) == Not Bot
+
+    check counter "normalize (¬Σ*) = ∅   (complement of top = empty)" $
+        normalize (Not (Not Bot)) == Bot
+
+    -- De Morgan: ¬(r1 ∨ r2) = ¬r1 ∧ ¬r2
+    check counter "normalize (¬(a ∨ b)) = ¬a ∧ ¬b   (De Morgan)" $
+        normalize (Not (Or (Single a) (Single b)))
+            == And (Not (Single a)) (Not (Single b))
+
+    -- De Morgan: ¬(r1 ∧ r2) = ¬r1 ∨ ¬r2
+    check counter "normalize (¬(a ∧ b)) = ¬a ∨ ¬b   (De Morgan)" $
+        normalize (Not (And (Single a) (Single b)))
+            == Or (Not (Single a)) (Not (Single b))
+
+    -- involution chains
+    check counter "normalize (¬¬¬a) = ¬a   (triple negation)" $
+        normalize (Not (Not (Not (Single a)))) == Not (Single a)
+
+    -- ── Star ──────────────────────────────────────────────────────────────────
+
+    check counter "normalize (∅*) = ε   (empty Kleene = epsilon)" $
+        normalize (Star Bot) == Epsilon
+
+    check counter "normalize (ε*) = ε   (epsilon Kleene = epsilon)" $
+        normalize (Star Epsilon) == Epsilon
+
+    check counter "normalize (a*) = a*   (no simplification)" $
+        normalize (Star (Single a)) == Star (Single a)
+
+    -- inner simplification: (∅ · a)* = ∅* = ε
+    check counter "normalize ((∅ · a)*) = ε   (inner Bot collapses before Star)" $
+        normalize (Star (Seq Bot (Single a))) == Epsilon
+
+-- ── reSubtraction ─────────────────────────────────────────────────────────────
+-- r1 \\ r2: residual obligation in r2 after trace r1.
+-- Implemented via Antimirov partial derivatives on r2: instead of a single
+-- Brzozowski step, antiDeriv yields a LIST of residuals whose language union
+-- equals L(∂_e(r2)); we subtract the remaining r1 from each and join with Or.
+--
+-- Key semantic contract:
+--   ε \\ r2 = r2            (base case: nothing consumed)
+--   a \\ a  = ε             (exact match: obligation discharged, ε remains)
+--   a \\ (a·b) = b          (prefix: tail obligation remains)
+--   (a·b) \\ a = ∅          (overshoot: no valid continuation)
+-- Antimirov-specific behaviour:
+--   a \\ (a ∨ (a·b)) = ε ∨ b   (both Or-branches fire as separate residuals)
+--   b \\ (a*·b) = ε             (nullable head a* skipped via Antimirov nullable split)
+
+test_reSubtraction :: IORef Int -> IO ()
+test_reSubtraction counter = do
+    putStrLn "\n── reSubtraction (Antimirov partial derivatives) ────────────────"
+
+    -- ── Base case: identity trace ──────────────────────────────────────────────
+    -- reSubtraction Epsilon r2 = r2  (base case, no derivative taken)
+    check counter "ε \\\\ a = a   (nothing consumed, obligation unchanged)" $
+        reSubtraction Epsilon (Single a) == Single a
+
+    check counter "ε \\\\ ∅ = ∅" $
+        reSubtraction Epsilon Bot == Bot
+
+    check counter "ε \\\\ Σ* = Σ*" $
+        reSubtraction Epsilon (Not Bot) == Not Bot
+
+    -- ── Σ* as the trace ───────────────────────────────────────────────────────
+    -- The key invariant: derivative e (Not Bot) = Not (derivative e Bot) = Not Bot,
+    -- so r1 stays Not Bot at every recursive step.  Exploration is entirely driven
+    -- by atoms r2; the recursion terminates only when antiDeriv produces residuals
+    -- with no further atoms, at which point firstWith [] (Not Bot) = [] → Bot.
+    --
+    -- Consequence: Σ* \\ r2 = ∅ for every r2 whose atoms-driven derivation
+    -- eventually reaches a residual with empty atoms (ε or ∅).
+    -- The semantically correct left-quotient Σ*\r2 = Σ* in all cases, but the
+    -- atoms-based alphabet extraction cannot produce events from Not Bot alone.
+
+    -- r2 = ∅: atoms ∅ = []; no events in alphabet → immediately ∅.
+    check counter "Σ* \\\\ ∅ = ∅   (atoms ∅ is empty; no events to explore)" $
+        normalize (reSubtraction (Not Bot) Bot) == Bot
+
+    -- r2 = ε: atoms ε = []; same as above.
+    check counter "Σ* \\\\ ε = ∅   (atoms ε is empty; no events to explore)" $
+        normalize (reSubtraction (Not Bot) Epsilon) == Bot
+
+    -- r2 = Σ*: atoms (Not Bot) = []; combined alphabet still empty.
+    check counter "Σ* \\\\ Σ* = ∅   (atoms of Not Bot is empty; no events explored)" $
+        normalize (reSubtraction (Not Bot) (Not Bot)) == Bot
+
+    -- r2 = Single a: alph = [a]; evts = [a] (∂_a(∅) = ∅, not total).
+    -- step a: dr1 = Not Bot (unchanged); antiDeriv a (Single a) = [ε].
+    -- recurse: Σ* \\ ε → alph = [] → ∅.
+    check counter "Σ* \\\\ a = ∅   (reaches Σ* \\\\ ε after one step; no atoms in ε)" $
+        normalize (reSubtraction (Not Bot) (Single a)) == Bot
+
+    -- r2 = a ∨ b: alph = [a, b]; both steps produce [ε] via antiDeriv,
+    -- then recurse to Σ* \\ ε = ∅.
+    check counter "Σ* \\\\ (a ∨ b) = ∅   (both Or-branches reduce to Σ* \\\\ ε)" $
+        normalize (reSubtraction (Not Bot) (Or (Single a) (Single b))) == Bot
+
+    -- r2 = a · b: alph = [a, b].
+    -- step a: antiDeriv a (a·b) = [b]; recurse Σ* \\ b → ∅.
+    -- step b: antiDeriv b (a·b) = [];  no residuals → ∅.
+    check counter "Σ* \\\\ (a · b) = ∅   (chain reduces to Σ* \\\\ ε)" $
+        normalize (reSubtraction (Not Bot) (Seq (Single a) (Single b))) == Bot
+
+    -- ── Single-step traces ─────────────────────────────────────────────────────
+    -- Exact match: antiDeriv a (Single a) = [ε]; reSubtraction ε ε = ε.
+    check counter "a \\\\ a = ε   (obligation exactly discharged)" $
+        normalize (reSubtraction (Single a) (Single a)) == Epsilon
+
+    -- Mismatch: antiDeriv b (Single a) = []; no residual, result is ∅.
+    check counter "b \\\\ a = ∅   (disjoint trace and obligation)" $
+        normalize (reSubtraction (Single b) (Single a)) == Bot
+
+    -- Prefix: antiDeriv a (a·b) = [ε·b] = [b]; reSubtraction ε b = b.
+    check counter "a \\\\ (a · b) = b   (head consumed, tail remains)" $
+        normalize (reSubtraction (Single a)
+                                 (Seq (Single a) (Single b))) == Single b
+
+    -- Overshoot: ∂_a(a·b) = b; antiDeriv b (Single a) = []; ∅.
+    check counter "(a · b) \\\\ a = ∅   (trace overshoots obligation)" $
+        normalize (reSubtraction (Seq (Single a) (Single b))
+                                 (Single a)) == Bot
+
+    -- ── Multi-step traces ──────────────────────────────────────────────────────
+    -- Exact multi-step: each step peels one layer; both sides reduce to ε.
+    check counter "(a · b) \\\\ (a · b) = ε   (multi-step exact match)" $
+        normalize (reSubtraction (Seq (Single a) (Single b))
+                                 (Seq (Single a) (Single b))) == Epsilon
+
+    -- Partial multi-step: one step consumed, b · c remains.
+    check counter "a \\\\ (a · b · c) = b · c   (prefix consumed, tail remains)" $
+        normalize (reSubtraction (Single a)
+                                 (Seq (Single a) (Seq (Single b) (Single c))))
+            == Seq (Single b) (Single c)
+
+    -- ── Or in r2: Antimirov splits branches independently ─────────────────────
+    -- antiDeriv a (a ∨ b) = [ε] ∪ [] = [ε]: only the a-branch fires.
+    -- The b-branch contributes nothing; result is ε.
+    check counter "a \\\\ (a ∨ b) = ε   (only the matching Or-branch yields a residual)" $
+        normalize (reSubtraction (Single a)
+                                 (Or (Single a) (Single b))) == Epsilon
+
+    -- antiDeriv a (a ∨ (a·b)) = [ε] ∪ [b] = [ε, b]: BOTH branches fire.
+    -- Antimirov yields two separate residuals; their union is ε ∨ b,
+    -- meaning the continuation either satisfies the obligation immediately (ε)
+    -- or must still perform b (a·b-branch).
+    check counter "a \\\\ (a ∨ (a · b)) = ε ∨ b   (Antimirov splits two matching Or-branches)" $
+        normalize (reSubtraction (Single a)
+                                 (Or (Single a) (Seq (Single a) (Single b))))
+            == Or Epsilon (Single b)
+
+    -- ── Seq with nullable head: Antimirov nullable split ──────────────────────
+    -- antiDeriv a (a*·b):
+    --   left  = {a*·b}   (a consumed from a*; loop back)
+    --   right = ∅        (nullable a*, but antiDeriv a b = []; no split contribution)
+    check counter "a \\\\ (a* · b) = a* · b   (one step of a* consumed; loop continues)" $
+        normalize (reSubtraction (Single a)
+                                 (Seq (Star (Single a)) (Single b)))
+            == Seq (Star (Single a)) (Single b)
+
+    -- antiDeriv b (a*·b):
+    --   left  = ∅        (b cannot start a*, so no left residuals)
+    --   right = [ε]      (nullable a* triggers the split; antiDeriv b b = [ε])
+    -- The nullable split produces residual ε: a* was skipped entirely.
+    check counter "b \\\\ (a* · b) = ε   (nullable a* skipped; b discharged via nullable split)" $
+        normalize (reSubtraction (Single b)
+                                 (Seq (Star (Single a)) (Single b)))
+            == Epsilon
+
+-- ── ltl_to_re ─────────────────────────────────────────────────────────────────
+-- Algebraic translation LTLf → RE.
+-- Returns Nothing when the LTL formula contains a temporal operator on the
+-- left-hand side of LTLUntil (no single-step projection exists).
+
+test_ltl_to_re :: IORef Int -> IO ()
+test_ltl_to_re counter = do
+    putStrLn "\n── ltl_to_re ────────────────────────────────────────────────────"
+
+    -- Base cases
+    check counter "ltl_to_re LTLTrue  = Just Σ*" $
+        ltl_to_re LTLTrue == Just (Not Bot)
+
+    check counter "ltl_to_re LTLFalse = Just ∅" $
+        ltl_to_re LTLFalse == Just Bot
+
+    check counter "ltl_to_re (LTLAtom a) = Just (Single a)" $
+        ltl_to_re (LTLAtom a) == Just (Single a)
+
+    -- Negation
+    check counter "ltl_to_re (LTLNot (LTLAtom a)) = Just (¬a)" $
+        ltl_to_re (LTLNot (LTLAtom a)) == Just (Not (Single a))
+
+    check counter "ltl_to_re (LTLNot LTLTrue) = Just (¬Σ*)   (= ∅ after normalization)" $
+        ltl_to_re (LTLNot LTLTrue) == Just (Not (Not Bot))
+
+    check counter "ltl_to_re (LTLNot LTLFalse) = Just Σ*" $
+        ltl_to_re (LTLNot LTLFalse) == Just (Not Bot)
+
+    -- Conjunction and disjunction
+    check counter "ltl_to_re (LTLAnd (LTLAtom a) (LTLAtom b)) = Just (a ∧ b)" $
+        ltl_to_re (LTLAnd (LTLAtom a) (LTLAtom b)) == Just (And (Single a) (Single b))
+
+    check counter "ltl_to_re (LTLOr (LTLAtom a) (LTLAtom b)) = Just (a ∨ b)" $
+        ltl_to_re (LTLOr (LTLAtom a) (LTLAtom b)) == Just (Or (Single a) (Single b))
+
+    -- Next: LTLNext φ ≡ Σ · ⟦φ⟧
+    check counter "ltl_to_re (LTLNext (LTLAtom a)) = Just (_ · a)" $
+        ltl_to_re (LTLNext (LTLAtom a)) == Just (Seq (Single Wildcard) (Single a))
+
+    check counter "ltl_to_re (LTLNext (LTLNext (LTLAtom a))) = Just (_ · (_ · a))   (nested Next)" $
+        ltl_to_re (LTLNext (LTLNext (LTLAtom a)))
+            == Just (Seq (Single Wildcard) (Seq (Single Wildcard) (Single a)))
+
+    -- Finally: LTLFinally φ ≡ Σ* · ⟦φ⟧
+    check counter "ltl_to_re (LTLFinally (LTLAtom a)) = Just (Σ* · a)" $
+        ltl_to_re (LTLFinally (LTLAtom a)) == Just (Seq (Not Bot) (Single a))
+
+    check counter "ltl_to_re (LTLFinally LTLTrue) = Just (Σ* · Σ*)" $
+        ltl_to_re (LTLFinally LTLTrue) == Just (Seq (Not Bot) (Not Bot))
+
+    check counter "ltl_to_re (LTLFinally LTLFalse) = Just (Σ* · ∅)" $
+        ltl_to_re (LTLFinally LTLFalse) == Just (Seq (Not Bot) Bot)
+
+    -- Globally: LTLGlobally φ ≡ ¬(Σ* · ¬⟦φ⟧)
+    check counter "ltl_to_re (LTLGlobally (LTLAtom a)) = Just (¬(Σ* · ¬a))" $
+        ltl_to_re (LTLGlobally (LTLAtom a)) == Just (Not (Seq (Not Bot) (Not (Single a))))
+
+    check counter "ltl_to_re (LTLGlobally LTLTrue) = Just (¬(Σ* · ¬Σ*))" $
+        ltl_to_re (LTLGlobally LTLTrue) == Just (Not (Seq (Not Bot) (Not (Not Bot))))
+
+    -- Until: LTLUntil l1 l2 ≡ step(l1)* · ⟦l2⟧
+    -- toSingleStep (LTLAtom a) = Just (Single a)
+    check counter "ltl_to_re (LTLAtom a `Until` LTLAtom b) = Just (a* · b)" $
+        ltl_to_re (LTLUntil (LTLAtom a) (LTLAtom b))
+            == Just (Seq (Star (Single a)) (Single b))
+
+    -- toSingleStep LTLTrue = Just (Single Wildcard)
+    check counter "ltl_to_re (LTLTrue `Until` LTLAtom b) = Just (_* · b)" $
+        ltl_to_re (LTLUntil LTLTrue (LTLAtom b))
+            == Just (Seq (Star (Single Wildcard)) (Single b))
+
+    -- toSingleStep LTLFalse = Just Bot
+    check counter "ltl_to_re (LTLFalse `Until` LTLAtom b) = Just (∅* · b)   (= ε · b = b)" $
+        ltl_to_re (LTLUntil LTLFalse (LTLAtom b))
+            == Just (Seq (Star Bot) (Single b))
+
+    -- toSingleStep returns Nothing for temporal operators → whole Until returns Nothing
+    check counter "ltl_to_re (LTLNext _ `Until` LTLAtom b) = Nothing   (no single-step projection)" $
+        ltl_to_re (LTLUntil (LTLNext (LTLAtom a)) (LTLAtom b)) == Nothing
+
+    check counter "ltl_to_re (LTLFinally _ `Until` LTLAtom b) = Nothing" $
+        ltl_to_re (LTLUntil (LTLFinally (LTLAtom a)) (LTLAtom b)) == Nothing
+
+    check counter "ltl_to_re (LTLGlobally _ `Until` LTLAtom b) = Nothing" $
+        ltl_to_re (LTLUntil (LTLGlobally (LTLAtom a)) (LTLAtom b)) == Nothing
+
+    -- Membership tests via iterated derivative + nullability
+    let Just reAtomA   = ltl_to_re (LTLAtom a)
+        Just reNextA   = ltl_to_re (LTLNext (LTLAtom a))
+        Just reAUntilB = ltl_to_re (LTLUntil (LTLAtom a) (LTLAtom b))
+        Just reFinallyA = ltl_to_re (LTLFinally (LTLAtom a))
+
+    -- LTLAtom a → Single a: matches only word [a]
+    check counter "word [a] ∈ ⟦LTLAtom a⟧" $
+        matches reAtomA [a]
+
+    check counter "word [b] ∉ ⟦LTLAtom a⟧" $
+        not (matches reAtomA [b])
+
+    -- LTLNext (LTLAtom a) → _ · a: matches any two-event word ending in a
+    check counter "word [b, a] ∈ ⟦LTLNext (LTLAtom a)⟧" $
+        matches reNextA [b, a]
+
+    check counter "word [a] ∉ ⟦LTLNext (LTLAtom a)⟧   (too short)" $
+        not (matches reNextA [a])
+
+    -- LTLUntil (LTLAtom a) (LTLAtom b) → a* · b: matches [a,a,b], not [a,a,a]
+    check counter "word [a, a, b] ∈ ⟦a U b⟧" $
+        matches reAUntilB [a, a, b]
+
+    check counter "word [a, a, a] ∉ ⟦a U b⟧" $
+        not (matches reAUntilB [a, a, a])
+
+    -- LTLFinally (LTLAtom a) → Σ* · a: matches [b, b, a], not [b, b, b]
+    check counter "word [b, b, a] ∈ ⟦F a⟧" $
+        matches reFinallyA [b, b, a]
+
+    check counter "word [b, b, b] ∉ ⟦F a⟧" $
+        not (matches reFinallyA [b, b, b])
+
 -- ── Main ──────────────────────────────────────────────────────────────────────
 
 main :: IO ()
@@ -454,5 +839,8 @@ main = do
     test_derivative    counter
     test_atoms         counter
     test_first         counter
+    test_normalize     counter
+    test_reSubtraction counter
+    test_ltl_to_re     counter
     n <- readIORef counter
     putStrLn $ "\n=== All " ++ show n ++ " assertions passed =================================="

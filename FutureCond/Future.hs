@@ -3,7 +3,7 @@
 module Future where
 
 import Prelude hiding ((<>))
-import Data.List (union, intercalate, subsequences)
+import Data.List (union, intercalate, subsequences, nub)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set        as Set
 
@@ -60,8 +60,8 @@ instance Show RE where
     show (Not r)     = "¬(" ++ show r ++ ")"
 
 -- Σ* — universal language, complement of the empty language
-anything :: RE
-anything = Not Bot
+top :: RE
+top = Not Bot
 
 -- ── Nullability: ν(r) ─────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r)
@@ -75,21 +75,6 @@ nullable (Or  r1 r2)  = nullable r1 || nullable r2
 nullable (And r1 r2)  = nullable r1 && nullable r2
 nullable (Star _)     = True
 nullable (Not r)      = not (nullable r)   -- ν(¬r) = ¬ν(r)
-
--- ── Brzozowski Derivative: ∂_e(r) ────────────────────────────────────────────
--- Key law for complement: ∂_a(¬r) = ¬(∂_a(r))
-
-derivative :: Event -> RE -> RE
-derivative _ Bot          = Bot
-derivative _ Epsilon      = Bot
-derivative e (Single p)   = if subsumesEvent e p then Epsilon else Bot
-derivative e (Seq r1 r2)
-    | nullable r1           = Or (Seq (derivative e r1) r2) (derivative e r2)
-    | otherwise             = Seq (derivative e r1) r2
-derivative e (Or  r1 r2)  = Or  (derivative e r1) (derivative e r2)
-derivative e (And r1 r2)  = And (derivative e r1) (derivative e r2)
-derivative e (Star r)     = Seq (derivative e r) (Star r)
-derivative e (Not r)      = Not (derivative e r)   -- ∂_a(¬r) = ¬(∂_a(r))
 
 -- ── Alphabet extraction ───────────────────────────────────────────────────────
 -- Collect all concrete (non-Wildcard) events mentioned in an RE.
@@ -130,6 +115,66 @@ firstWith alph (Not r)          = [e | e <- alph, not (isTotal (normalize (deriv
 -- subtraction passes the combined alphabet of both operands for completeness.
 first :: RE -> [Event]
 first r = firstWith (atoms r) r
+
+-- ── Brzozowski Derivative: ∂_e(r) ────────────────────────────────────────────
+-- Key law for complement: ∂_a(¬r) = ¬(∂_a(r))
+
+derivative :: Event -> RE -> RE
+derivative _ Bot          = Bot
+derivative _ Epsilon      = Bot
+derivative e (Single p)   = if subsumesEvent e p then Epsilon else Bot
+derivative e (Seq r1 r2)
+    | nullable r1           = Or (Seq (derivative e r1) r2) (derivative e r2)
+    | otherwise             = Seq (derivative e r1) r2
+derivative e (Or  r1 r2)  = Or  (derivative e r1) (derivative e r2)
+derivative e (And r1 r2)  = And (derivative e r1) (derivative e r2)
+derivative e (Star r)     = Seq (derivative e r) (Star r)
+derivative e (Not r)      = Not (derivative e r)   -- ∂_a(¬r) = ¬(∂_a(r))
+
+-- ── Antimirov Partial Derivatives: ∂_e^A(r) ──────────────────────────────────
+-- antiDeriv e r returns a LIST of REs whose language UNION equals L(∂_e(r)).
+-- This is the Antimirov set-based refinement of the Brzozowski derivative:
+--   • Or  distributes into a union of smaller residuals.
+--   • Seq factors out the tail r2, giving {t · r2 | t ∈ ∂_e^A(r1)} plus,
+--     when r1 is nullable, the partial derivatives of r2 directly.
+--   • Star unfolds one step: {t · r* | t ∈ ∂_e^A(r)}.
+--   • And and Not have no canonical Antimirov splitting; they fall back to
+--     the unique Brzozowski derivative wrapped in a singleton list.
+
+antiDeriv :: Event -> RE -> [RE]
+antiDeriv _ Bot           = []
+antiDeriv _ Epsilon       = []
+antiDeriv e (Single p)
+    | subsumesEvent e p   = [Epsilon]
+    | otherwise           = []
+antiDeriv e (Or  r1 r2)   = nub (antiDeriv e r1 ++ antiDeriv e r2)
+antiDeriv e (Seq r1 r2)   =
+    let left  = map (\t -> normalize (Seq t r2)) (antiDeriv e r1)
+        right = if nullable r1 then antiDeriv e r2 else []
+    in nub (left ++ right)
+antiDeriv e (Star r)      = map (\t -> normalize (Seq t (Star r))) (antiDeriv e r)
+antiDeriv e (And r1 r2)   = [normalize (And (derivative e r1) (derivative e r2))]
+antiDeriv e (Not r)       = [normalize (Not (derivative e r))]
+
+-- Quotient r1 \ r2: the residual obligation in r2 after trace r1.
+-- Base: if r1 = ε (nothing consumed), r2 is unchanged.
+-- Σ* (Not Bot) trivially satisfies any precondition: residual is ⊤.
+--
+-- Rewritten using Antimirov partial derivatives on r2:
+-- instead of a single Brzozowski step ∂_e(r2), we compute the full set
+-- ∂_e^A(r2) of Antimirov residuals and recursively subtract ∂_e(r1) from
+-- each element, then take their union with Or.  The result language is the
+-- same as the Brzozowski version because ⋃ L(∂_e^A(r2)) = L(∂_e(r2)).
+reSubtraction :: RE -> RE -> RE
+reSubtraction Epsilon r2 = r2
+reSubtraction r1 r2 =
+    let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
+        evts   = firstWith alph r1
+        step e =
+            let dr1  = normalize (derivative e r1)
+                dr2s = antiDeriv e r2           -- Antimirov set of r2 residuals
+            in foldr Or Bot (map (reSubtraction dr1) dr2s)
+    in foldr Or Bot (map step evts)
 
 -- ── LTL ───────────────────────────────────────────────────────────────────────
 
@@ -181,7 +226,7 @@ toSingleStep _               = Nothing  -- temporal operators not representable 
 -- LTLUntil returns Nothing when the left-hand side contains a temporal
 -- operator with no single-step projection.
 ltl_to_re :: LTL -> Maybe RE
-ltl_to_re LTLTrue            = Just anything                         -- ¬∅  = Σ*
+ltl_to_re LTLTrue            = Just top                         -- ¬∅  = Σ*
 ltl_to_re LTLFalse           = Just Bot                              -- ∅
 ltl_to_re (LTLAtom e)        = Just (Single e)
 ltl_to_re (LTLNot l)         = Not <$> ltl_to_re l                  -- ¬⟦l⟧
@@ -190,8 +235,8 @@ ltl_to_re (LTLOr  l1 l2)     = Or  <$> ltl_to_re l1 <*> ltl_to_re l2  -- ⟦l1�
 ltl_to_re (LTLNext l)        = Seq (Single Wildcard) <$> ltl_to_re l   -- Σ · ⟦l⟧
 ltl_to_re (LTLUntil l1 l2)   = Seq . Star <$> toSingleStep l1          -- step(l1)* · ⟦l2⟧
                                            <*> ltl_to_re l2
-ltl_to_re (LTLFinally l)     = Seq anything <$> ltl_to_re l            -- Σ* · ⟦l⟧
-ltl_to_re (LTLGlobally l)    = Not . Seq anything . Not                 -- ¬(Σ* · ¬⟦l⟧)
+ltl_to_re (LTLFinally l)     = Seq top <$> ltl_to_re l            -- Σ* · ⟦l⟧
+ltl_to_re (LTLGlobally l)    = Not . Seq top . Not                 -- ¬(Σ* · ¬⟦l⟧)
                                    <$> ltl_to_re l
 
 -- ── Shorthands ────────────────────────────────────────────────────────────────
@@ -202,16 +247,9 @@ globally ev = Star (Single ev)
 
 -- F ev  — ev must occur at some step:  Σ* · ev · Σ*
 finally :: Event -> RE
-finally ev = Seq anything (Seq (Single ev) anything)
-
--- Σ* (alias, for use as a trivially-satisfied future condition)
-reTrue :: RE
-reTrue = anything
+finally ev = Seq top (Seq (Single ev) top)
 
 -- ── Composable class ──────────────────────────────────────────────────────────
-
-type Trace      = RE
-type FutureCond = RE
 
 class Composable a where
     concatenation :: a -> a -> a
@@ -236,19 +274,8 @@ instance Composable RE where
     concatenation = Seq
     conjunction   = And
     empty         = Epsilon
-    universe      = anything
-
-    -- Quotient r1 \ r2: the residual future obligation in r2 after trace r1.
-    -- Base: if r1 = ε (nothing consumed), r2 is unchanged.
-    -- Σ* (Not Bot) trivially satisfies any precondition: residual is ε.
-    subtraction Epsilon   r2 = r2
-    subtraction (Not Bot) _  = Epsilon
-    subtraction r1 r2 =
-        let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
-            evts   = firstWith alph r1
-            step e = subtraction (normalize (derivative e r1))
-                                 (normalize (derivative e r2))
-        in foldr Or Bot (map step evts)
+    universe      = top
+    subtraction   = reSubtraction
 
 -- Normalization: simplify using RE algebra + De Morgan laws for Not.
 normalize :: RE -> RE
@@ -265,8 +292,8 @@ normalize r = case r of
         (r', Bot)        -> r'
         (r1', r2')
             | r1' == r2'  -> r1'
-            | isUniv r1'  -> anything
-            | isUniv r2'  -> anything
+            | isTop r1'  -> top
+            | isTop r2'  -> top
         (r1', r2')       -> Or r1' r2'
 
     And r1 r2 -> case (normalize r1, normalize r2) of
@@ -274,8 +301,8 @@ normalize r = case r of
         (_, Bot)         -> Bot
         (r1', r2')
             | r1' == r2'  -> r1'
-            | isUniv r1'  -> r2'
-            | isUniv r2'  -> r1'
+            | isTop r1'  -> r2'
+            | isTop r2'  -> r1'
         (Epsilon, r')    -> if nullable r' then Epsilon else Bot
         (r', Epsilon)    -> if nullable r' then Epsilon else Bot
         (r1', r2')       -> And r1' r2'
@@ -285,8 +312,8 @@ normalize r = case r of
         Not r'       -> r'                                    -- ¬¬r = r
         Or  r1' r2'  -> normalize (And (Not r1') (Not r2'))  -- De Morgan
         And r1' r2'  -> normalize (Or  (Not r1') (Not r2'))  -- De Morgan
-        Bot          -> anything                              -- ¬∅  = Σ*
-        r' | isUniv r' -> Bot                                -- ¬Σ* = ∅
+        Bot          -> top                              -- ¬∅  = Σ*
+        r' | isTop r' -> Bot                                -- ¬Σ* = ∅
         r'             -> Not r'
 
     Star r1 -> case normalize r1 of
@@ -296,8 +323,8 @@ normalize r = case r of
 
     _ -> r
   where
-    isUniv (Not Bot) = True
-    isUniv _         = False
+    isTop (Not Bot) = True
+    isTop _         = False
 
 -- ── Effectful monad ───────────────────────────────────────────────────────────
 
@@ -320,10 +347,13 @@ instance Composable eff => Applicative (Effectful eff) where
         }
     ef <*> ex = Effectful
         { ret    = ret ef (ret ex)
+        -- 1. ef is evaluated first (left to right)
+        -- 2. ex is evaluated second
+        -- 3. the extracted function is applied to the extracted value
         -- Traditional precondition: pre of ef, plus whatever of pre ex
         -- is not already discharged by post ef.
         -- If post ef ⊢ pre ex, the quotient is ε and nothing is added.
-        , pre    = pre ef <> (pre ex \\ post ef)
+        , pre    = pre ef /\ (post ef \\ pre ex)
         , post   = post ef <> post ex
         , future = (post ex \\ future ef) /\ future ex
         }
@@ -336,7 +366,7 @@ instance Composable eff => Monad (Effectful eff) where
         -- not covered by post e.  Mirrors the Hoare rule:
         --   {P} e {Q},  Q ⊢ P'  ⊢  {P} e >>= f {R}
         -- When post e fully satisfies pre fe, pre fe \\ post e = ε.
-        , pre    = pre e <> (pre fe \\ post e)
+        , pre    = pre e /\ (post e \\ pre fe)
         , post   = post e <> post fe
         , future = (post fe \\ future e) /\ future fe
         }

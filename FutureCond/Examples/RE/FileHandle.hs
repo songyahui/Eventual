@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -i.. #-}
-module Examples.FileHandle where
+{-# OPTIONS_GHC -i../.. #-}
+module Examples.RE.FileHandle where
 import Prelude hiding ((<>))
 import Future
 

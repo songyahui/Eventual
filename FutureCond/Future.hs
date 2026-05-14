@@ -381,44 +381,79 @@ type Addr = Int
 type Val  = Int
 type Heap = Map.Map Addr Val
 
+-- ── Presburger Arithmetic ─────────────────────────────────────────────────────
+-- Linear arithmetic over heap values.  Variables are heap addresses; ValAt a
+-- dereferences address a.  Only scalar multiplication (k * e) is allowed to
+-- keep expressions linear.
+
+data PExpr
+    = Lit Int           -- integer literal
+    | ValAt Addr        -- value stored at address: h[a]
+    | Add PExpr PExpr   -- e1 + e2
+    | Mul Int   PExpr   -- k * e  (scalar only, preserves linearity)
+    deriving (Eq)
+
+instance Show PExpr where
+    show (Lit n)     = show n
+    show (ValAt a)   = "h[" ++ show a ++ "]"
+    show (Add e1 e2) = "(" ++ show e1 ++ " + " ++ show e2 ++ ")"
+    show (Mul k e)   = show k ++ "*" ++ show e
+
+-- Derived expression smart constructors
+pNeg :: PExpr -> PExpr
+pNeg = Mul (-1)
+
+data PPred
+    = PTrue
+    | PLt  PExpr PExpr  -- e1 < e2
+    | PLe  PExpr PExpr  -- e1 ≤ e2
+    | PEq  PExpr PExpr  -- e1 = e2
+    | PGt  PExpr PExpr  -- e1 > e2
+    | PGe  PExpr PExpr  -- e1 ≥ e2
+    | PNot PPred
+    | PAnd PPred PPred
+    deriving (Eq)
+
+instance Show PPred where
+    show PTrue        = "true"
+    show (PLt  e1 e2) = show e1 ++ " < "  ++ show e2
+    show (PLe  e1 e2) = show e1 ++ " ≤ "  ++ show e2
+    show (PEq  e1 e2) = show e1 ++ " = "  ++ show e2
+    show (PGt  e1 e2) = show e1 ++ " > "  ++ show e2
+    show (PGe  e1 e2) = show e1 ++ " ≥ "  ++ show e2
+    show (PNot p)     = "¬(" ++ show p ++ ")"
+    show (PAnd p q)   = "(" ++ show p ++ " ∧ " ++ show q ++ ")"
+
 data SL
     = Emp              -- empty heap                  (identity for Sep)
-    | Top              -- any heap (universe)          (identity for Conj)
-    | Pure Bool        -- pure constraint              (heap-independent)
+    | Top              -- any heap (universe)         (identity for Conj)
+    | Pure PPred       -- pure predicate over heap values
     | Cell Addr Val    -- singleton: address l holds value v
     | SepStar SL SL    -- P * Q   separating conjunction
     | Conj SL SL       -- P ∧ Q   ordinary conjunction
     | Wand SL SL       -- P -* Q  magic wand (residual)
     deriving (Eq, Show)
 
--- ── Semantic interpretation ───────────────────────────────────────────────────
--- satisfies world heap predicate
--- The Wand case quantifies over sub-heaps of the supplied world, bounding
--- the search to a finite domain for decidable checking.
+normalizeSL :: SL -> SL
+normalizeSL s = case s of
 
-satisfies :: Heap -> Heap -> SL -> Bool
-satisfies _ h Emp        = Map.null h
-satisfies _ _ Top        = True
-satisfies _ _ (Pure b)   = b
-satisfies _ h (Cell l v) = h == Map.singleton l v
-satisfies w h (SepStar p q) = any split (subHeaps h)
-  where
-    split h1 = let h2 = Map.difference h h1
-               in  heapDisjoint h1 h2
-                && satisfies w h1 p
-                && satisfies w h2 q
-satisfies w h (Conj p q) = satisfies w h p && satisfies w h q
-satisfies w h (Wand p q) = all step (subHeaps w)
-  where
-    step h' = not (heapDisjoint h h' && satisfies w h' p)
-           || satisfies w (Map.union h h') q
+    SepStar p q -> case (normalizeSL p, normalizeSL q) of
+        (Emp, q')             -> q'           -- Emp * Q = Q
+        (p',  Emp)            -> p'           -- P * Emp = P
+        (p',  q')             -> SepStar p' q'
 
--- All sub-heaps of a heap (powerset of key-value pairs).
-subHeaps :: Heap -> [Heap]
-subHeaps = map Map.fromList . subsequences . Map.toList
+    Conj p q -> case (normalizeSL p, normalizeSL q) of
+        (Top, q')             -> q'           -- ⊤ ∧ Q = Q
+        (p',  Top)            -> p'           -- P ∧ ⊤ = P
+        (p',  q') | p' == q' -> p'           -- P ∧ P = P  (idempotent)
+        (p',  q')             -> Conj p' q'
 
-heapDisjoint :: Heap -> Heap -> Bool
-heapDisjoint h1 h2 = Set.disjoint (Map.keysSet h1) (Map.keysSet h2)
+    Wand p q -> case (normalizeSL p, normalizeSL q) of
+        (Emp, q')             -> q'           -- Emp -* Q = Q
+        (_,   Top)            -> Top          -- P -* ⊤ = ⊤
+        (p',  q')             -> Wand p' q'
+
+    _ -> s
 
 -- ── Composable instance ───────────────────────────────────────────────────────
 

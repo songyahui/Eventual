@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -i.. #-}
-module Examples.CryptoSession where
+{-# OPTIONS_GHC -i../.. #-}
+module Examples.RE.CryptoSession where
 import Prelude hiding ((<>))
 import Future
 

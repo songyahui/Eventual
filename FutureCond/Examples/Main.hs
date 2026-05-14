@@ -1,13 +1,16 @@
 {-# OPTIONS_GHC -i.. #-}
-import qualified Examples.UnitTest        as UnitTest
-import qualified Examples.Memory          as Memory
-import qualified Examples.FileHandle      as FileHandle
-import qualified Examples.Mutex           as Mutex
-import qualified Examples.Transaction     as Transaction
-import qualified Examples.CryptoSession   as CryptoSession
-import qualified Examples.NetworkProtocol as NetworkProtocol
-import qualified Examples.Capability      as Capability
-import qualified Examples.Sensor          as Sensor
+import qualified Examples.UnitTest           as UnitTest
+import qualified Examples.RE.Memory          as REMemory
+import qualified Examples.RE.FileHandle      as REFileHandle
+import qualified Examples.RE.Mutex           as REMutex
+import qualified Examples.RE.Transaction     as RETransaction
+import qualified Examples.RE.CryptoSession   as RECryptoSession
+import qualified Examples.RE.NetworkProtocol as RENetworkProtocol
+import qualified Examples.RE.Capability      as RECapability
+import qualified Examples.RE.Sensor          as RESensor
+import qualified Examples.SL.HeapMemory      as SLHeapMemory
+import qualified Examples.SL.BankAccount     as SLBankAccount
+import qualified Examples.SL.LinkedList      as SLLinkedList
 
 section :: String -> IO ()
 section title = putStrLn $ "\n── " ++ title ++ " " ++ replicate (50 - length title) '─'
@@ -17,26 +20,35 @@ main = do
     section "0. Unit Tests"
     UnitTest.main
 
-    section "1. Memory Management (malloc/free)"
-    Memory.main
+    section "RE 1. Memory Management (malloc/free)"
+    REMemory.main
 
-    section "2. File Handle Lifecycle"
-    FileHandle.main
+    section "RE 2. File Handle Lifecycle"
+    REFileHandle.main
 
-    section "3. Mutex / Lock Lifecycle"
-    Mutex.main
+    section "RE 3. Mutex / Lock Lifecycle"
+    REMutex.main
 
-    section "4. Database Transactions"
-    Transaction.main
+    section "RE 4. Database Transactions"
+    RETransaction.main
 
-    section "5. Cryptographic Sessions & Nonces"
-    CryptoSession.main
+    section "RE 5. Cryptographic Sessions & Nonces"
+    RECryptoSession.main
 
-    section "6. Network Protocol (TCP-like)"
-    NetworkProtocol.main
+    section "RE 6. Network Protocol (TCP-like)"
+    RENetworkProtocol.main
 
-    section "7. Capability / Token Lifecycle"
-    Capability.main
+    section "RE 7. Capability / Token Lifecycle"
+    RECapability.main
 
-    section "8. Sensor / Actuator (IoT)"
-    Sensor.main
+    section "RE 8. Sensor / Actuator (IoT)"
+    RESensor.main
+
+    section "SL 1. Heap Memory (alloc/free/read/write)"
+    SLHeapMemory.main
+
+    section "SL 2. Bank Account (Pure Presburger guards)"
+    SLBankAccount.main
+
+    section "SL 3. Linked List (SepStar ownership)"
+    SLLinkedList.main

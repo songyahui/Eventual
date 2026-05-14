@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -i.. #-}
-module Examples.NetworkProtocol where
+{-# OPTIONS_GHC -i../.. #-}
+module Examples.RE.NetworkProtocol where
 import Prelude hiding ((<>))
 import Future
 

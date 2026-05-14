@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -i.. #-}
-module Examples.Sensor where
+{-# OPTIONS_GHC -i../.. #-}
+module Examples.RE.Sensor where
 import Prelude hiding ((<>))
 import Future
 

@@ -1,5 +1,5 @@
-{-# OPTIONS_GHC -i.. #-}
-module Examples.Transaction where
+{-# OPTIONS_GHC -i../.. #-}
+module Examples.RE.Transaction where
 import Prelude hiding ((<>))
 import Future
 

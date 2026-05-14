@@ -880,6 +880,138 @@ test_effectful counter = do
     check counter "pre (e{post=a} >>= \\_ -> fe{pre=b}) = ∅   (a ≠ b; post does not cover pre fe)" $
         normalize (pre (e3 >>= \_ -> fe3)) == Bot
 
+-- ── Effectful SL ──────────────────────────────────────────────────────────────
+-- Mirrors test_effectful but with SL as the effect type.
+-- concatenation = SepStar, conjunction = Conj, empty = Emp, universe = Top,
+-- subtraction base cases: Emp\q = q,  Top\_ = Emp,  general = Wand p q.
+
+test_effectful_sl :: IORef Int -> IO ()
+test_effectful_sl counter = do
+    putStrLn "\n── Effectful SL ─────────────────────────────────────────────────────"
+
+    -- ── pre: post = Emp, nothing provided ───────────────────────────────────────
+    -- subtraction Emp (Cell 0 42) = Cell 0 42   (base case: Emp\q = q)
+    -- pre = Top /\ Cell 0 42 = Conj Top (Cell 0 42)
+    let e0  = Effectful { ret = (), pre = Top,       post = Emp,       future = Top }
+        fe0 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = Top }
+    check counter "pre (e{post=Emp} >>= fe{pre=Cell 0 42}) = Conj Top (Cell 0 42)   (nothing provided; full pre fe remains)" $
+        pre (e0 >>= \_ -> fe0) == Conj Top (Cell 0 42)
+
+    -- ── pre: post = Top, all preconditions discharged ───────────────────────────
+    -- subtraction Top (Cell 0 42) = Emp          (base case: Top\_ = Emp)
+    -- pre = Top /\ Emp = Conj Top Emp
+    let e1  = Effectful { ret = (), pre = Top,       post = Top,       future = Top }
+        fe1 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = Top }
+    check counter "pre (e{post=Top} >>= fe{pre=Cell 0 42}) = Conj Top Emp   (Top discharges any precondition)" $
+        pre (e1 >>= \_ -> fe1) == Conj Top Emp
+
+    -- ── post: SepStar combines disjoint heap ownership ──────────────────────────
+    -- e writes Cell 0 42, fe writes Cell 1 99 (disjoint addresses).
+    -- post combined = SepStar (Cell 0 42) (Cell 1 99)
+    let e2  = Effectful { ret = (), pre = Top,       post = Cell 0 42, future = Top }
+        fe2 = Effectful { ret = (), pre = Top,       post = Cell 1 99, future = Top }
+    check counter "post (write{0} >> write{1}) = SepStar (Cell 0 42) (Cell 1 99)   (disjoint ownership)" $
+        post (e2 >>= \_ -> fe2) == SepStar (Cell 0 42) (Cell 1 99)
+
+    -- ── future: obligation not discharged when post fe = Emp ────────────────────
+    -- e has future = Cell 0 42 (must eventually hold).
+    -- subtraction Emp (Cell 0 42) = Cell 0 42    (fe produced nothing toward it)
+    -- future combined = Cell 0 42 /\ Top = Conj (Cell 0 42) Top
+    let e3  = Effectful { ret = (), pre = Top,       post = Emp,       future = Cell 0 42 }
+        fe3 = Effectful { ret = (), pre = Top,       post = Emp,       future = Top }
+    check counter "future (e{future=Cell 0 42} >>= fe{post=Emp}) = Conj (Cell 0 42) Top   (obligation outstanding)" $
+        future (e3 >>= \_ -> fe3) == Conj (Cell 0 42) Top
+
+    -- ── future: obligation discharged when post fe = Top ────────────────────────
+    -- subtraction Top (Cell 0 42) = Emp          (Top covers everything)
+    -- future combined = Emp /\ Top = Conj Emp Top
+    let e4  = Effectful { ret = (), pre = Top,       post = Emp,       future = Cell 0 42 }
+        fe4 = Effectful { ret = (), pre = Top,       post = Top,       future = Top }
+    check counter "future (e{future=Cell 0 42} >>= fe{post=Top}) = Conj Emp Top   (obligation discharged)" $
+        future (e4 >>= \_ -> fe4) == Conj Emp Top
+
+    -- ── pre: Pure constraint propagates through bind ─────────────────────────────
+    -- fe requires h[0] > 5 AND spatial ownership of Cell 0 42.
+    -- post e = Emp → residual = full pre fe   (base case)
+    -- pre combined = Top /\ Conj (Pure _) (Cell 0 42)
+    let gtFive = (PGt (ValAt 0) (Lit 5))
+        e5  = Effectful { ret = (), pre = Top, post = Emp, future = Top }
+        fe5 = Effectful { ret = (), pre = Conj (Pure gtFive) (Cell 0 42), post = Emp, future = Top }
+    check counter "pre (e{post=Emp} >>= fe{pre=⌈h[0]>5⌉∧Cell 0 42}) = Conj Top (Conj (Pure _) (Cell 0 42))" $
+        pre (e5 >>= \_ -> fe5) == Conj Top (Conj (Pure gtFive) (Cell 0 42))
+
+-- ── normalizeSL ───────────────────────────────────────────────────────────────
+
+test_normalizeSL :: IORef Int -> IO ()
+test_normalizeSL counter = do
+    putStrLn "\n── normalizeSL ──────────────────────────────────────────────────────"
+
+    -- SepStar: Emp is unit
+    check counter "Emp * P = P" $
+        normalizeSL (SepStar Emp (Cell 0 42)) == Cell 0 42
+
+    check counter "P * Emp = P" $
+        normalizeSL (SepStar (Cell 0 42) Emp) == Cell 0 42
+
+    check counter "Emp * Emp = Emp" $
+        normalizeSL (SepStar Emp Emp) == Emp
+
+    -- SepStar: non-trivial terms are preserved
+    check counter "Cell 0 42 * Cell 1 99 unchanged" $
+        normalizeSL (SepStar (Cell 0 42) (Cell 1 99)) == SepStar (Cell 0 42) (Cell 1 99)
+
+    -- SepStar: recursive normalisation
+    check counter "Emp * (Emp * Cell 0 42) = Cell 0 42   (nested)" $
+        normalizeSL (SepStar Emp (SepStar Emp (Cell 0 42))) == Cell 0 42
+
+    -- Conj: Top is unit
+    check counter "⊤ ∧ P = P" $
+        normalizeSL (Conj Top (Cell 0 42)) == Cell 0 42
+
+    check counter "P ∧ ⊤ = P" $
+        normalizeSL (Conj (Cell 0 42) Top) == Cell 0 42
+
+    check counter "⊤ ∧ ⊤ = ⊤" $
+        normalizeSL (Conj Top Top) == Top
+
+    -- Conj: idempotent
+    check counter "P ∧ P = P" $
+        normalizeSL (Conj (Cell 0 42) (Cell 0 42)) == Cell 0 42
+
+    check counter "Emp ∧ Emp = Emp" $
+        normalizeSL (Conj Emp Emp) == Emp
+
+    -- Conj: recursive normalisation
+    check counter "⊤ ∧ (⊤ ∧ Cell 0 42) = Cell 0 42   (nested)" $
+        normalizeSL (Conj Top (Conj Top (Cell 0 42))) == Cell 0 42
+
+    -- Wand: Emp -* Q = Q
+    check counter "Emp -* Q = Q" $
+        normalizeSL (Wand Emp (Cell 0 42)) == Cell 0 42
+
+    -- Wand: P -* ⊤ = ⊤
+    check counter "P -* ⊤ = ⊤" $
+        normalizeSL (Wand (Cell 0 42) Top) == Top
+
+    check counter "Emp -* ⊤ = ⊤   (both rules apply; Emp rule fires first)" $
+        normalizeSL (Wand Emp Top) == Top
+
+    -- Wand: non-trivial terms are preserved
+    check counter "Cell 0 42 -* Cell 1 99 unchanged" $
+        normalizeSL (Wand (Cell 0 42) (Cell 1 99)) == Wand (Cell 0 42) (Cell 1 99)
+
+    -- Wand: recursive normalisation
+    check counter "(Emp * Cell 0 42) -* ⊤ = ⊤   (inner SepStar normalised first)" $
+        normalizeSL (Wand (SepStar Emp (Cell 0 42)) Top) == Top
+
+    -- Pure: passes through unchanged
+    check counter "Pure p unchanged" $
+        normalizeSL (Pure (PGt (ValAt 0) (Lit 5))) == Pure (PGt (ValAt 0) (Lit 5))
+
+    -- Pure with Conj: Top stripped
+    check counter "⊤ ∧ Pure p = Pure p" $
+        normalizeSL (Conj Top (Pure (PEq (ValAt 0) (Lit 0)))) == Pure (PEq (ValAt 0) (Lit 0))
+
 -- ── Main ──────────────────────────────────────────────────────────────────────
 
 main :: IO ()
@@ -895,5 +1027,7 @@ main = do
     test_reSubtraction counter
     test_effectful     counter
     test_ltl_to_re     counter
+    test_effectful_sl  counter
+    test_normalizeSL   counter
     n <- readIORef counter
     putStrLn $ "\n=== All " ++ show n ++ " assertions passed =================================="

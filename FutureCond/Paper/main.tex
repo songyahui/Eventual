@@ -50,7 +50,10 @@
 
 %% --- Math macros ---------------------------------------------------------
 \newcommand{\RE}{\mathsf{RE}}
+\newcommand{\SL}{\mathsf{SL}}
 \newcommand{\Eff}{\mathsf{Effectful}}
+\newcommand{\sep}{*}
+\newcommand{\wand}{-\!\!*}
 \newcommand{\pre}{\mathit{pre}}
 \newcommand{\post}{\mathit{post}}
 \newcommand{\fut}{\mathit{future}}
@@ -79,26 +82,25 @@
 
 \begin{abstract}
 We present \emph{FutureCond}, a Haskell library that extends the classical
-pre/post-condition contract model with \emph{future conditions}: regular
-expressions over events that specify what the remainder of a program must
-eventually do.
+pre/post-condition contract model with \emph{future conditions}: specifications
+that constrain what the remainder of a program must eventually do.
 Future conditions are carried as a first-class field in the
 \lstinline{Effectful} monad alongside pre- and post-conditions.
 When operations are composed via monadic bind, future conditions are
-propagated and updated automatically using a
-Brzozowski-derivative-based subtraction operator, and preconditions
-accumulate in the Hoare-rule style: the residual of the continuation's
-precondition not yet discharged by the current computation's postcondition.
-A future condition that normalises to $\univ$ (the universal language)
-certifies that all temporal obligations have been discharged; a
-precondition normalising to $\varnothing$ flags a violation.
-The regular-expression language is extended with a complement operator
-whose derivative commutes algebraically with negation---no automaton
-construction is required.
-We demonstrate the approach across three domains---memory management,
-mutexes, and database transactions---showing
-that resource-lifecycle and ordering properties invisible to
-pre/post reasoning become statically visible as residual annotations.
+propagated and updated automatically using a subtraction operator,
+and preconditions accumulate in the Hoare-rule style.
+The design is parameterised over a \lstinline{Composable} algebra, admitting
+two distinct instances.
+In the \emph{regular-expression} instance, future conditions are extended REs
+with complement---whose derivative commutes algebraically with negation,
+avoiding automaton construction---and subtraction is the Brzozowski quotient.
+In the \emph{separation-logic} instance, future conditions are heap predicates
+with separating conjunction ($*$), ordinary conjunction ($\wedge$),
+magic wand ($-*$), and Presburger arithmetic pure constraints;
+subtraction is the magic wand.
+Both instances reuse the same monadic bind formula, demonstrating that
+the framework captures two fundamentally different notions of resource
+obligation within a single algebraic interface.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
@@ -188,9 +190,16 @@ postcondition.
         subtraction---the core of future-condition propagation
         (\S\ref{sec:re})---and show that LTL\textsubscript{f} operators
         embed directly as RE terms (\S\ref{sec:ltl}).
-  \item We demonstrate the approach on three use cases
-        (\S\ref{sec:examples}), showing that both resource leaks and
-        precondition violations surface as non-trivial residual annotations.
+  \item We provide a second, independent instantiation to separation-logic
+        heap predicates (\S\ref{sec:sl-instance}), where separating
+        conjunction plays the role of sequential composition, magic wand
+        plays the role of subtraction, and Presburger arithmetic provides
+        pure constraints. This demonstrates the generality of the
+        \lstinline{Composable} interface beyond trace-based specifications.
+  \item We demonstrate the approach on six use cases across both instances
+        (\S\ref{sec:examples}), showing that resource leaks, ordering
+        violations, and heap-ownership errors all surface as non-trivial
+        residual annotations.
 \end{enumerate}
 
 %% =========================================================================
@@ -678,11 +687,166 @@ $\varnothing^* = \varepsilon$, $\varepsilon^* = \varepsilon$ & \lstinline{Star} 
 \end{center}
 
 %% =========================================================================
+\section{The SL Instance}
+\label{sec:sl-instance}
+%% =========================================================================
+
+The \lstinline{Composable} typeclass is not tied to trace-based specifications.
+We demonstrate its generality with a second instance over
+\emph{separation-logic heap predicates}, where future conditions describe
+what heap state must hold when the computation completes.
+
+\subsection{Structural Parallel with RE}
+
+Table~\ref{tab:sl-re-parallel} shows the role each SL construct plays in
+the \lstinline{Composable} interface.
+
+\begin{table}[h]
+\caption{Structural parallel between the RE and SL instances of
+         \lstinline{Composable}.}
+\label{tab:sl-re-parallel}
+\begin{tabular}{lll}
+\toprule
+\lstinline{Composable} operation & RE instance & SL instance \\
+\midrule
+\lstinline{concatenation} & $r_1 \cdot r_2$ (sequence) & $P \sep Q$ (separating conjunction) \\
+\lstinline{conjunction}   & $r_1 \wedge r_2$ (intersection) & $P \wedge Q$ (ordinary conjunction) \\
+\lstinline{empty}         & $\varepsilon$ (empty trace) & $\mathbf{emp}$ (empty heap) \\
+\lstinline{universe}      & $\univ$ ($\Sigma^*$) & $\top$ (any heap) \\
+\lstinline{subtraction}   & Brzozowski quotient & $P \wand Q$ (magic wand) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+The bind formula is unchanged:
+$\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e) \wedge (\post(e) \wand \pre(e_2))$
+and
+$\fut(e \mathbin{>\!\!>\!\!=} f) = (\post(e_2) \wand \fut(e)) \wedge \fut(e_2)$.
+Here $\wand$ is the magic wand (separating implication):
+$P \wand Q$ holds of heap $h$ iff for every heap $h'$ disjoint from $h$
+satisfying $P$, the combined heap $h \cup h'$ satisfies $Q$.
+
+\subsection{The SL Predicate Type}
+
+\begin{lstlisting}
+data SL
+    = Emp              -- empty heap         (identity for SepStar)
+    | Top              -- any heap           (identity for Conj)
+    | Pure PPred       -- pure Presburger constraint (heap-independent)
+    | Cell Addr Val    -- singleton: address a holds value v
+    | SepStar SL SL    -- P * Q  separating conjunction
+    | Conj SL SL       -- P /\ Q ordinary conjunction
+    | Wand SL SL       -- P -* Q magic wand (residual)
+    deriving (Eq, Show)
+\end{lstlisting}
+
+\subsection{Separating vs.\ Ordinary Conjunction}
+
+The two conjunction-like constructors have distinct semantics.
+$\mathtt{SepStar}\;P\;Q$ holds of heap $h$ iff $h$ can be \emph{split}
+into disjoint parts $h_1 \uplus h_2$ with $P(h_1)$ and $Q(h_2)$;
+it is the standard separating conjunction of ownership.
+$\mathtt{Conj}\;P\;Q$ holds of $h$ iff the \emph{same} heap satisfies
+both $P$ and $Q$ simultaneously.
+
+Without pure constraints, \lstinline{Conj} on purely spatial predicates
+is either trivial or unsatisfiable:
+$\mathtt{Conj}\;\mathbf{top}\;P = P$, and
+$\mathtt{Conj}\;(\mathtt{Cell}\;l_1\;v_1)\;(\mathtt{Cell}\;l_2\;v_2) =
+\mathbf{false}$ for distinct addresses $l_1 \neq l_2$.
+The constructor becomes genuinely useful when one side is a \emph{pure
+constraint}---a predicate that holds independently of the heap:
+\[
+  \lceil\phi\rceil \wedge (\ell \mapsto v)
+  \qquad\text{(pure condition $\phi$ and spatial ownership $\ell \mapsto v$)}
+\]
+
+\subsection{Presburger Arithmetic for Pure Constraints}
+
+Pure constraints are modelled by a small Presburger arithmetic language
+over heap values.
+Expressions are linear combinations of heap dereferences and literals;
+predicates are comparisons and propositional connectives.
+
+\begin{lstlisting}
+data PExpr
+    = Lit Int         -- integer literal
+    | ValAt Addr      -- h[a]: value at address a
+    | Add PExpr PExpr -- e1 + e2
+    | Mul Int PExpr   -- k * e  (scalar only, keeps linearity)
+
+data PPred
+    = PTrue
+    | PLt PExpr PExpr  | PLe PExpr PExpr  | PEq PExpr PExpr
+    | PGt PExpr PExpr  | PGe PExpr PExpr
+    | PNot PPred       | PAnd PPred PPred
+\end{lstlisting}
+
+\noindent
+Derived connectives ($\mathtt{pFalse}$, $\mathtt{pOr}$) are smart
+constructors built from the primitives via De Morgan laws.
+\lstinline{Pure p} in an \lstinline{SL} predicate holds of any heap
+for which \lstinline{evalPPred h p} is true; it is heap-independent in
+the sense that it does not enforce any ownership of cells.
+
+\paragraph{Pure syntax.}
+In standard SL notation, $\lceil\phi\rceil$ (pronounced ``pure $\phi$'')
+means $\phi$ holds \emph{and} the heap is empty.
+The smart constructor \lstinline{pureSL} realises this:
+\lstinline{pureSL PTrue = Emp} (trivially pure) and
+\lstinline{pureSL p = Conj (Pure p) Emp} for non-trivial $p$.
+
+\subsection{The \lstinline{Composable SL} Instance}
+
+\begin{lstlisting}
+instance Composable SL where
+    concatenation = SepStar
+    conjunction   = Conj
+    empty         = Emp
+    universe      = Top
+
+    subtraction Emp q = q           -- emp -* Q = Q
+    subtraction Top _ = Emp         -- Top trivially covers any pre
+    subtraction p   q = Wand p q    -- general: symbolic wand
+\end{lstlisting}
+
+\noindent
+The two base cases mirror those of the RE instance:
+$\varepsilon \setminus r = r$ becomes $\mathbf{emp} \wand Q = Q$
+(providing no heap leaves the obligation unchanged), and
+$\univ \setminus r = \varepsilon$ becomes $\top \wand Q = \mathbf{emp}$
+(a $\top$ postcondition covers any precondition).
+The general case records the wand symbolically for later evaluation
+or normalisation.
+
+\subsection{Normalisation}
+
+\lstinline{normalizeSL} applies the standard SL algebraic identities:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Law & Constructor \\
+\midrule
+$\mathbf{emp} \sep Q = Q$, $P \sep \mathbf{emp} = P$ & \lstinline{SepStar} \\
+$\top \wedge Q = Q$, $P \wedge \top = P$              & \lstinline{Conj} \\
+$P \wedge P = P$ (idempotent)                          & \lstinline{Conj} \\
+$\mathbf{emp} \wand Q = Q$                            & \lstinline{Wand} \\
+$P \wand \top = \top$                                  & \lstinline{Wand} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+All rules apply recursively bottom-up.
+
+%% =========================================================================
 \section{Examples}
 \label{sec:examples}
 %% =========================================================================
 
-We demonstrate FutureCond across three domains.
+We demonstrate FutureCond across six domains, three per instance.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
 composes them in the \lstinline{Effectful} monad, and inspects the
@@ -751,15 +915,12 @@ A program ending with neither \lstinline{commit} nor \lstinline{rollback}
 retains the full disjunction as its residual future, naming both
 outstanding alternatives.
 
-\paragraph{Summary.}
-Table~\ref{tab:examples} summarises the three domains.
-Each bad instance surfaces as a non-trivial residual annotation:
-a leaked resource yields a non-$\univ$ \lstinline{future},
-and a missing precondition collapses \lstinline{pre} to $\varnothing$.
+\paragraph{RE summary.}
+Table~\ref{tab:examples-re} summarises the three RE domains.
 
 \begin{table}[h]
-\caption{Example programs, bad instances, and residual annotations.}
-\label{tab:examples}
+\caption{RE instance: bad programs and residual annotations.}
+\label{tab:examples-re}
 \begin{tabular}{llll}
 \toprule
 Domain & Bad program & Residual \lstinline{future} & Residual \lstinline{pre} \\
@@ -769,6 +930,129 @@ Memory      & \lstinline{free} without malloc   & $\univ$ & $\varnothing$ \\
 Mutex       & \lstinline{acquire 1} leaked      & \lstinline{finally(release(1))} & $\univ$ \\
 Mutex       & release without acquire           & $\univ$ & $\varnothing$ \\
 Transaction & no commit/rollback                & \lstinline{finally(commit)$\vee$finally(rollback)} & $\univ$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Heap Memory (SL Instance)}
+\label{sec:ex-heap}
+
+The heap-memory example mirrors the RE memory example but uses heap
+ownership rather than event traces.
+
+\begin{lstlisting}
+alloc :: Addr -> Val -> Effectful SL ()
+alloc a v = Effectful
+  { ret = (), pre = Top, post = Cell a v, future = Top }
+
+free :: Addr -> Val -> Effectful SL ()
+free a v = Effectful
+  { ret = (), pre = Cell a v, post = Emp, future = Top }
+
+writeCell :: Addr -> Val -> Val -> Effectful SL ()
+writeCell a old new = Effectful
+  { ret = (), pre = Cell a old, post = Cell a new, future = Top }
+\end{lstlisting}
+
+\noindent
+\textbf{Good: \lstinline{alloc 0 1 >> alloc 1 2}.}
+The combined \lstinline{post} is
+$\mathtt{SepStar}\;(\mathtt{Cell}\;0\;1)\;(\mathtt{Cell}\;1\;2)$:
+two disjoint ownerships composed by separating conjunction,
+correctly reflecting that the two cells reside at distinct addresses.
+
+\noindent
+\textbf{Bad: leak (\lstinline{alloc 0 1 >> alloc 1 2 >> free 0 1}).}
+After freeing only address~0, the \lstinline{post} retains
+$\mathtt{Cell}\;1\;2$, naming the unreleased ownership.
+
+\noindent
+\textbf{Bad: read without ownership (\lstinline{readCell 0 42}).}
+The \lstinline{pre} of the bare read is $\mathtt{Cell}\;0\;42$,
+which is never discharged, flagging the missing ownership.
+
+\subsection{Bank Account with Presburger Guards (SL Instance)}
+\label{sec:ex-bank}
+
+The bank account example demonstrates \lstinline{Pure} Presburger
+constraints inside \lstinline{Conj}.
+
+\begin{lstlisting}
+withdraw :: Addr -> Val -> Val -> Effectful SL ()
+withdraw a old amount = Effectful
+  { ret = ()
+  , pre  = Conj (Pure (PGe (ValAt a) (Lit amount))) (Cell a old)
+  , post = Cell a (old - amount)
+  , future = Top }
+
+closeAccount :: Addr -> Val -> Effectful SL ()
+closeAccount a bal = Effectful
+  { ret = ()
+  , pre  = Conj (Pure (PEq (ValAt a) (Lit 0))) (Cell a bal)
+  , post = Emp, future = Top }
+\end{lstlisting}
+
+\noindent
+The precondition of \lstinline{withdraw} is a \lstinline{Conj} of a pure
+Presburger guard ($h[a] \geq \mathtt{amount}$) and a spatial ownership
+claim ($\mathtt{Cell}\;a\;\mathtt{old}$).
+Without the \lstinline{Pure} constructor, \lstinline{Conj} of two purely
+spatial predicates would be either trivial or unsatisfiable (see
+\S\ref{sec:sl-instance}); the combination of \lstinline{Pure} and
+\lstinline{Conj} is what makes value-dependent preconditions expressible.
+
+\noindent
+\textbf{Bad: overdraft.}
+After \lstinline{deposit 0 0 100}, the account holds 100.
+\lstinline{withdraw 0 100 150} carries
+$\pre = \mathtt{Conj}\;(\mathtt{Pure}\;(h[0] \geq 150))\;(\mathtt{Cell}\;0\;100)$.
+Since $100 < 150$, the pure guard is not satisfiable, and the residual
+\lstinline{pre} of the composed program retains this unsatisfiable constraint.
+
+\subsection{Linked List (SL Instance)}
+\label{sec:ex-list}
+
+A singly-linked-list node occupies two consecutive cells:
+address $a$ holds the payload value and address $a{+}1$ holds the next pointer.
+
+\begin{lstlisting}
+allocNode :: Addr -> Val -> Val -> Effectful SL ()
+allocNode a val next = Effectful
+  { ret = (), pre = Top
+  , post = SepStar (Cell a val) (Cell (a+1) next)
+  , future = Top }
+\end{lstlisting}
+
+\noindent
+\textbf{Two-node list (\lstinline{allocNode 0 10 2 >> allocNode 2 20 (-1)}).}
+The combined \lstinline{post} is a four-cell \lstinline{SepStar}:
+\[
+  (\mathtt{Cell}\;0\;10 \sep \mathtt{Cell}\;1\;2)
+  \sep
+  (\mathtt{Cell}\;2\;20 \sep \mathtt{Cell}\;3\;{-1})
+\]
+This is the canonical representation of a two-node list in separation logic:
+all four cells are disjointly owned, and the structure of \lstinline{SepStar}
+mirrors the structure of the list.
+
+\paragraph{SL summary.}
+Table~\ref{tab:examples-sl} summarises the three SL domains.
+The key difference from the RE instance is that residual annotations are
+heap predicates rather than traces: a leaked cell appears in \lstinline{post},
+an unsatisfiable ownership constraint in \lstinline{pre}.
+
+\begin{table}[h]
+\caption{SL instance: bad programs and residual annotations.}
+\label{tab:examples-sl}
+\begin{tabular}{llll}
+\toprule
+Domain & Bad program & Residual \lstinline{post} & Residual \lstinline{pre} \\
+\midrule
+Heap memory  & \lstinline{Cell 1 2} not freed      & $\mathtt{Cell}\;1\;2$ (leaked) & $\top$ \\
+Heap memory  & read without ownership               & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;42$ \\
+Bank account & withdraw with insufficient balance   & $\mathtt{Cell}\;0\;{-50}$ & Conj of unsatisfiable guard \\
+Bank account & close with non-zero balance          & $\mathbf{emp}$ & Conj of unsatisfied $h[0]=0$ \\
+Linked list  & read node without ownership          & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;99$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -933,22 +1217,30 @@ and removing the closed-world restriction.
 %% =========================================================================
 
 We have presented FutureCond, a Haskell library that extends effectful
-computations with future conditions---extended regular expressions with
-complement that specify temporal obligations on the remainder of a program.
-Two design choices make the approach work.
-First, complement is integrated into the RE language with the single
-algebraic law $\partial_a(\neg r) = \neg(\partial_a r)$, making the
-universal language $\univ = \neg\varnothing$ a natural identity for
-discharged obligations and enabling globally assertions---all without
-automaton construction.
-Second, the bind operator propagates preconditions in the Hoare-rule style:
-the residual $\pre(e_2)\setminus\post(e)$ records which precondition
-obligations of the continuation are not yet discharged.
+computations with future conditions---specifications that constrain what
+the remainder of a program must do.
+Three design choices make the approach work.
+First, the \lstinline{Composable} typeclass abstracts the specification
+algebra, admitting two independent instances: extended regular expressions
+with complement (using Brzozowski quotient as subtraction) and
+separation-logic heap predicates (using magic wand as subtraction).
+Both reuse the same monadic bind formula, showing that the framework
+captures trace-based temporal obligations \emph{and} heap-ownership
+obligations within a single interface.
+Second, the RE instance integrates complement with the single algebraic
+law $\partial_a(\neg r) = \neg(\partial_a r)$, enabling globally
+assertions and LTL\textsubscript{f} embedding---all without automaton
+construction.
+Third, the SL instance adds Presburger arithmetic pure constraints via
+\lstinline{Pure PPred} inside \lstinline{Conj}, making value-dependent
+preconditions such as ``balance $\geq$ amount'' expressible as first-class
+heap predicates.
 The resulting system is lightweight (a single module, no language
 extensions), composable (a standard \lstinline{Monad} instance), and
-doubly informative: a residual \lstinline{future} $\neq \univ$ names
-unmet obligations, and a residual \lstinline{pre} $= \varnothing$ flags
-a precondition violation.
+doubly informative: a residual \lstinline{future} $\neq \univ$ (or $\top$
+in the SL instance) names unmet obligations, and a residual
+\lstinline{pre} $= \varnothing$ (or an unsatisfiable guard) flags a
+precondition violation.
 
 %% =========================================================================
 \bibliographystyle{ACM-Reference-Format}

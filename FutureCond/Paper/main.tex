@@ -501,7 +501,7 @@ Let $e_2 = f(\ret(e))$.
 \begin{lstlisting}
 e >>= f = let fe = f (ret e) in Effectful
   { ret    = ret fe
-  , pre    = pre e <> (pre fe \\ post e)
+  , pre    = pre e /\ (post e \\ pre fe)
   , post   = post e <> post fe
   , future = (post fe \\ future e) /\ future fe
   }
@@ -524,28 +524,47 @@ postcondition satisfies, then intersects the residual with $e_2$'s
 own future obligation.
 When $\fut$ normalises to $\univ$, all obligations are discharged.
 
-\paragraph{Precondition (Hoare-rule style).}
+\paragraph{Precondition.}
 
 \begin{equation}
   \pre(e \mathbin{>\!\!>\!\!=} f)
   \;=\;
-  \pre(e) \mathbin{<>} \bigl(\pre(e_2) \setminus \post(e)\bigr)
+  \pre(e) \;\wedge\; \bigl(\post(e) \setminus \pre(e_2)\bigr)
   \label{eq:pre-bind}
 \end{equation}
 
-The term $\pre(e_2) \setminus \post(e)$ is the \emph{residual
-precondition}: the part of $e_2$'s precondition not discharged by
-$e$'s postcondition.
-When $\post(e)$ fully satisfies $\pre(e_2)$---i.e.\ the quotient
-is $\varepsilon$---the composed precondition reduces to just
-$\pre(e)$, mirroring the Hoare rule
-$\{P\}\,C_1\,\{Q\}$, $Q\vdash P'$, $\{P'\}\,C_2\,\{R\}$
-$\;\Rightarrow\; \{P\}\,C_1;\,C_2\,\{R\}$.
-When $\post(e)$ does not satisfy $\pre(e_2)$, the residual is $\varnothing$
-and the composed $\pre$ becomes $\varnothing$, flagging the violation.
+The term $\post(e) \setminus \pre(e_2)$ is the \emph{residual
+precondition}: the part of $e_2$'s precondition not already discharged
+by $e$'s postcondition.
+The combination uses $\wedge$ (intersection): both $\pre(e)$ and the
+residual must hold \emph{simultaneously} in the same input history.
 
-As a special case, $\univ \setminus r = \varepsilon$ for any $r$: a
-universal precondition ($\pre = \univ$) is trivially discharged.
+When $\post(e)$ does not cover $\pre(e_2)$ at all, the residual is
+$\varnothing$, and $\pre(e) \wedge \varnothing = \varnothing$,
+flagging a precondition violation.
+
+When $\post(e)$ \emph{exactly} satisfies $\pre(e_2)$, the residual is
+$\varepsilon$, and the combined precondition becomes
+$\pre(e) \wedge \varepsilon$.
+The outcome depends on whether $\varepsilon \in L(\pre(e))$:
+\begin{itemize}
+  \item $\pre(e) = \univ$ (nullable, $\varepsilon \in L(\univ)$):
+        $\univ \wedge \varepsilon = \varepsilon$.
+        The composed computation requires an empty input history---it
+        can be called at the very start, once the internal
+        $\post(e) \vdash \pre(e_2)$ handshake is satisfied within the
+        composition.
+  \item $\pre(e) = \{a\}$ (non-nullable, $\varepsilon \notin L(\{a\})$):
+        $\{a\} \wedge \varepsilon = \varnothing$.
+        The history cannot simultaneously be ``contains event $a$''
+        and ``is empty''; the requirements are contradictory and
+        $\pre$ correctly collapses to $\varnothing$.
+\end{itemize}
+
+This behaviour is intentional.
+The $\wedge$ operator records both constraints faithfully; when they
+are incompatible the intersection is empty, immediately flagging the
+conflict rather than silently discarding one side.
 
 \subsection{Intuition via an Example}
 
@@ -575,9 +594,12 @@ Binding \lstinline{free 1} (with $\pre = \mathtt{malloc}(1)$, $\post =
 \mathtt{free}(1)$):
 
 \textit{Precondition:}
-$\pre(\mathtt{free}(1)) \setminus \post(\mathtt{malloc}(1))
+$\post(\mathtt{malloc}(1)) \setminus \pre(\mathtt{free}(1))
 = \mathtt{malloc}(1) \setminus \mathtt{malloc}(1) = \varepsilon$.
-So $\pre = \univ \mathbin{<>} \varepsilon = \univ$.\ \checkmark
+So $\pre = \univ \wedge \varepsilon = \varepsilon$.\ \checkmark
+($\univ$ is nullable, so $\univ \wedge \varepsilon = \varepsilon$:
+the composed program requires an empty history, i.e.\ can be called
+at the very start.)
 
 \textit{Future:}
 $\mathtt{free}(1) \setminus \finally{\mathtt{free}(1)} = \univ$.
@@ -799,13 +821,18 @@ $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark
 and the distributivity of \lstinline{\\} over \lstinline{/\\}.
 
 \paragraph{Precondition.}
-The \lstinline{pre} field satisfies the Hoare-rule property: when
-$\post(e) \vdash \pre(e_2)$ (i.e.\ the quotient
-$\pre(e_2)\setminus\post(e) = \varepsilon$), equation~\eqref{eq:pre-bind}
-gives $\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e)$, matching the classical
-Hoare rule.
-In general, the residual $\pre(e_2)\setminus\post(e)$ records precisely
-which precondition obligations of the continuation remain unmet.
+The \lstinline{pre} field propagates constraints via $\wedge$ (intersection).
+When $\post(e)$ fully covers $\pre(e_2)$---i.e.\
+$\post(e) \setminus \pre(e_2) = \varepsilon$---equation~\eqref{eq:pre-bind}
+gives $\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e) \wedge \varepsilon$.
+If $\pre(e) = \univ$ (the common case for pure computations) this reduces
+to $\varepsilon$, meaning the composed computation can run from an empty
+start.
+If $\pre(e)$ is non-nullable---e.g.\ $\pre(e) = \{a\}$---the intersection
+$\{a\} \wedge \varepsilon = \varnothing$ flags a contradiction: no history
+can satisfy both constraints simultaneously.
+In general, the residual $\post(e) \setminus \pre(e_2)$ records
+precisely which precondition obligations of the continuation remain unmet.
 
 %% =========================================================================
 \section{Related Work}

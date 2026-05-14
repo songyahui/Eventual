@@ -828,6 +828,58 @@ test_ltl_to_re counter = do
     check counter "word [b, b, b] ∉ ⟦F a⟧" $
         not (matches reFinallyA [b, b, b])
 
+-- ── Effectful monad: pre field ────────────────────────────────────────────────
+-- The combined precondition uses /\ (intersection), not <> (concatenation):
+--
+--   pre (e >>= f) = pre e /\ (post e \\ pre fe)
+--
+-- /\ requires BOTH constraints to hold simultaneously in the same history.
+-- When the residual (post e \\ pre fe) = ε, the outcome depends on whether
+-- pre e is nullable (i.e. whether ε ∈ L(pre e)):
+--
+--   pre e = Σ*    (nullable):  Σ* /\ ε  = ε    (can run from empty start)
+--   pre e = a     (non-nullable): {a} /\ ε = ∅  (impossible: history ≠ ε)
+--
+-- The second case is the key insight: even though post e perfectly covers
+-- pre fe, the conjunction {a} ∩ {ε} = ∅ correctly flags the contradiction
+-- — no history can simultaneously contain event a AND be empty.
+
+test_effectful :: IORef Int -> IO ()
+test_effectful counter = do
+    putStrLn "\n── Effectful: pre /\\ (post \\\\ pre) ────────────────────────────────"
+
+    -- post e = ε (produces nothing): residual = ε \\ pre fe = pre fe (base case).
+    -- pre = universe /\ pre fe = pre fe  (universe is identity for /\).
+    let e0  = Effectful { ret = (), pre = universe,  post = empty,    future = universe }
+        fe0 = Effectful { ret = (), pre = Single a,  post = empty,    future = universe }
+    check counter "pre (e{post=ε} >>= \\_ -> fe{pre=a}) = a   (nothing produced; full pre fe remains)" $
+        normalize (pre (e0 >>= \_ -> fe0)) == Single a
+
+    -- post e = Single a, pre fe = Single a: post exactly covers pre fe.
+    -- residual = a \\ a = ε.
+    -- pre = universe /\ ε = ε   (isTop universe → right side = ε).
+    let e1  = Effectful { ret = (), pre = universe,  post = Single a, future = universe }
+        fe1 = Effectful { ret = (), pre = Single a,  post = empty,    future = universe }
+    check counter "pre (e{pre=Σ*,post=a} >>= \\_ -> fe{pre=a}) = ε   (Σ* /\\ ε = ε)" $
+        normalize (pre (e1 >>= \_ -> fe1)) == Epsilon
+
+    -- pre e = Single a, post e = Single b, pre fe = Single b:
+    -- residual = b \\ b = ε.
+    -- pre = Single a /\ ε = And (Single a) Epsilon.
+    -- nullable (Single a) = False  →  {a} ∩ {ε} = ∅ = Bot.
+    -- Correct: the history cannot simultaneously be "contains a" and "is empty".
+    let e2  = Effectful { ret = (), pre = Single a,  post = Single b, future = universe }
+        fe2 = Effectful { ret = (), pre = Single b,  post = empty,    future = universe }
+    check counter "pre (e{pre=a,post=b} >>= \\_ -> fe{pre=b}) = ∅   ({a} /\\ ε = ∅; contradictory constraints)" $
+        normalize (pre (e2 >>= \_ -> fe2)) == Bot
+
+    -- post e = Single a, pre fe = Single b (a ≠ b): residual = a \\ b = ∅.
+    -- pre = universe /\ ∅ = ∅  (Bot absorbs).
+    let e3  = Effectful { ret = (), pre = universe,  post = Single a, future = universe }
+        fe3 = Effectful { ret = (), pre = Single b,  post = empty,    future = universe }
+    check counter "pre (e{post=a} >>= \\_ -> fe{pre=b}) = ∅   (a ≠ b; post does not cover pre fe)" $
+        normalize (pre (e3 >>= \_ -> fe3)) == Bot
+
 -- ── Main ──────────────────────────────────────────────────────────────────────
 
 main :: IO ()
@@ -841,6 +893,7 @@ main = do
     test_first         counter
     test_normalize     counter
     test_reSubtraction counter
+    test_effectful     counter
     test_ltl_to_re     counter
     n <- readIORef counter
     putStrLn $ "\n=== All " ++ show n ++ " assertions passed =================================="

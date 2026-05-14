@@ -365,12 +365,11 @@ instance Composable eff => Monad (Effectful eff) where
         -- Traditional precondition: pre of e, plus the residual of pre fe
         -- not covered by post e.  Mirrors the Hoare rule:
         --   {P} e {Q},  Q ⊢ P'  ⊢  {P} e >>= f {R}
-        -- When post e fully satisfies pre fe, pre fe \\ post e = ε.
+        -- When post e fully satisfies pre fe, post e \\ pre fe = ε.
         , pre    = pre e /\ (post e \\ pre fe)
         , post   = post e <> post fe
         , future = (post fe \\ future e) /\ future fe
         }
-
 
 -- ── Separation Logic ──────────────────────────────────────────────────────────
 -- Symbolic separation-logic predicates over integer-addressed heaps.
@@ -385,8 +384,9 @@ type Heap = Map.Map Addr Val
 data SL
     = Emp              -- empty heap                  (identity for Sep)
     | Top              -- any heap (universe)          (identity for Conj)
+    | Pure Bool        -- pure constraint              (heap-independent)
     | Cell Addr Val    -- singleton: address l holds value v
-    | SepStar SL SL       -- P * Q   separating conjunction
+    | SepStar SL SL    -- P * Q   separating conjunction
     | Conj SL SL       -- P ∧ Q   ordinary conjunction
     | Wand SL SL       -- P -* Q  magic wand (residual)
     deriving (Eq, Show)
@@ -399,6 +399,7 @@ data SL
 satisfies :: Heap -> Heap -> SL -> Bool
 satisfies _ h Emp        = Map.null h
 satisfies _ _ Top        = True
+satisfies _ _ (Pure b)   = b
 satisfies _ h (Cell l v) = h == Map.singleton l v
 satisfies w h (SepStar p q) = any split (subHeaps h)
   where

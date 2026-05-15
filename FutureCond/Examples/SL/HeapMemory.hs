@@ -15,7 +15,7 @@ alloc addr val = Effectful
     { ret    = ()
     , pre    = Top
     , post   = Cell addr val
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- free addr val: releases ownership of a cell.
@@ -26,7 +26,7 @@ free addr val = Effectful
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- readCell addr val: borrows a cell for reading; produces no new ownership.
@@ -37,7 +37,7 @@ readCell addr val = Effectful
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- writeCell addr old new: overwrites a cell.
@@ -48,7 +48,7 @@ writeCell addr old new = Effectful
     { ret    = ()
     , pre    = Cell addr old
     , post   = Cell addr new
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalizeSL (pre    prog))
     putStrLn $ "Post:   " ++ show (normalizeSL (post   prog))
-    putStrLn $ "Future: " ++ show (normalizeSL (future prog))
+    putStrLn $ "Future: " ++ show (normalizeSL (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

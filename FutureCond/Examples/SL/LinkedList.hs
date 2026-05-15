@@ -19,7 +19,7 @@ allocNode addr val next = Effectful
     { ret    = ()
     , pre    = Top
     , post   = SepStar (Cell addr val) (Cell (addr+1) next)
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- freeNode addr val next: releases a node.
@@ -30,7 +30,7 @@ freeNode addr val next = Effectful
     { ret    = ()
     , pre    = SepStar (Cell addr val) (Cell (addr+1) next)
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- readVal addr val: reads the payload; requires (and produces nothing from) val cell.
@@ -39,7 +39,7 @@ readVal addr val = Effectful
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- readNext addr next: reads the next pointer.
@@ -48,7 +48,7 @@ readNext addr next = Effectful
     { ret    = ()
     , pre    = Cell (addr+1) next
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- updateNext addr oldNext newNext: rewires the next pointer.
@@ -59,7 +59,7 @@ updateNext addr oldNext newNext = Effectful
     { ret    = ()
     , pre    = Cell (addr+1) oldNext
     , post   = Cell (addr+1) newNext
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalizeSL (pre    prog))
     putStrLn $ "Post:   " ++ show (normalizeSL (post   prog))
-    putStrLn $ "Future: " ++ show (normalizeSL (future prog))
+    putStrLn $ "Future: " ++ show (normalizeSL (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

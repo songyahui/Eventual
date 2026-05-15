@@ -8,7 +8,7 @@ openFile path = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "open" (List [Str path]))
-    , future = finally (Atom "close" (List [Str path]))
+    , future = \_ -> finally (Atom "close" (List [Str path]))
     }
 
 -- Precondition: last event was open or read (file must be open)
@@ -18,7 +18,7 @@ readFile' path = Effectful
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
     , post   = Single (Atom "read" (List [Str path]))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Precondition: last event was open or read (file must be open)
@@ -28,7 +28,7 @@ closeFile path = Effectful
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
     , post   = Single (Atom "close" (List [Str path]))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Good: open, read, close — preconditions satisfied, future discharged
@@ -60,7 +60,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
     putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (future prog))
+    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

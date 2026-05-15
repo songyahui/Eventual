@@ -1,4 +1,5 @@
 \documentclass[acmsmall,screen]{acmart}
+\citestyle{acmauthoryear}
 
 %% --- ACM metadata --------------------------------------------------------
 \acmJournal{PACMPL}
@@ -60,6 +61,8 @@
 \newcommand{\ret}{\mathit{ret}}
 \newcommand{\anything}{\mathtt{anything}}
 \newcommand{\finally}[1]{\mathtt{finally}(#1)}
+\newcommand{\never}[1]{\mathtt{never}(#1)}
+\newcommand{\noUntil}[2]{\mathtt{noUntil}(#1,\,#2)}
 \newcommand{\derives}[2]{\partial_{#1}(#2)}
 \newcommand{\norm}[1]{\lceil #1 \rceil}
 \newcommand{\sem}[1]{\llbracket #1 \rrbracket}
@@ -84,11 +87,14 @@
 We present \emph{FutureCond}, a Haskell library that extends the classical
 pre/post-condition contract model with \emph{future conditions}: specifications
 that constrain what the remainder of a program must eventually do.
-Future conditions are carried as a first-class field in the
-\lstinline{Effectful} monad alongside pre- and post-conditions.
+Future conditions are carried as a \emph{data-dependent} field
+\lstinline{future :: a -> eff} in the \lstinline{Effectful} monad
+alongside pre- and post-conditions, so that a single operation can
+impose obligations that refer to the resource handle it returns.
 When operations are composed via monadic bind, future conditions are
-propagated and updated automatically using a subtraction operator,
-and preconditions accumulate in the Hoare-rule style.
+evaluated at the current return value, propagated and updated
+automatically using a subtraction operator, and preconditions
+accumulate in the Hoare-rule style.
 The design is parameterised over a \lstinline{Composable} algebra, admitting
 two distinct instances.
 In the \emph{regular-expression} instance, future conditions are extended REs
@@ -144,7 +150,8 @@ multiple calls separated by unbounded intervening computation:
 
 \begin{itemize}
   \item Every \lstinline{malloc(a)} must eventually be followed by
-        \lstinline{free(a)}.
+        \lstinline{free(a)}, and \lstinline{free(a)} must not be called twice
+        without an intervening \lstinline{malloc(a)}.
   \item Every \lstinline{open(f)} must eventually be followed by
         \lstinline{close(f)}.
   \item Every \lstinline{beginTx} must eventually reach
@@ -182,9 +189,11 @@ postcondition.
 \begin{enumerate}
   \item We define the \lstinline{Effectful} monad (\S\ref{sec:effectful}),
         parameterised over a \lstinline{Composable} algebra, with
-        \lstinline{pre}, \lstinline{post}, and \lstinline{future} fields,
-        and verify that the monad laws hold for the
-        $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
+        \lstinline{pre}, \lstinline{post}, and \lstinline{future :: a -> eff}
+        fields.  The \lstinline{future} field is \emph{data-dependent}: it is
+        a function of the return value, so obligations can refer to the
+        resource handle an operation produces.  We verify that the monad laws
+        hold for the $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
   \item We instantiate the algebra to extended regular expressions over
         events with complement, using Brzozowski derivatives to implement
         subtraction---the core of future-condition propagation
@@ -236,7 +245,7 @@ data RE = Bot | Epsilon | Single Event
         | Seq RE RE | Or RE RE | And RE RE | Star RE | Not RE
 \end{lstlisting}
 
-Three derived forms are central:
+Five derived forms are used throughout:
 
 \begin{align*}
   \anything &\;\triangleq\; \neg\varnothing
@@ -244,8 +253,20 @@ Three derived forms are central:
   \finally{e} &\;\triangleq\; \anything \cdot e \cdot \anything
             &&\text{($e$ must occur eventually)} \\
   \mathtt{globally}(e) &\;\triangleq\; e^*
-            &&\text{($e$ at every step)}
+            &&\text{($e$ at every step)} \\
+  \mathtt{never}(e) &\;\triangleq\; \neg\finally{e}
+            &&\text{($e$ must never occur)} \\
+  \mathtt{noUntil}(e,\,g) &\;\triangleq\;
+            \neg\bigl((\Sigma\setminus\{g\})^* \cdot e \cdot \anything\bigr)
+            &&\text{($e$ must not occur before $g$)}
 \end{align*}
+
+\noindent
+$\mathtt{noUntil}(e,\,g)$ is nullable (the empty continuation satisfies it)
+and its derivative with respect to $g$ is $\Sigma^*$, meaning once $g$ occurs
+the restriction on $e$ is lifted.
+This is the key combinator for \emph{conditional} safety: $e$ is forbidden
+until $g$ re-enables it.
 
 \subsection{Algebraic Complement and Brzozowski Derivatives}
 \label{sec:deriv}
@@ -486,13 +507,22 @@ need not define it at all.
 
 \subsection{The \texttt{Effectful} Type}
 
+The \lstinline{future} field is \emph{data-dependent}: it is a function of
+the return value \lstinline{a}, allowing obligations to refer to the resource
+handle an operation produces.
+The helper \lstinline{evalFuture} evaluates this function at the
+computation's own return value.
+
 \begin{lstlisting}
 data Effectful eff a = Effectful
   { ret    :: a
-  , pre    :: eff   -- what must have occurred before this computation
-  , post   :: eff   -- what this computation produces
-  , future :: eff   -- what the rest of the program must do
+  , pre    :: eff        -- what must have occurred before
+  , post   :: eff        -- what this computation produces
+  , future :: a -> eff   -- obligation indexed by the return value
   }
+
+evalFuture :: Effectful eff a -> eff
+evalFuture e = future e (ret e)
 \end{lstlisting}
 
 \subsection{Monad Instances}
@@ -501,7 +531,7 @@ data Effectful eff a = Effectful
 
 \begin{lstlisting}
 pure x = Effectful
-  { ret = x, pre = universe, post = empty, future = universe }
+  { ret = x, pre = universe, post = empty, future = \_ -> universe }
 \end{lstlisting}
 
 The bind operator sequences two computations.
@@ -512,26 +542,28 @@ e >>= f = let fe = f (ret e) in Effectful
   { ret    = ret fe
   , pre    = pre e /\ (post e \\ pre fe)
   , post   = post e <> post fe
-  , future = (post fe \\ future e) /\ future fe
+  , future = \_ -> (post fe \\ future e (ret e)) /\ future fe (ret fe)
   }
 \end{lstlisting}
 
 \paragraph{Future condition.}
-The formula
+Each \lstinline{future} function is applied to the corresponding
+\lstinline{ret} before the obligation is propagated:
 
 \begin{equation}
   \fut(e \mathbin{>\!\!>\!\!=} f)
   \;=\;
-  \bigl(\post(e_2) \setminus \fut(e)\bigr)
+  \bigl(\post(e_2) \setminus \fut(e)(\ret(e))\bigr)
   \;\wedge\;
-  \fut(e_2)
+  \fut(e_2)(\ret(e_2))
   \label{eq:future-bind}
 \end{equation}
 
-removes from $e$'s future obligation those traces that $e_2$'s
-postcondition satisfies, then intersects the residual with $e_2$'s
-own future obligation.
-When $\fut$ normalises to $\univ$, all obligations are discharged.
+removes from $e$'s future obligation (evaluated at $e$'s return value)
+those traces that $e_2$'s postcondition satisfies, then intersects the
+residual with $e_2$'s own future obligation (evaluated at $e_2$'s return
+value).
+When the result normalises to $\univ$, all obligations are discharged.
 
 \paragraph{Precondition.}
 
@@ -577,23 +609,32 @@ conflict rather than silently discarding one side.
 
 \subsection{Intuition via an Example}
 
-\begin{lstlisting}
-malloc :: Int -> Effectful RE ()
-malloc a = Effectful
-  { ret = (), pre = universe
-  , post   = Single (Atom "malloc" [Num a])
-  , future = finally (Atom "free" [Num a]) }
+\lstinline{malloc} returns the allocated address as its return value;
+the future condition is data-dependent, referring to whatever address
+was actually returned via the lambda parameter \lstinline{r}.
+\lstinline{free} asserts that \lstinline{free(a)} must not recur
+until \lstinline{malloc(a)} happens first, preventing double-free while
+allowing re-allocation.
 
-free :: Int -> Effectful RE ()
+\begin{lstlisting}
+type Addr = Int
+
+malloc :: Addr -> Effectful RE Addr
+malloc a = Effectful
+  { ret = a, pre = universe
+  , post   = Single (Atom "malloc" [Num a])
+  , future = \r -> finally (Atom "free" [Num r]) }
+
+free :: Addr -> Effectful RE ()
 free a = Effectful
   { ret = ()
-  , pre    = Single (Atom "malloc" [Num a])  -- malloc(a) must precede
+  , pre    = previously (Atom "malloc" [Num a])
   , post   = Single (Atom "free" [Num a])
-  , future = universe }
+  , future = \_ -> noUntil (Atom "free" [Num a]) (Atom "malloc" [Num a]) }
 \end{lstlisting}
 
-\noindent\textbf{Good program: \lstinline{malloc 1 >> free 1}.}
-After \lstinline{malloc 1}, the state is:
+\noindent\textbf{Good program: \lstinline{addr <- malloc 1; free addr}.}
+After \lstinline{malloc 1} ($\ret = 1$):
 \[
   \post = \mathtt{malloc}(1),\quad
   \fut  = \finally{\mathtt{free}(1)},\quad
@@ -606,26 +647,29 @@ Binding \lstinline{free 1} (with $\pre = \mathtt{malloc}(1)$, $\post =
 $\post(\mathtt{malloc}(1)) \setminus \pre(\mathtt{free}(1))
 = \mathtt{malloc}(1) \setminus \mathtt{malloc}(1) = \varepsilon$.
 So $\pre = \univ \wedge \varepsilon = \varepsilon$.\ \checkmark
-($\univ$ is nullable, so $\univ \wedge \varepsilon = \varepsilon$:
-the composed program requires an empty history, i.e.\ can be called
-at the very start.)
 
 \textit{Future:}
 $\mathtt{free}(1) \setminus \finally{\mathtt{free}(1)} = \univ$.
-Intersect with $\fut(\mathtt{free}(1)) = \univ$: result $\univ$.\ \checkmark
+Intersect with $\fut(\mathtt{free}(1)) = \noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$:
+result $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.\ \checkmark
+(nullable: the program may end here; no double-free obligation is pending.)
 
-\noindent\textbf{Bad program: \lstinline{free 1} alone.}
+\noindent\textbf{Bad: \lstinline{free 1} alone.}
 \lstinline{pure ()} has $\post = \varepsilon$.
 $\mathtt{malloc}(1) \setminus \varepsilon = \varnothing$.
-So $\pre = \univ \mathbin{<>} \varnothing = \varnothing$.\ \texttimes
+So $\pre = \varnothing$.\ \texttimes
 
-\noindent\textbf{Bad program: \lstinline{malloc 1 >> malloc 2 >> free 1}.}
-After binding \lstinline{free 1} to the composed
-\lstinline{malloc 1 >> malloc 2},
-the $\post = \mathtt{malloc}(1)\cdot\mathtt{malloc}(2)$.
+\noindent\textbf{Bad: \lstinline{malloc 1 >> malloc 2 >> free 1} (leak).}
 The future of \lstinline{malloc 2} is $\finally{\mathtt{free}(2)}$,
-so the residual future after \lstinline{free 1}
+which is not discharged by \lstinline{free 1}, so the residual future
 still contains $\finally{\mathtt{free}(2)}$, naming the leak precisely.
+
+\noindent\textbf{Bad: double-free (\lstinline{addr <- malloc 1; free addr; free addr}).}
+After the first \lstinline{free 1}, the future is
+$\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.
+The second \lstinline{free 1} posts $\mathtt{free}(1)$; consuming
+$\mathtt{free}(1)$ in $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$
+yields $\varnothing$, so the combined future is $\varnothing$.\ \texttimes
 
 %% =========================================================================
 \section{The RE Instance}
@@ -856,30 +900,48 @@ together certify the computation is temporally correct.
 
 \subsection{Memory Management}
 
-\begin{lstlisting}
-malloc :: Int -> Effectful RE ()
-malloc a = Effectful
-  { ret = (), pre = universe
-  , post   = Single (Atom "malloc" [Num a])
-  , future = finally (Atom "free" [Num a]) }
+\lstinline{malloc} returns the allocated address; its data-dependent
+future condition uses the lambda parameter \lstinline{r} so the
+obligation always tracks the \emph{returned} address, not a
+call-site constant.
+\lstinline{free} carries $\noUntil{\mathtt{free}(a)}{\mathtt{malloc}(a)}$
+as its future, forbidding a second \lstinline{free(a)} unless
+\lstinline{malloc(a)} resets the guard first.
 
-free :: Int -> Effectful RE ()
+\begin{lstlisting}
+malloc :: Addr -> Effectful RE Addr
+malloc a = Effectful
+  { ret = a, pre = universe
+  , post   = Single (Atom "malloc" [Num a])
+  , future = \r -> finally (Atom "free" [Num r]) }
+
+free :: Addr -> Effectful RE ()
 free a = Effectful
   { ret = ()
-  , pre    = Single (Atom "malloc" [Num a])
+  , pre    = previously (Atom "malloc" [Num a])
   , post   = Single (Atom "free" [Num a])
-  , future = universe }
+  , future = \_ -> noUntil (Atom "free" [Num a]) (Atom "malloc" [Num a]) }
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: pre = universe, future = universe (all obligations met)
-simpleFree = do { malloc 1; free 1 }
+-- Good: data-dependent free — obligation discharged on the returned address
+dataDependentFree n = do { addr <- malloc n; free addr }
+
+-- Good: re-allocate the same address after freeing — noUntil is reset by malloc
+reallocSameAddr = do { a <- malloc 1; free a; a <- malloc 1; free a }
 
 -- Bad future: free(2) obligation remains
-leak = do { malloc 1; free 1; malloc 2 }
+leak = do { a1 <- malloc 1; free a1; _ <- malloc 2; return () }
 
 -- Bad pre: malloc(1) precondition not met
 freeWithoutMalloc = free 1
+
+-- Bad future: double-free collapses future to Bot
+doubleFree = do { addr <- malloc 1; free addr; free addr }
+
+-- Bad: two mallocs, free one correctly, double-free the other
+doubleFreeWithWork = do
+  { a1 <- malloc 1; a2 <- malloc 2; free a1; free a2; free a1 }
 \end{lstlisting}
 
 \subsection{Mutex / Lock Lifecycle}
@@ -925,11 +987,13 @@ Table~\ref{tab:examples-re} summarises the three RE domains.
 \toprule
 Domain & Bad program & Residual \lstinline{future} & Residual \lstinline{pre} \\
 \midrule
-Memory      & \lstinline{malloc 2} not freed    & \lstinline{finally(free(2))} & $\univ$ \\
+Memory      & \lstinline{malloc 2} not freed    & $\finally{\mathtt{free}(2)}$ & $\univ$ \\
 Memory      & \lstinline{free} without malloc   & $\univ$ & $\varnothing$ \\
-Mutex       & \lstinline{acquire 1} leaked      & \lstinline{finally(release(1))} & $\univ$ \\
+Memory      & double-free of addr 1             & $\varnothing$ & $\univ$ \\
+Memory      & leak + double-free                & $\varnothing$ & $\univ$ \\
+Mutex       & \lstinline{acquire 1} leaked      & $\finally{\mathtt{release}(1)}$ & $\univ$ \\
 Mutex       & release without acquire           & $\univ$ & $\varnothing$ \\
-Transaction & no commit/rollback                & \lstinline{finally(commit)$\vee$finally(rollback)} & $\univ$ \\
+Transaction & no commit/rollback                & $\finally{\mathtt{commit}}\vee\finally{\mathtt{rollback}}$ & $\univ$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1062,13 +1126,16 @@ Linked list  & read node without ownership          & $\mathbf{emp}$ & $\mathtt{
 \label{sec:monad-laws}
 %% =========================================================================
 
-We verify the monad laws for the $(\ret, \post, \fut)$ triple under the
-assumption that the \lstinline{Composable} instance forms a monoid for
-concatenation (\lstinline{empty} is the unit, \lstinline{<>} is
-associative) and that \lstinline{universe} is the unit for
-\lstinline{/\\}.
+Because \lstinline{future :: a -> eff} is a function, the monad laws
+are stated in terms of \lstinline{evalFuture e = future e (ret e)},
+the future condition evaluated at the computation's own return value.
+We write $\widehat{\fut}(e)$ for $\mathit{evalFuture}(e)$ for brevity.
+The laws hold for the triple $(\ret, \post, \widehat{\fut})$ under the
+assumption that \lstinline{Composable} forms a monoid for
+\lstinline{<>} (\lstinline{empty} is the unit) and that
+\lstinline{universe} is the unit for \lstinline{/\\}.
 The \lstinline{pre} field satisfies the Hoare-rule property
-(Equation~\ref{eq:pre-bind}) rather than the strict monad-law equality;
+(Equation~\ref{eq:pre-bind}) rather than strict monad-law equality;
 we discuss this below.
 
 \paragraph{Left identity} \lstinline{pure x >>= f = f x}.
@@ -1076,38 +1143,61 @@ we discuss this below.
 $\ret$: $\ret(f\,x)$. \checkmark \quad
 $\post$: $\varepsilon \mathbin{<>} \post(f\,x) = \post(f\,x)$. \checkmark
 
+For the future, let $fe = f(\ret(\mathtt{pure}\;x)) = f\,x$.
+$\mathtt{future}(\mathtt{pure}\;x) = \lambda\,\_.\ \univ$, so
+$\widehat{\fut}(\mathtt{pure}\;x) = \univ$.
+
 \begin{align*}
-  \fut(\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f)
-    &= \bigl(\post(f\,x) \setminus \mathit{universe}\bigr)
-       \wedge \fut(f\,x)
-     = \varepsilon \wedge \fut(f\,x)
-     = \fut(f\,x). \;\checkmark
+  \widehat{\fut}(\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f)
+    &= \bigl(\post(fe) \setminus \widehat{\fut}(\mathtt{pure}\;x)\bigr)
+       \wedge \widehat{\fut}(fe) \\
+    &= \bigl(\post(f\,x) \setminus \univ\bigr)
+       \wedge \widehat{\fut}(f\,x)
+     \;=\; \varepsilon \wedge \widehat{\fut}(f\,x)
+     \;=\; \widehat{\fut}(f\,x). \;\checkmark
 \end{align*}
 
-The subtraction $r \setminus \univ = \varepsilon$ follows because
-$\univ = \neg\varnothing$ and the special case
-$\univ \setminus r = \varepsilon$ (when $r_1 = \univ$, the library
-returns $\varepsilon$ immediately).
+The subtraction $r \setminus \univ = \varepsilon$ holds because
+$\univ \setminus r = \varepsilon$ is a base case of
+\lstinline{reSubtraction}.
 
 \paragraph{Right identity} \lstinline{e >>= pure = e}.
 
 $\ret$: $\ret(e)$. \checkmark \quad
 $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark
 
+Let $fe = \mathtt{pure}(\ret(e))$.
+$\post(fe) = \varepsilon$ and
+$\widehat{\fut}(fe) = \mathtt{future}(fe)(\ret(fe))
+                    = (\lambda\,\_.\ \univ)(\ret(e)) = \univ$.
+
 \begin{align*}
-  \fut(e \mathbin{>\!\!>\!\!=} \mathtt{pure})
-    &= (\varepsilon \setminus \fut(e)) \wedge \mathit{universe}
-     = \fut(e) \wedge \univ
-     = \fut(e). \;\checkmark
+  \widehat{\fut}(e \mathbin{>\!\!>\!\!=} \mathtt{pure})
+    &= \bigl(\varepsilon \setminus \widehat{\fut}(e)\bigr)
+       \wedge \univ
+     \;=\; \widehat{\fut}(e) \wedge \univ
+     \;=\; \widehat{\fut}(e). \;\checkmark
 \end{align*}
 
-\paragraph{Associativity} follows from associativity of \lstinline{<>}
-and the distributivity of \lstinline{\\} over \lstinline{/\\}.
+\paragraph{Associativity.}
+For $(e \mathbin{>\!\!>\!\!=} f) \mathbin{>\!\!>\!\!=} g = e \mathbin{>\!\!>\!\!=} (\lambda\,x.\ f\,x \mathbin{>\!\!>\!\!=} g)$,
+the $\ret$ and $\post$ components follow from associativity of
+\lstinline{<>}.
+For the future, both sides reduce to
+\[
+  \bigl(\post(g\,(\ret(f\,(\ret(e)))))
+    \setminus
+    \bigl(\post(f\,(\ret(e))) \setminus \widehat{\fut}(e)\bigr)\bigr)
+  \wedge \widehat{\fut}(f\,(\ret(e)))
+  \wedge \widehat{\fut}(g\,(\ret(f\,(\ret(e)))))
+\]
+by repeated application of Equation~\eqref{eq:future-bind} and
+associativity of $\wedge$.
 
 \paragraph{Precondition.}
 The \lstinline{pre} field propagates constraints via $\wedge$ (intersection).
 When $\post(e)$ fully covers $\pre(e_2)$---i.e.\
-$\post(e) \setminus \pre(e_2) = \varepsilon$---equation~\eqref{eq:pre-bind}
+$\post(e) \setminus \pre(e_2) = \varepsilon$---Equation~\eqref{eq:pre-bind}
 gives $\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e) \wedge \varepsilon$.
 If $\pre(e) = \univ$ (the common case for pure computations) this reduces
 to $\varepsilon$, meaning the composed computation can run from an empty
@@ -1122,6 +1212,25 @@ precisely which precondition obligations of the continuation remain unmet.
 \section{Related Work}
 
 \label{sec:related}
+
+\paragraph{Pre/post-condition contracts in Haskell.}
+Several lines of work encode pre/post-condition contracts in Haskell.
+\emph{Liquid Haskell}~\cite{vazou2014} extends GHC with refinement types,
+expressing preconditions as refinements on input types and postconditions as
+refinements on output types, verified statically via an SMT solver.
+Findler and Felleisen~\cite{findler2002} establish a runtime contract
+discipline for higher-order functions that directly influences Haskell
+contract libraries.
+QuickCheck~\cite{claessen2000} supports conditional properties via the
+\lstinline{==>} combinator, providing a lightweight, test-based form of
+pre/post-condition checking.
+Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
+monad in a dependently typed language, propagating pre/post annotations through
+monadic bind analogously to our \lstinline{Effectful} monad.
+FutureCond complements all of these by adding a \emph{temporal}
+dimension---the future condition---that none of these systems address,
+and it does so without requiring type-system extensions or a dependent type
+theory.
 
 \paragraph{Future conditions.}
 Song et al.\ propose future conditions as a first-class extension to
@@ -1210,6 +1319,73 @@ will under-approximate.
 A fully open-world implementation would accept an explicit $\Sigma$
 declaration, enabling complement over an unrestricted event domain
 and removing the closed-world restriction.
+
+\paragraph{Data-dependent future conditions (implemented).}
+FutureCond represents \lstinline{future} as a function
+\lstinline{future :: a -> eff} of the return value, so obligations can
+refer to the resource handle an operation produces rather than a
+fixed call-site constant.
+For example, \lstinline{malloc :: Addr -> Effectful RE Addr} carries
+\lstinline{future = \r -> finally(free(r))}: the address that must
+eventually be freed is the one that was \emph{returned}, bound by the
+lambda parameter \lstinline{r}.
+The helper \lstinline{evalFuture e = future e (ret e)} evaluates the
+obligation, and the bind formula applies each \lstinline{future} to
+its own \lstinline{ret} before propagating.
+This connects FutureCond to the indexed/graded-monad literature, where
+types are indexed by computational effects; here obligations are
+indexed by return values instead.
+The companion combinator $\noUntil{e}{g}$ leverages this design to
+express \emph{conditional} safety: after \lstinline{free(a)}, the
+remaining trace must not contain another \lstinline{free(a)} unless
+\lstinline{malloc(a)} occurs first, preventing double-free while
+permitting re-allocation.
+
+\paragraph{Solver-backed discharge of residual conditions.}
+Residual annotations---a \lstinline{pre} that normalises to $\varnothing$,
+or a \lstinline{future} that does not reduce to $\univ$---are currently
+surfaced as symbolic expressions that the programmer must inspect manually.
+A natural extension is to connect these expressions to an automatic solver:
+residual RE conditions can be checked for non-emptiness by an NFA/DFA
+construction or a BDD-based automaton library, while residual SL predicates
+with Presburger arithmetic guards can be discharged by an SMT solver such as
+Z3 or CVC5.
+Integrating a solver backend would let FutureCond report concrete
+counterexample traces (for RE) or unsatisfiable heaps (for SL) rather than
+leaving the interpretation of the residual to the user.
+
+\paragraph{Parallel composition.}
+The \lstinline{Effectful} monad is inherently sequential: bind models
+one computation followed by another.
+Concurrent programs require a \emph{parallel} combinator $e_1 \parallel e_2$
+in which the two sub-computations interleave freely.
+Under interleaving, the combined future condition must account for all
+possible orderings of the two traces; in the RE instance this corresponds
+to the \emph{shuffle product} $r_1 \shuffle r_2$, and the combined
+postcondition is the shuffle of the individual postconditions.
+The SL instance admits a natural parallel connective via the
+\emph{concurrent separation logic} frame rule~\cite{o2007resources},
+where disjoint heap regions are owned by parallel threads.
+Extending the \lstinline{Composable} class with a \lstinline{parallel}
+operation and deriving the corresponding bind-like combinator is a
+natural next step towards reasoning about concurrent Haskell programs.
+
+\paragraph{Quantitative and probabilistic future conditions.}
+The current framework is Boolean: a future condition is either satisfied
+(residual $= \univ$) or violated (residual $\neq \univ$), with no notion
+of degree or likelihood.
+A quantitative generalisation would replace Boolean RE membership with a
+\emph{weight}: for instance, ``\lstinline{free(a)} must be called with
+probability at least $p$'' or ``the expected number of steps before
+\lstinline{commit} is at most $k$''.
+This connects to probabilistic temporal logics such as PCTL and to
+quantitative Kleene algebras, where the star-semiring laws replace
+the Boolean lattice.
+In the SL instance, a quantitative analogue could express expected
+heap usage or amortised resource bounds.
+Such an extension would require replacing the \lstinline{Composable}
+typeclass's Boolean operations with a semiring structure, and
+replacing the Brzozowski derivative with its quantitative counterpart.
 
 %% =========================================================================
 \section{Conclusion}

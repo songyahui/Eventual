@@ -8,7 +8,7 @@ acquire mid = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "acquire" (List [Num mid]))
-    , future = finally (Atom "release" (List [Num mid]))
+    , future = \_ -> finally (Atom "release" (List [Num mid]))
     }
 
 -- Precondition: acquire(mid) must have been the immediately preceding event
@@ -17,7 +17,7 @@ release mid = Effectful
     { ret    = ()
     , pre    = Single (Atom "acquire" (List [Num mid]))
     , post   = Single (Atom "release" (List [Num mid]))
-    , future = universe
+    , future = \_ -> universe
     }
 
 criticalWork :: Effectful RE ()
@@ -25,7 +25,7 @@ criticalWork = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "work" (List []))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Good: acquire, work, release
@@ -59,7 +59,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
     putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (future prog))
+    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

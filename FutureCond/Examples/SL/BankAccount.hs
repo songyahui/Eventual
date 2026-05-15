@@ -16,7 +16,7 @@ openAccount addr = Effectful
     { ret    = ()
     , pre    = Top
     , post   = Cell addr 0
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- deposit addr old amount: unconditionally adds amount to the balance.
@@ -27,7 +27,7 @@ deposit addr old amount = Effectful
     { ret    = ()
     , pre    = Cell addr old
     , post   = Cell addr (old + amount)
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- withdraw addr old amount: subtracts amount; requires balance >= amount.
@@ -39,7 +39,7 @@ withdraw addr old amount = Effectful
     , pre    = Conj (Pure (PGe (ValAt addr) (Lit amount)))
                     (Cell addr old)
     , post   = Cell addr (old - amount)
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- transfer srcAddr srcBal dstAddr dstBal amount:
@@ -53,7 +53,7 @@ transfer src srcBal dst dstBal amount = Effectful
                     (SepStar (Cell src srcBal) (Cell dst dstBal))
     , post   = SepStar (Cell src (srcBal - amount))
                        (Cell dst (dstBal + amount))
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- closeAccount addr bal: closes account; requires balance is zero.
@@ -65,7 +65,7 @@ closeAccount addr bal = Effectful
     , pre    = Conj (Pure (PEq (ValAt addr) (Lit 0)))
                     (Cell addr bal)
     , post   = Emp
-    , future = Top
+    , future = \_ -> Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalizeSL (pre    prog))
     putStrLn $ "Post:   " ++ show (normalizeSL (post   prog))
-    putStrLn $ "Future: " ++ show (normalizeSL (future prog))
+    putStrLn $ "Future: " ++ show (normalizeSL (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

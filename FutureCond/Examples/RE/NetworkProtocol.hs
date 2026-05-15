@@ -10,7 +10,7 @@ sendSYN = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendSYN" (List []))
-    , future = finally (Atom "recvSYNACK" (List []))
+    , future = \_ -> finally (Atom "recvSYNACK" (List []))
     }
 
 -- Precondition: sendSYN must have just occurred
@@ -19,7 +19,7 @@ recvSYNACK = Effectful
     { ret    = ()
     , pre    = Single (Atom "sendSYN" (List []))
     , post   = Single (Atom "recvSYNACK" (List []))
-    , future = finally (Atom "sendACK" (List []))
+    , future = \_ -> finally (Atom "sendACK" (List []))
     }
 
 -- Precondition: recvSYNACK must have just occurred
@@ -28,7 +28,7 @@ sendACK = Effectful
     { ret    = ()
     , pre    = Single (Atom "recvSYNACK" (List []))
     , post   = Single (Atom "sendACK" (List []))
-    , future = universe
+    , future = \_ -> universe
     }
 
 sendData :: String -> Effectful RE ()
@@ -36,7 +36,7 @@ sendData payload = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendData" (List [Str payload]))
-    , future = universe
+    , future = \_ -> universe
     }
 
 sendFIN :: Effectful RE ()
@@ -44,7 +44,7 @@ sendFIN = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendFIN" (List []))
-    , future = finally (Atom "recvFINACK" (List []))
+    , future = \_ -> finally (Atom "recvFINACK" (List []))
     }
 
 recvFINACK :: Effectful RE ()
@@ -52,7 +52,7 @@ recvFINACK = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "recvFINACK" (List []))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Good: complete handshake, data, teardown — all preconditions met, no future pending
@@ -91,7 +91,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
     putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (future prog))
+    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

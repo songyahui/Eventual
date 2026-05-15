@@ -850,16 +850,16 @@ test_effectful counter = do
 
     -- post e = ε (produces nothing): residual = ε \\ pre fe = pre fe (base case).
     -- pre = universe /\ pre fe = pre fe  (universe is identity for /\).
-    let e0  = Effectful { ret = (), pre = universe,  post = empty,    future = universe }
-        fe0 = Effectful { ret = (), pre = Single a,  post = empty,    future = universe }
+    let e0  = Effectful { ret = (), pre = universe,  post = empty,    future = \_ -> universe}
+        fe0 = Effectful { ret = (), pre = Single a,  post = empty,    future = \_ -> universe}
     check counter "pre (e{post=ε} >>= \\_ -> fe{pre=a}) = a   (nothing produced; full pre fe remains)" $
         normalize (pre (e0 >>= \_ -> fe0)) == Single a
 
     -- post e = Single a, pre fe = Single a: post exactly covers pre fe.
     -- residual = a \\ a = ε.
     -- pre = universe /\ ε = ε   (isTop universe → right side = ε).
-    let e1  = Effectful { ret = (), pre = universe,  post = Single a, future = universe }
-        fe1 = Effectful { ret = (), pre = Single a,  post = empty,    future = universe }
+    let e1  = Effectful { ret = (), pre = universe,  post = Single a, future = \_ -> universe}
+        fe1 = Effectful { ret = (), pre = Single a,  post = empty,    future = \_ -> universe}
     check counter "pre (e{pre=Σ*,post=a} >>= \\_ -> fe{pre=a}) = ε   (Σ* /\\ ε = ε)" $
         normalize (pre (e1 >>= \_ -> fe1)) == Epsilon
 
@@ -868,15 +868,15 @@ test_effectful counter = do
     -- pre = Single a /\ ε = And (Single a) Epsilon.
     -- nullable (Single a) = False  →  {a} ∩ {ε} = ∅ = Bot.
     -- Correct: the history cannot simultaneously be "contains a" and "is empty".
-    let e2  = Effectful { ret = (), pre = Single a,  post = Single b, future = universe }
-        fe2 = Effectful { ret = (), pre = Single b,  post = empty,    future = universe }
+    let e2  = Effectful { ret = (), pre = Single a,  post = Single b, future = \_ -> universe}
+        fe2 = Effectful { ret = (), pre = Single b,  post = empty,    future = \_ -> universe}
     check counter "pre (e{pre=a,post=b} >>= \\_ -> fe{pre=b}) = ∅   ({a} /\\ ε = ∅; contradictory constraints)" $
         normalize (pre (e2 >>= \_ -> fe2)) == Bot
 
     -- post e = Single a, pre fe = Single b (a ≠ b): residual = a \\ b = ∅.
     -- pre = universe /\ ∅ = ∅  (Bot absorbs).
-    let e3  = Effectful { ret = (), pre = universe,  post = Single a, future = universe }
-        fe3 = Effectful { ret = (), pre = Single b,  post = empty,    future = universe }
+    let e3  = Effectful { ret = (), pre = universe,  post = Single a, future = \_ -> universe}
+        fe3 = Effectful { ret = (), pre = Single b,  post = empty,    future = \_ -> universe}
     check counter "pre (e{post=a} >>= \\_ -> fe{pre=b}) = ∅   (a ≠ b; post does not cover pre fe)" $
         normalize (pre (e3 >>= \_ -> fe3)) == Bot
 
@@ -892,24 +892,24 @@ test_effectful_sl counter = do
     -- ── pre: post = Emp, nothing provided ───────────────────────────────────────
     -- subtraction Emp (Cell 0 42) = Cell 0 42   (base case: Emp\q = q)
     -- pre = Top /\ Cell 0 42 = Conj Top (Cell 0 42)
-    let e0  = Effectful { ret = (), pre = Top,       post = Emp,       future = Top }
-        fe0 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = Top }
+    let e0  = Effectful { ret = (), pre = Top,       post = Emp,       future = \_ -> Top }
+        fe0 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = \_ -> Top }
     check counter "pre (e{post=Emp} >>= fe{pre=Cell 0 42}) = Conj Top (Cell 0 42)   (nothing provided; full pre fe remains)" $
         pre (e0 >>= \_ -> fe0) == Conj Top (Cell 0 42)
 
     -- ── pre: post = Top, all preconditions discharged ───────────────────────────
     -- subtraction Top (Cell 0 42) = Emp          (base case: Top\_ = Emp)
     -- pre = Top /\ Emp = Conj Top Emp
-    let e1  = Effectful { ret = (), pre = Top,       post = Top,       future = Top }
-        fe1 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = Top }
+    let e1  = Effectful { ret = (), pre = Top,       post = Top,       future = \_ -> Top }
+        fe1 = Effectful { ret = (), pre = Cell 0 42, post = Emp,       future = \_ -> Top }
     check counter "pre (e{post=Top} >>= fe{pre=Cell 0 42}) = Conj Top Emp   (Top discharges any precondition)" $
         pre (e1 >>= \_ -> fe1) == Conj Top Emp
 
     -- ── post: SepStar combines disjoint heap ownership ──────────────────────────
     -- e writes Cell 0 42, fe writes Cell 1 99 (disjoint addresses).
     -- post combined = SepStar (Cell 0 42) (Cell 1 99)
-    let e2  = Effectful { ret = (), pre = Top,       post = Cell 0 42, future = Top }
-        fe2 = Effectful { ret = (), pre = Top,       post = Cell 1 99, future = Top }
+    let e2  = Effectful { ret = (), pre = Top,       post = Cell 0 42, future = \_ -> Top }
+        fe2 = Effectful { ret = (), pre = Top,       post = Cell 1 99, future = \_ -> Top }
     check counter "post (write{0} >> write{1}) = SepStar (Cell 0 42) (Cell 1 99)   (disjoint ownership)" $
         post (e2 >>= \_ -> fe2) == SepStar (Cell 0 42) (Cell 1 99)
 
@@ -917,26 +917,26 @@ test_effectful_sl counter = do
     -- e has future = Cell 0 42 (must eventually hold).
     -- subtraction Emp (Cell 0 42) = Cell 0 42    (fe produced nothing toward it)
     -- future combined = Cell 0 42 /\ Top = Conj (Cell 0 42) Top
-    let e3  = Effectful { ret = (), pre = Top,       post = Emp,       future = Cell 0 42 }
-        fe3 = Effectful { ret = (), pre = Top,       post = Emp,       future = Top }
+    let e3  = Effectful { ret = (), pre = Top,       post = Emp,       future = \_ -> Cell 0 42 }
+        fe3 = Effectful { ret = (), pre = Top,       post = Emp,       future = \_ -> Top }
     check counter "future (e{future=Cell 0 42} >>= fe{post=Emp}) = Conj (Cell 0 42) Top   (obligation outstanding)" $
-        future (e3 >>= \_ -> fe3) == Conj (Cell 0 42) Top
+        evalFuture (e3 >>= \_ -> fe3) == Conj (Cell 0 42) Top
 
     -- ── future: obligation discharged when post fe = Top ────────────────────────
     -- subtraction Top (Cell 0 42) = Emp          (Top covers everything)
     -- future combined = Emp /\ Top = Conj Emp Top
-    let e4  = Effectful { ret = (), pre = Top,       post = Emp,       future = Cell 0 42 }
-        fe4 = Effectful { ret = (), pre = Top,       post = Top,       future = Top }
+    let e4  = Effectful { ret = (), pre = Top,       post = Emp,       future = \_ -> Cell 0 42 }
+        fe4 = Effectful { ret = (), pre = Top,       post = Top,       future = \_ -> Top }
     check counter "future (e{future=Cell 0 42} >>= fe{post=Top}) = Conj Emp Top   (obligation discharged)" $
-        future (e4 >>= \_ -> fe4) == Conj Emp Top
+        evalFuture (e4 >>= \_ -> fe4) == Conj Emp Top
 
     -- ── pre: Pure constraint propagates through bind ─────────────────────────────
     -- fe requires h[0] > 5 AND spatial ownership of Cell 0 42.
     -- post e = Emp → residual = full pre fe   (base case)
     -- pre combined = Top /\ Conj (Pure _) (Cell 0 42)
     let gtFive = (PGt (ValAt 0) (Lit 5))
-        e5  = Effectful { ret = (), pre = Top, post = Emp, future = Top }
-        fe5 = Effectful { ret = (), pre = Conj (Pure gtFive) (Cell 0 42), post = Emp, future = Top }
+        e5  = Effectful { ret = (), pre = Top, post = Emp, future = \_ -> Top }
+        fe5 = Effectful { ret = (), pre = Conj (Pure gtFive) (Cell 0 42), post = Emp, future = \_ -> Top }
     check counter "pre (e{post=Emp} >>= fe{pre=⌈h[0]>5⌉∧Cell 0 42}) = Conj Top (Conj (Pure _) (Cell 0 42))" $
         pre (e5 >>= \_ -> fe5) == Conj Top (Conj (Pure gtFive) (Cell 0 42))
 

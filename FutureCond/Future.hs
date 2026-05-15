@@ -249,6 +249,24 @@ globally ev = Star (Single ev)
 finally :: Event -> RE
 finally ev = Seq top (Seq (Single ev) top)
 
+-- ¬F ev — ev must never occur again:  ¬(Σ* · ev · Σ*)
+never :: Event -> RE
+never ev = Not (finally ev)
+
+-- noUntil e g: event e must not occur before event g does.
+-- Formally: ¬((Σ\{g})* · e · Σ*)
+-- This says: in the remaining trace, there is no occurrence of e that
+-- is not preceded by g.  If g occurs first, e is unrestricted afterward.
+-- Use case: after free(addr), free(addr) must not occur again until
+-- malloc(addr) happens first — allowing re-allocation but catching double-free.
+noUntil :: Event -> Event -> RE
+noUntil e g =
+    let notG = And (Single Wildcard) (Not (Single g))
+    in Not (Seq (Star notG) (Seq (Single e) top))
+
+previously :: Event -> RE
+previously ev = Seq top (Seq (Single ev) top)
+
 -- ── Composable class ──────────────────────────────────────────────────────────
 
 class Composable a where
@@ -328,34 +346,46 @@ normalize r = case r of
 
 -- ── Effectful monad ───────────────────────────────────────────────────────────
 
+-- future is now indexed by the return value (direction 1: data-dependent
+-- future conditions).  This lets an operation's temporal obligation refer
+-- to whatever resource handle it returns, e.g.
+--   mallocFresh addr = Effectful { ..., future = \a -> finally(free(a)) }
+-- so that the exact address returned drives the obligation.
+
 data Effectful eff a = Effectful
     { ret    :: a
     , pre    :: eff
     , post   :: eff
-    , future :: eff
+    , future :: a -> eff   -- indexed by the return value
     }
 
+-- Convenience: evaluate the future condition at the computation's own
+-- return value.  Use this wherever you previously wrote `future e`.
+evalFuture :: Effectful eff a -> eff
+evalFuture e = future e (ret e)
+
 instance Functor (Effectful eff) where
-    fmap f e = e { ret = f (ret e) }
+    -- fmap changes the return type from a to b, so future must become
+    -- b -> eff.  We evaluate it at the known original return value and
+    -- ignore the new b argument (the obligation is already determined).
+    fmap f e = e { ret = f (ret e), future = \_ -> future e (ret e) }
 
 instance Composable eff => Applicative (Effectful eff) where
     pure x = Effectful
         { ret    = x
         , pre    = universe
         , post   = empty
-        , future = universe
+        , future = \_ -> universe
         }
     ef <*> ex = Effectful
         { ret    = ret ef (ret ex)
-        -- 1. ef is evaluated first (left to right)
-        -- 2. ex is evaluated second
-        -- 3. the extracted function is applied to the extracted value
         -- Traditional precondition: pre of ef, plus whatever of pre ex
         -- is not already discharged by post ef.
-        -- If post ef ⊢ pre ex, the quotient is ε and nothing is added.
         , pre    = pre ef /\ (post ef \\ pre ex)
         , post   = post ef <> post ex
-        , future = (post ex \\ future ef) /\ future ex
+        -- future ef and future ex are each applied to their own return
+        -- values before the obligation is propagated.
+        , future = \_ -> (post ex \\ future ef (ret ef)) /\ future ex (ret ex)
         }
 
 instance Composable eff => Monad (Effectful eff) where
@@ -365,10 +395,10 @@ instance Composable eff => Monad (Effectful eff) where
         -- Traditional precondition: pre of e, plus the residual of pre fe
         -- not covered by post e.  Mirrors the Hoare rule:
         --   {P} e {Q},  Q ⊢ P'  ⊢  {P} e >>= f {R}
-        -- When post e fully satisfies pre fe, post e \\ pre fe = ε.
         , pre    = pre e /\ (post e \\ pre fe)
         , post   = post e <> post fe
-        , future = (post fe \\ future e) /\ future fe
+        -- future e is evaluated at e's return value; future fe at fe's.
+        , future = \_ -> (post fe \\ future e (ret e)) /\ future fe (ret fe)
         }
 
 -- ── Separation Logic ──────────────────────────────────────────────────────────

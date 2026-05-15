@@ -9,7 +9,7 @@ beginTx = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "beginTx" (List []))
-    , future = Or (finally (Atom "commit" (List []))) (finally (Atom "rollback" (List [])))
+    , future = \_ -> Or (finally (Atom "commit" (List []))) (finally (Atom "rollback" (List [])))
     }
 
 dbWrite :: String -> Int -> Effectful RE ()
@@ -17,7 +17,7 @@ dbWrite key val = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "write" (List [Str key, Num val]))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Precondition: a write must have just occurred (commit requires at least one write)
@@ -27,7 +27,7 @@ commit = Effectful
     , pre    = Or (Single (Atom "beginTx" (List [])))
                   (Single (Atom "write"   (List [])))  -- wildcard args checked by RE matching
     , post   = Single (Atom "commit" (List []))
-    , future = universe
+    , future = \_ -> universe
     }
 
 rollback :: Effectful RE ()
@@ -35,7 +35,7 @@ rollback = Effectful
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "rollback" (List []))
-    , future = universe
+    , future = \_ -> universe
     }
 
 -- Good: begin, write, commit
@@ -63,7 +63,7 @@ printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
     putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (future prog))
+    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
     putStrLn ""
 
 main :: IO ()

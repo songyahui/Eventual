@@ -61,6 +61,7 @@
 \newcommand{\ret}{\mathit{ret}}
 \newcommand{\anything}{\mathtt{anything}}
 \newcommand{\finally}[1]{\mathtt{finally}(#1)}
+\newcommand{\shuffle}{\mathbin{\sqcup\!\!\!\sqcup}}
 \newcommand{\never}[1]{\mathtt{never}(#1)}
 \newcommand{\noUntil}[2]{\mathtt{noUntil}(#1,\,#2)}
 \newcommand{\derives}[2]{\partial_{#1}(#2)}
@@ -659,12 +660,12 @@ result $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.\ \checkmark
 $\mathtt{malloc}(1) \setminus \varepsilon = \varnothing$.
 So $\pre = \varnothing$.\ \texttimes
 
-\noindent\textbf{Bad: \lstinline{malloc 1 >> malloc 2 >> free 1} (leak).}
+\noindent\textbf{Bad: \lstinline{missingFree} (\lstinline{malloc 1 >> malloc 2 >> free 1}).}
 The future of \lstinline{malloc 2} is $\finally{\mathtt{free}(2)}$,
 which is not discharged by \lstinline{free 1}, so the residual future
-still contains $\finally{\mathtt{free}(2)}$, naming the leak precisely.
+still contains $\finally{\mathtt{free}(2)}$, naming the missing free precisely.
 
-\noindent\textbf{Bad: double-free (\lstinline{addr <- malloc 1; free addr; free addr}).}
+\noindent\textbf{Bad: \lstinline{doubleFreeImmediate} (\lstinline{addr <- malloc 1; free addr; free addr}).}
 After the first \lstinline{free 1}, the future is
 $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.
 The second \lstinline{free 1} posts $\mathtt{free}(1)$; consuming
@@ -924,24 +925,41 @@ free a = Effectful
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: data-dependent free — obligation discharged on the returned address
-dataDependentFree n = do { addr <- malloc n; free addr }
+-- Good: data-dependent — obligation discharged on the returned address
+mallocFreeByReturnedAddr n = do { addr <- malloc n; free addr }
 
 -- Good: re-allocate the same address after freeing — noUntil is reset by malloc
-reallocSameAddr = do { a <- malloc 1; free a; a <- malloc 1; free a }
+mallocFreeReallocFree = do { a <- malloc 1; free a; a <- malloc 1; free a }
 
 -- Bad future: free(2) obligation remains
-leak = do { a1 <- malloc 1; free a1; _ <- malloc 2; return () }
+missingFree = do { a1 <- malloc 1; free a1; _ <- malloc 2; return () }
 
 -- Bad pre: malloc(1) precondition not met
 freeWithoutMalloc = free 1
 
--- Bad future: double-free collapses future to Bot
-doubleFree = do { addr <- malloc 1; free addr; free addr }
+-- Bad future: double-free immediately collapses future to Bot
+doubleFreeImmediate = do { addr <- malloc 1; free addr; free addr }
 
--- Bad: two mallocs, free one correctly, double-free the other
+-- Bad future: double-free with intervening work, still collapses to Bot
 doubleFreeWithWork = do
   { a1 <- malloc 1; a2 <- malloc 2; free a1; free a2; free a1 }
+\end{lstlisting}
+
+The three examples below return non-unit values, showing that future
+conditions are tracked regardless of the return type.
+
+\begin{lstlisting}
+-- Good: ret = Addr; future = finally(free(1)) — obligation visible in residual
+allocReturnAddr :: Effectful RE Addr
+allocReturnAddr = malloc 1
+
+-- Bad future: ret = (Addr, Addr); future = finally(free(1)) /\ finally(free(2))
+allocTwoReturnPair :: Effectful RE (Addr, Addr)
+allocTwoReturnPair = do { a1 <- malloc 1; a2 <- malloc 2; return (a1, a2) }
+
+-- Good: ret = Addr; future = noUntil(free(1), malloc(1)) — no pending finally
+allocFreeReturnAddr :: Effectful RE Addr
+allocFreeReturnAddr = do { a <- malloc 1; free a; return a }
 \end{lstlisting}
 
 \subsection{Mutex / Lock Lifecycle}
@@ -987,10 +1005,12 @@ Table~\ref{tab:examples-re} summarises the three RE domains.
 \toprule
 Domain & Bad program & Residual \lstinline{future} & Residual \lstinline{pre} \\
 \midrule
-Memory      & \lstinline{malloc 2} not freed    & $\finally{\mathtt{free}(2)}$ & $\univ$ \\
-Memory      & \lstinline{free} without malloc   & $\univ$ & $\varnothing$ \\
-Memory      & double-free of addr 1             & $\varnothing$ & $\univ$ \\
-Memory      & leak + double-free                & $\varnothing$ & $\univ$ \\
+Memory      & \lstinline{missingFree}           & $\finally{\mathtt{free}(2)}$ & $\univ$ \\
+Memory      & \lstinline{freeWithoutMalloc}     & $\univ$ & $\varnothing$ \\
+Memory      & \lstinline{doubleFreeImmediate}   & $\varnothing$ & $\univ$ \\
+Memory      & \lstinline{leakAndDoubleFree}     & $\varnothing$ & $\univ$ \\
+Memory      & \lstinline{allocReturnAddr}       & $\finally{\mathtt{free}(1)}$ & $\univ$ \\
+Memory      & \lstinline{allocTwoReturnPair}    & $\finally{\mathtt{free}(1)}\wedge\finally{\mathtt{free}(2)}$ & $\univ$ \\
 Mutex       & \lstinline{acquire 1} leaked      & $\finally{\mathtt{release}(1)}$ & $\univ$ \\
 Mutex       & release without acquire           & $\univ$ & $\varnothing$ \\
 Transaction & no commit/rollback                & $\finally{\mathtt{commit}}\vee\finally{\mathtt{rollback}}$ & $\univ$ \\
@@ -1112,11 +1132,11 @@ an unsatisfiable ownership constraint in \lstinline{pre}.
 \toprule
 Domain & Bad program & Residual \lstinline{post} & Residual \lstinline{pre} \\
 \midrule
-Heap memory  & \lstinline{Cell 1 2} not freed      & $\mathtt{Cell}\;1\;2$ (leaked) & $\top$ \\
-Heap memory  & read without ownership               & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;42$ \\
-Bank account & withdraw with insufficient balance   & $\mathtt{Cell}\;0\;{-50}$ & Conj of unsatisfiable guard \\
-Bank account & close with non-zero balance          & $\mathbf{emp}$ & Conj of unsatisfied $h[0]=0$ \\
-Linked list  & read node without ownership          & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;99$ \\
+Heap memory  & \lstinline{Cell 1 2} not freed  & $\mathtt{Cell}\;1\;2$ (leaked) & $\top$ \\
+Heap memory  & read without ownership           & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;42$ \\
+Bank account & insufficient balance             & $\mathtt{Cell}\;0\;{-50}$ & unsatisfiable guard \\
+Bank account & close with non-zero balance      & $\mathbf{emp}$ & unsatisfied $h[0]=0$ \\
+Linked list  & read without ownership           & $\mathbf{emp}$ & $\mathtt{Cell}\;0\;99$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1126,9 +1146,10 @@ Linked list  & read node without ownership          & $\mathbf{emp}$ & $\mathtt{
 \label{sec:monad-laws}
 %% =========================================================================
 
-Because \lstinline{future :: a -> eff} is a function, the monad laws
-are stated in terms of \lstinline{evalFuture e = future e (ret e)},
-the future condition evaluated at the computation's own return value.
+Because \lstinline{future} has type \lstinline{a -> eff}, the monad laws
+are stated in terms of \lstinline{evalFuture}, defined as
+\lstinline{future e (ret e)}: the future condition evaluated at the
+computation's own return value.
 We write $\widehat{\fut}(e)$ for $\mathit{evalFuture}(e)$ for brevity.
 The laws hold for the triple $(\ret, \post, \widehat{\fut})$ under the
 assumption that \lstinline{Composable} forms a monoid for
@@ -1167,9 +1188,13 @@ $\ret$: $\ret(e)$. \checkmark \quad
 $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark
 
 Let $fe = \mathtt{pure}(\ret(e))$.
-$\post(fe) = \varepsilon$ and
-$\widehat{\fut}(fe) = \mathtt{future}(fe)(\ret(fe))
-                    = (\lambda\,\_.\ \univ)(\ret(e)) = \univ$.
+Then $\post(fe) = \varepsilon$ and
+\[
+  \widehat{\fut}(fe)
+    = \mathtt{future}(fe)\bigl(\ret(fe)\bigr)
+    = (\lambda\,\_.\ \univ)\bigl(\ret(e)\bigr)
+    = \univ.
+\]
 
 \begin{align*}
   \widehat{\fut}(e \mathbin{>\!\!>\!\!=} \mathtt{pure})
@@ -1183,13 +1208,13 @@ $\widehat{\fut}(fe) = \mathtt{future}(fe)(\ret(fe))
 For $(e \mathbin{>\!\!>\!\!=} f) \mathbin{>\!\!>\!\!=} g = e \mathbin{>\!\!>\!\!=} (\lambda\,x.\ f\,x \mathbin{>\!\!>\!\!=} g)$,
 the $\ret$ and $\post$ components follow from associativity of
 \lstinline{<>}.
-For the future, both sides reduce to
+For the future, let $r_1 = \ret(e)$, $r_2 = \ret(f\,r_1)$, $r_3 = \ret(g\,r_2)$.
+Both sides reduce to
 \[
-  \bigl(\post(g\,(\ret(f\,(\ret(e)))))
-    \setminus
-    \bigl(\post(f\,(\ret(e))) \setminus \widehat{\fut}(e)\bigr)\bigr)
-  \wedge \widehat{\fut}(f\,(\ret(e)))
-  \wedge \widehat{\fut}(g\,(\ret(f\,(\ret(e)))))
+  \bigl(\post(g\,r_2) \setminus
+        \bigl(\post(f\,r_1) \setminus \widehat{\fut}(e)\bigr)\bigr)
+  \;\wedge\; \widehat{\fut}(f\,r_1)
+  \;\wedge\; \widehat{\fut}(g\,r_2)
 \]
 by repeated application of Equation~\eqref{eq:future-bind} and
 associativity of $\wedge$.

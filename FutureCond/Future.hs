@@ -53,15 +53,48 @@ instance Show RE where
     show Bot         = "∅"
     show Epsilon     = "ε"
     show (Single e)  = show e
-    show (Seq r1 r2) = "(" ++ show r1 ++ ") · (" ++ show r2 ++ ")"
+    -- top: ¬∅ = Σ*
+    show (Not Bot)   = "Σ*"
+    -- finally/previously: Σ* · ev · Σ*  →  F(ev)
+    show (Seq (Not Bot) (Seq (Single ev) (Not Bot))) =
+        "F(" ++ show ev ++ ")"
+    -- never: ¬F(ev)
+    show (Not (Seq (Not Bot) (Seq (Single ev) (Not Bot)))) =
+        "¬F(" ++ show ev ++ ")"
+    -- noUntil(e, g): ¬((Σ\{g})* · e · Σ*)
+    show (Not (Seq (Star (And (Single Wildcard) (Not (Single g)))) (Seq (Single e) (Not Bot)))) =
+        "noUntil(" ++ show e ++ ", " ++ show g ++ ")"
+    -- general cases
+    show (Seq r1 r2) = show r1 ++ " · " ++ show r2
     show (Or  r1 r2) = "(" ++ show r1 ++ ") ∨ (" ++ show r2 ++ ")"
     show (And r1 r2) = "(" ++ show r1 ++ ") ∧ (" ++ show r2 ++ ")"
     show (Star r)    = "(" ++ show r ++ ")*"
     show (Not r)     = "¬(" ++ show r ++ ")"
 
+-- Shortcuts for common patterns:
 -- Σ* — universal language, complement of the empty language
 top :: RE
 top = Not Bot
+
+-- G ev  — ev must occur at every step:  ev*
+globally :: Event -> RE
+globally ev = Star (Single ev)
+
+-- F ev  — ev must occur at some step:  Σ* · ev · Σ*
+finally :: Event -> RE
+finally ev = Seq top (Seq (Single ev) top)
+
+-- ¬F ev — ev must never occur again:  ¬(Σ* · ev · Σ*)
+never :: Event -> RE
+never ev = Not (finally ev)
+
+-- noUntil e g: e must not occur before g.  Formally: ¬((Σ\{g})* · e · Σ*)
+-- If g occurs first, e is unrestricted afterward.
+noUntil :: Event -> Event -> RE
+noUntil e g = Not (Seq (Star (And (Single Wildcard) (Not (Single g)))) (Seq (Single e) top))
+
+previously :: Event -> RE
+previously ev = Seq top (Seq (Single ev) top)
 
 -- ── Nullability: ν(r) ─────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r)
@@ -238,34 +271,6 @@ ltl_to_re (LTLUntil l1 l2)   = Seq . Star <$> toSingleStep l1          -- step(l
 ltl_to_re (LTLFinally l)     = Seq top <$> ltl_to_re l            -- Σ* · ⟦l⟧
 ltl_to_re (LTLGlobally l)    = Not . Seq top . Not                 -- ¬(Σ* · ¬⟦l⟧)
                                    <$> ltl_to_re l
-
--- ── Shorthands ────────────────────────────────────────────────────────────────
-
--- G ev  — ev must occur at every step:  ev*
-globally :: Event -> RE
-globally ev = Star (Single ev)
-
--- F ev  — ev must occur at some step:  Σ* · ev · Σ*
-finally :: Event -> RE
-finally ev = Seq top (Seq (Single ev) top)
-
--- ¬F ev — ev must never occur again:  ¬(Σ* · ev · Σ*)
-never :: Event -> RE
-never ev = Not (finally ev)
-
--- noUntil e g: event e must not occur before event g does.
--- Formally: ¬((Σ\{g})* · e · Σ*)
--- This says: in the remaining trace, there is no occurrence of e that
--- is not preceded by g.  If g occurs first, e is unrestricted afterward.
--- Use case: after free(addr), free(addr) must not occur again until
--- malloc(addr) happens first — allowing re-allocation but catching double-free.
-noUntil :: Event -> Event -> RE
-noUntil e g =
-    let notG = And (Single Wildcard) (Not (Single g))
-    in Not (Seq (Star notG) (Seq (Single e) top))
-
-previously :: Event -> RE
-previously ev = Seq top (Seq (Single ev) top)
 
 -- ── Composable class ──────────────────────────────────────────────────────────
 

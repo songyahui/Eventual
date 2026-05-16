@@ -286,7 +286,7 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
 ## File Layout
 
 ```
-Pledge/
+./
 ├── Pledge.hs          -- RE, SL, Composable, Pledge monad, LTL
 ├── pledge.cabal       -- cabal project (deps: containers, effectful)
 ├── cabal.project
@@ -314,7 +314,6 @@ Pledge/
 With cabal (recommended):
 
 ```bash
-cd Pledge
 cabal build
 cabal run pledge-main
 ```
@@ -322,7 +321,6 @@ cabal run pledge-main
 Or directly with `runghc`:
 
 ```bash
-cd Pledge
 runghc -i. Examples/Main.hs
 ```
 
@@ -339,7 +337,7 @@ Each example prints three fields per test program:
 The `Formalization/` directory contains a Lean 4 mechanization of the core theory, covering syntax, denotational semantics, nullability, Brzozowski derivatives, normalization soundness, the `Composable` algebra, and the `Pledge` monad laws.
 
 ```bash
-cd Pledge/Formalization
+cd Formalization
 lake build Pledge
 ```
 

@@ -1,4 +1,4 @@
-# FutureCond
+# Pledge
 
 A Haskell library for effectful computations with **temporal specifications**: pre-conditions, post-conditions, and *future conditions* that enforce what must happen later in program execution.
 
@@ -11,14 +11,14 @@ Pre- and post-conditions reason about a single call boundary. Many real-world co
 - Every `beginTx` must eventually reach a `commit` or `rollback`
 - Every `acquire` must eventually be followed by `release`
 
-`FutureCond` makes these obligations first-class values that compose automatically through monadic sequencing.
+`Pledge` makes these obligations first-class values that compose automatically through monadic sequencing.
 
 ## Core Type
 
 Every effectful operation carries three trace specifications:
 
 ```haskell
-data FutureCond eff a = FutureCond
+data Pledge eff a = Pledge
     { ret    :: a          -- return value
     , pre    :: eff        -- what must have happened immediately before
     , post   :: eff        -- what this operation produces
@@ -29,7 +29,7 @@ data FutureCond eff a = FutureCond
 `future` is **data-dependent**: it takes the operation's return value and produces the remaining obligation. This lets a single operation express obligations that name the exact resource handle returned:
 
 ```haskell
-malloc addr = FutureCond
+malloc addr = Pledge
     { ret    = addr
     , future = \a -> finally (Atom "free" (List [Num a]))
       --              ^ obligation names the address actually returned
@@ -41,13 +41,13 @@ malloc addr = FutureCond
 A convenience accessor evaluates `future` at the computation's own return value:
 
 ```haskell
-evalFuture :: FutureCond eff a -> eff
+evalFuture :: Pledge eff a -> eff
 evalFuture e = future e (ret e)
 ```
 
 ## Bind Laws
 
-When operations are sequenced via `>>=`, the `FutureCond` monad propagates specifications automatically.
+When operations are sequenced via `>>=`, the `Pledge` monad propagates specifications automatically.
 
 ### Precondition (Hoare-logic style)
 
@@ -142,7 +142,7 @@ ltl_to_re (LTLUntil l1 l2)  = Seq  (Star (toSingleStep l1)) (ltl_to_re l2)
 
 ## Separation Logic (SL)
 
-`FutureCond` can also instantiate `eff` to `SL` — symbolic separation-logic predicates — for heap-reasoning:
+`Pledge` can also instantiate `eff` to `SL` — symbolic separation-logic predicates — for heap-reasoning:
 
 ```haskell
 data SL
@@ -160,16 +160,16 @@ The `Composable SL` instance uses `SepStar` as concatenation, `Conj` as conjunct
 Example — heap cell alloc/free:
 
 ```haskell
-alloc :: Addr -> Val -> FutureCond SL ()
-alloc addr val = FutureCond
+alloc :: Addr -> Val -> Pledge SL ()
+alloc addr val = Pledge
     { ret    = ()
     , pre    = Top                -- no ownership required
     , post   = Cell addr val      -- establishes ownership
     , future = \_ -> Top          -- no deferred obligation
     }
 
-free :: Addr -> Val -> FutureCond SL ()
-free addr val = FutureCond
+free :: Addr -> Val -> Pledge SL ()
+free addr val = Pledge
     { ret    = ()
     , pre    = Cell addr val      -- must own the cell
     , post   = Emp                -- relinquishes ownership
@@ -198,7 +198,7 @@ class Composable a where
 
 ## Shadow: Spec alongside a Real Effect Handler
 
-`Shadow.hs` demonstrates running `FutureCond RE a` as a **pure specification** alongside a real `effectful` computation. The two monads stay completely separate — FutureCond checks the spec statically; the handler library runs the actual effects.
+`Shadow.hs` demonstrates running `Pledge RE a` as a **pure specification** alongside a real `effectful` computation. The two monads stay completely separate — Pledge checks the spec statically; the handler library runs the actual effects.
 
 A `FileSystem` effect is declared as a GADT and interpreted by two handlers:
 
@@ -213,7 +213,7 @@ fsHandler :: IORef [String] -> EffectHandler FileSystem '[IOE]
 
 -- Shadow: pairs the spec with the real Eff program
 data Shadow a = Shadow
-    { spec :: FutureCond RE a          -- checked statically
+    { spec :: Pledge RE a          -- checked statically
     , impl :: Eff '[FileSystem, IOE] a -- run by the handler
     }
 ```
@@ -241,16 +241,16 @@ goodFile = do
 ## Defining Your Own Operations
 
 ```haskell
-openFile :: String -> FutureCond RE ()
-openFile path = FutureCond
+openFile :: String -> Pledge RE ()
+openFile path = Pledge
     { ret    = ()
     , pre    = universe                                   -- no precondition
     , post   = Single (Atom "open" (List [Str path]))
     , future = \_ -> finally (Atom "close" (List [Str path]))
     }
 
-closeFile :: String -> FutureCond RE ()
-closeFile path = FutureCond
+closeFile :: String -> Pledge RE ()
+closeFile path = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
@@ -259,10 +259,10 @@ closeFile path = FutureCond
     }
 ```
 
-Sequence them in the `FutureCond` monad:
+Sequence them in the `Pledge` monad:
 
 ```haskell
-program :: FutureCond RE ()
+program :: Pledge RE ()
 program = do
     openFile "data.txt"
     closeFile "data.txt"
@@ -274,10 +274,10 @@ program = do
 ## Checking Results Programmatically
 
 ```haskell
-preOk :: FutureCond RE () -> Bool
+preOk :: Pledge RE () -> Bool
 preOk prog = normalize (pre prog) == universe
 
-futureOk :: FutureCond RE () -> Bool
+futureOk :: Pledge RE () -> Bool
 futureOk prog = normalize (evalFuture prog) == universe
 ```
 
@@ -286,9 +286,9 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
 ## File Layout
 
 ```
-FutureCond/
-├── FutureCond.hs          -- RE, SL, Composable, FutureCond monad, LTL
-├── futurecond.cabal       -- cabal project (deps: containers, effectful)
+Pledge/
+├── Pledge.hs          -- RE, SL, Composable, Pledge monad, LTL
+├── pledge.cabal       -- cabal project (deps: containers, effectful)
 ├── cabal.project
 └── Examples/
     ├── Main.hs            -- runs all examples
@@ -302,7 +302,7 @@ FutureCond/
     │   ├── NetworkProtocol.hs -- TCP-like three-way handshake
     │   ├── Capability.hs      -- token / privilege lifecycle
     │   ├── Sensor.hs          -- IoT sensor / motor control
-    │   └── Shadow.hs          -- FutureCond spec + effectful handler
+    │   └── Shadow.hs          -- Pledge spec + effectful handler
     └── SL/                -- separation-logic examples
         ├── HeapMemory.hs      -- alloc / free / read / write
         ├── BankAccount.hs     -- deposit / withdraw / transfer
@@ -314,15 +314,15 @@ FutureCond/
 With cabal (recommended):
 
 ```bash
-cd FutureCond
+cd Pledge
 cabal build
-cabal run futurecond-main
+cabal run pledge-main
 ```
 
 Or directly with `runghc`:
 
 ```bash
-cd FutureCond
+cd Pledge
 runghc -i. Examples/Main.hs
 ```
 
@@ -336,11 +336,11 @@ Each example prints three fields per test program:
 
 ## Lean 4 Formalization
 
-The `Formalization/` directory contains a Lean 4 mechanization of the core theory, covering syntax, denotational semantics, nullability, Brzozowski derivatives, normalization soundness, the `Composable` algebra, and the `FutureCond` monad laws.
+The `Formalization/` directory contains a Lean 4 mechanization of the core theory, covering syntax, denotational semantics, nullability, Brzozowski derivatives, normalization soundness, the `Composable` algebra, and the `Pledge` monad laws.
 
 ```bash
-cd FutureCond/Formalization
-lake build FutureCond
+cd Pledge/Formalization
+lake build Pledge
 ```
 
 ### Proof Status

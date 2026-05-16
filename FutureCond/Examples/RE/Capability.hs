@@ -1,18 +1,18 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Capability where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
-requestToken :: String -> FutureCond RE ()
-requestToken user = FutureCond
+requestToken :: String -> Pledge RE ()
+requestToken user = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "requestToken" (List [Str user]))
     , future = \_ -> finally (Atom "revokeToken" (List [Str user]))
     }
 
-useToken :: String -> String -> FutureCond RE ()
-useToken user resource = FutureCond
+useToken :: String -> String -> Pledge RE ()
+useToken user resource = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "accessResource" (List [Str user, Str resource]))
@@ -20,24 +20,24 @@ useToken user resource = FutureCond
     }
 
 -- Precondition: a token must have just been requested for this user
-revokeToken :: String -> FutureCond RE ()
-revokeToken user = FutureCond
+revokeToken :: String -> Pledge RE ()
+revokeToken user = Pledge
     { ret    = ()
     , pre    = Single (Atom "requestToken" (List [Str user]))
     , post   = Single (Atom "revokeToken" (List [Str user]))
     , future = \_ -> universe
     }
 
-escalate :: String -> FutureCond RE ()
-escalate role = FutureCond
+escalate :: String -> Pledge RE ()
+escalate role = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "escalate" (List [Str role]))
     , future = \_ -> finally (Atom "deescalate" (List [Str role]))
     }
 
-deescalate :: String -> FutureCond RE ()
-deescalate role = FutureCond
+deescalate :: String -> Pledge RE ()
+deescalate role = Pledge
     { ret    = ()
     , pre    = Single (Atom "escalate" (List [Str role]))
     , post   = Single (Atom "deescalate" (List [Str role]))
@@ -45,34 +45,34 @@ deescalate role = FutureCond
     }
 
 -- Good: token acquired and immediately revoked
-properTokenUse :: FutureCond RE ()
+properTokenUse :: Pledge RE ()
 properTokenUse = do
     requestToken "alice"
     revokeToken "alice"
 
 -- Good: privilege escalated and dropped
-safeEscalation :: FutureCond RE ()
+safeEscalation :: Pledge RE ()
 safeEscalation = do
     escalate "admin"
     deescalate "admin"
 
 -- Bad: token never revoked — future obligation remains
-tokenLeak :: FutureCond RE ()
+tokenLeak :: Pledge RE ()
 tokenLeak = do
     requestToken "mallory"
     useToken "mallory" "/secrets"
 
 -- Bad: privilege escalated but never dropped — future remains
-privilegeLeak :: FutureCond RE ()
+privilegeLeak :: Pledge RE ()
 privilegeLeak = do
     escalate "admin"
     useToken "system" "/root"
 
 -- Bad: revokeToken without requestToken — precondition violated
-revokeWithoutRequest :: FutureCond RE ()
+revokeWithoutRequest :: Pledge RE ()
 revokeWithoutRequest = revokeToken "eve"
 
-printResult :: String -> FutureCond RE () -> IO ()
+printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

@@ -1,8 +1,8 @@
 cabal-version: 3.0
-name:          futurecond
+name:          pledge
 version:       0.1.0.0
 
-executable futurecond-main
+executable pledge-main
   hs-source-dirs:   .
   main-is:          Examples/Main.hs
   default-language: GHC2021
@@ -13,7 +13,7 @@ executable futurecond-main
     , effectful
     , effectful-core
   other-modules:
-      FutureCond
+      Pledge
       Examples.UnitTest
       Examples.RE.Memory
       Examples.RE.FileHandle

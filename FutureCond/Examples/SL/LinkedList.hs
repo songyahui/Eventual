@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.SL.LinkedList where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
 -- ── Model ─────────────────────────────────────────────────────────────────────
 -- A singly-linked list node at address `addr` occupies two consecutive cells:
@@ -14,8 +14,8 @@ import FutureCond
 
 -- allocNode addr val next: allocates a fresh node.
 -- Post: SepStar of the two cells (disjoint ownership).
-allocNode :: Addr -> Val -> Val -> FutureCond SL ()
-allocNode addr val next = FutureCond
+allocNode :: Addr -> Val -> Val -> Pledge SL ()
+allocNode addr val next = Pledge
     { ret    = ()
     , pre    = Top
     , post   = SepStar (Cell addr val) (Cell (addr+1) next)
@@ -25,8 +25,8 @@ allocNode addr val next = FutureCond
 -- freeNode addr val next: releases a node.
 -- Pre:  own both cells of the node.
 -- Post: Emp.
-freeNode :: Addr -> Val -> Val -> FutureCond SL ()
-freeNode addr val next = FutureCond
+freeNode :: Addr -> Val -> Val -> Pledge SL ()
+freeNode addr val next = Pledge
     { ret    = ()
     , pre    = SepStar (Cell addr val) (Cell (addr+1) next)
     , post   = Emp
@@ -34,8 +34,8 @@ freeNode addr val next = FutureCond
     }
 
 -- readVal addr val: reads the payload; requires (and produces nothing from) val cell.
-readVal :: Addr -> Val -> FutureCond SL ()
-readVal addr val = FutureCond
+readVal :: Addr -> Val -> Pledge SL ()
+readVal addr val = Pledge
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
@@ -43,8 +43,8 @@ readVal addr val = FutureCond
     }
 
 -- readNext addr next: reads the next pointer.
-readNext :: Addr -> Val -> FutureCond SL ()
-readNext addr next = FutureCond
+readNext :: Addr -> Val -> Pledge SL ()
+readNext addr next = Pledge
     { ret    = ()
     , pre    = Cell (addr+1) next
     , post   = Emp
@@ -54,8 +54,8 @@ readNext addr next = FutureCond
 -- updateNext addr oldNext newNext: rewires the next pointer.
 -- Pre:  own the next cell with oldNext.
 -- Post: Cell (addr+1) newNext.
-updateNext :: Addr -> Val -> Val -> FutureCond SL ()
-updateNext addr oldNext newNext = FutureCond
+updateNext :: Addr -> Val -> Val -> Pledge SL ()
+updateNext addr oldNext newNext = Pledge
     { ret    = ()
     , pre    = Cell (addr+1) oldNext
     , post   = Cell (addr+1) newNext
@@ -66,20 +66,20 @@ updateNext addr oldNext newNext = FutureCond
 
 -- Good: single-node list [10] at addr 0, terminated with -1.
 -- Post: SepStar (Cell 0 10) (Cell 1 (-1))
-singleNode :: FutureCond SL ()
+singleNode :: Pledge SL ()
 singleNode = allocNode 0 10 (-1)
 
 -- Good: two-node list [10 -> 20] at addrs 0 and 2.
 -- Node 0: val=10, next=2
 -- Node 2: val=20, next=-1
 -- Post: SepStar of four cells (two nodes, each two cells).
-twoNodeList :: FutureCond SL ()
+twoNodeList :: Pledge SL ()
 twoNodeList = do
     allocNode 0 10 2      -- head: val=10, next→addr 2
     allocNode 2 20 (-1)   -- tail: val=20, next=NULL
 
 -- Good: three-node list [5 -> 15 -> 25].
-threeNodeList :: FutureCond SL ()
+threeNodeList :: Pledge SL ()
 threeNodeList = do
     allocNode 0 5  2
     allocNode 2 15 4
@@ -87,30 +87,30 @@ threeNodeList = do
 
 -- Good: alloc a node then immediately free it.
 -- Post normalises toward Emp; pre carries the Wand residual.
-allocFreeNode :: FutureCond SL ()
+allocFreeNode :: Pledge SL ()
 allocFreeNode = do
     allocNode 0 42 (-1)
     freeNode  0 42 (-1)
 
 -- Good: build a two-node list then rewire head's next to NULL (unlink tail).
 -- Before unlink: 0→2→NULL.  After: 0→NULL (tail still allocated but unreachable).
-unlinkTail :: FutureCond SL ()
+unlinkTail :: Pledge SL ()
 unlinkTail = do
     allocNode  0 10 2
     allocNode  2 20 (-1)
     updateNext 0 2  (-1)   -- head now points to NULL
 
 -- Bad: read a node's value without owning it — pre = Cell 0 99, unmet.
-readWithoutOwnership :: FutureCond SL ()
+readWithoutOwnership :: Pledge SL ()
 readWithoutOwnership = readVal 0 99
 
 -- Bad: free a node that was never allocated — pre = SepStar (Cell 0 1) (Cell 1 (-1)), unmet.
-freeWithoutAlloc :: FutureCond SL ()
+freeWithoutAlloc :: Pledge SL ()
 freeWithoutAlloc = freeNode 0 1 (-1)
 
 -- ── Display ───────────────────────────────────────────────────────────────────
 
-printResult :: String -> FutureCond SL () -> IO ()
+printResult :: String -> Pledge SL () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalizeSL (pre    prog))

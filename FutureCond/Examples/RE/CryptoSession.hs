@@ -1,18 +1,18 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.CryptoSession where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
-initSession :: String -> FutureCond RE ()
-initSession sid = FutureCond
+initSession :: String -> Pledge RE ()
+initSession sid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "initSession" (List [Str sid]))
     , future = \_ -> finally (Atom "finalizeSession" (List [Str sid]))
     }
 
-finalizeSession :: String -> FutureCond RE ()
-finalizeSession sid = FutureCond
+finalizeSession :: String -> Pledge RE ()
+finalizeSession sid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "finalizeSession" (List [Str sid]))
@@ -20,8 +20,8 @@ finalizeSession sid = FutureCond
     }
 
 -- Nonce must be consumed exactly once (use-once enforcement via future)
-generateNonce :: Int -> FutureCond RE ()
-generateNonce nid = FutureCond
+generateNonce :: Int -> Pledge RE ()
+generateNonce nid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "generateNonce" (List [Num nid]))
@@ -29,16 +29,16 @@ generateNonce nid = FutureCond
     }
 
 -- Precondition: nonce must have just been generated
-consumeNonce :: Int -> FutureCond RE ()
-consumeNonce nid = FutureCond
+consumeNonce :: Int -> Pledge RE ()
+consumeNonce nid = Pledge
     { ret    = ()
     , pre    = Single (Atom "generateNonce" (List [Num nid]))
     , post   = Single (Atom "consumeNonce" (List [Num nid]))
     , future = \_ -> universe
     }
 
-encrypt :: String -> String -> FutureCond RE ()
-encrypt sid msg = FutureCond
+encrypt :: String -> String -> Pledge RE ()
+encrypt sid msg = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "encrypt" (List [Str sid, Str msg]))
@@ -46,7 +46,7 @@ encrypt sid msg = FutureCond
     }
 
 -- Good: session opened, nonce generated and consumed, session closed
-goodHandshake :: FutureCond RE ()
+goodHandshake :: Pledge RE ()
 goodHandshake = do
     initSession "sess-1"
     generateNonce 42
@@ -55,7 +55,7 @@ goodHandshake = do
     finalizeSession "sess-1"
 
 -- Bad: nonce generated but never consumed (replay attack risk) — future remains
-nonceLeak :: FutureCond RE ()
+nonceLeak :: Pledge RE ()
 nonceLeak = do
     initSession "sess-2"
     generateNonce 99
@@ -63,14 +63,14 @@ nonceLeak = do
     finalizeSession "sess-2"
 
 -- Bad: session never finalized — future remains
-unclosedSession :: FutureCond RE ()
+unclosedSession :: Pledge RE ()
 unclosedSession = do
     initSession "sess-3"
     generateNonce 7
     consumeNonce 7
     encrypt "sess-3" "data"
 
-printResult :: String -> FutureCond RE () -> IO ()
+printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

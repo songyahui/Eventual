@@ -1,18 +1,18 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Sensor where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
-sensorInit :: Int -> FutureCond RE ()
-sensorInit sid = FutureCond
+sensorInit :: Int -> Pledge RE ()
+sensorInit sid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sensorInit" (List [Num sid]))
     , future = \_ -> finally (Atom "sensorSleep" (List [Num sid]))
     }
 
-sensorRead :: Int -> FutureCond RE ()
-sensorRead sid = FutureCond
+sensorRead :: Int -> Pledge RE ()
+sensorRead sid = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
@@ -21,8 +21,8 @@ sensorRead sid = FutureCond
     }
 
 -- Precondition: sensor must have been initialised or read before sleeping
-sensorSleep :: Int -> FutureCond RE ()
-sensorSleep sid = FutureCond
+sensorSleep :: Int -> Pledge RE ()
+sensorSleep sid = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
@@ -30,24 +30,24 @@ sensorSleep sid = FutureCond
     , future = \_ -> universe
     }
 
-motorOn :: Int -> FutureCond RE ()
-motorOn mid = FutureCond
+motorOn :: Int -> Pledge RE ()
+motorOn mid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "motorOn" (List [Num mid]))
     , future = \_ -> finally (Atom "motorOff" (List [Num mid]))
     }
 
-motorOff :: Int -> FutureCond RE ()
-motorOff mid = FutureCond
+motorOff :: Int -> Pledge RE ()
+motorOff mid = Pledge
     { ret    = ()
     , pre    = Single (Atom "motorOn" (List [Num mid]))
     , post   = Single (Atom "motorOff" (List [Num mid]))
     , future = \_ -> universe
     }
 
-actuate :: String -> Int -> FutureCond RE ()
-actuate device level = FutureCond
+actuate :: String -> Int -> Pledge RE ()
+actuate device level = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "actuate" (List [Str device, Num level]))
@@ -55,21 +55,21 @@ actuate device level = FutureCond
     }
 
 -- Good: init, read, sleep
-safeSensorCycle :: FutureCond RE ()
+safeSensorCycle :: Pledge RE ()
 safeSensorCycle = do
     sensorInit 1
     sensorRead 1
     sensorSleep 1
 
 -- Good: motor on, actuate, motor off
-safeMotorCycle :: FutureCond RE ()
+safeMotorCycle :: Pledge RE ()
 safeMotorCycle = do
     motorOn 1
     actuate "pump" 80
     motorOff 1
 
 -- Bad: sensor 2 never slept — future pending
-sensorLeftOn :: FutureCond RE ()
+sensorLeftOn :: Pledge RE ()
 sensorLeftOn = do
     sensorInit 1
     sensorSleep 1
@@ -78,16 +78,16 @@ sensorLeftOn = do
     -- sensorSleep 2 missing
 
 -- Bad: motor left running — future pending
-motorLeftRunning :: FutureCond RE ()
+motorLeftRunning :: Pledge RE ()
 motorLeftRunning = do
     motorOn 3
     actuate "fan" 50
 
 -- Bad: sensorRead without init — precondition violated
-readWithoutInit :: FutureCond RE ()
+readWithoutInit :: Pledge RE ()
 readWithoutInit = sensorRead 5
 
-printResult :: String -> FutureCond RE () -> IO ()
+printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

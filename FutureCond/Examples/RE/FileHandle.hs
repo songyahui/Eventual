@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.FileHandle where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
-openFile :: String -> FutureCond RE ()
-openFile path = FutureCond
+openFile :: String -> Pledge RE ()
+openFile path = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "open" (List [Str path]))
@@ -12,8 +12,8 @@ openFile path = FutureCond
     }
 
 -- Precondition: last event was open or read (file must be open)
-readFile' :: String -> FutureCond RE ()
-readFile' path = FutureCond
+readFile' :: String -> Pledge RE ()
+readFile' path = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
@@ -22,8 +22,8 @@ readFile' path = FutureCond
     }
 
 -- Precondition: last event was open or read (file must be open)
-closeFile :: String -> FutureCond RE ()
-closeFile path = FutureCond
+closeFile :: String -> Pledge RE ()
+closeFile path = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
@@ -32,30 +32,30 @@ closeFile path = FutureCond
     }
 
 -- Good: open, read, close — preconditions satisfied, future discharged
-goodProgram :: FutureCond RE ()
+goodProgram :: Pledge RE ()
 goodProgram = do
     openFile "data.txt"
     readFile' "data.txt"
     closeFile "data.txt"
 
 -- Good: open then close immediately (no read)
-openThenClose :: FutureCond RE ()
+openThenClose :: Pledge RE ()
 openThenClose = do
     openFile "log.txt"
     closeFile "log.txt"
 
 -- Bad: open two files, only close one — future obligation for b.txt remains
-leakedHandle :: FutureCond RE ()
+leakedHandle :: Pledge RE ()
 leakedHandle = do
     openFile "a.txt"
     closeFile "a.txt"
     openFile "b.txt"    -- future: close(b.txt) pending
 
 -- Bad: read without open — precondition violated (pre = Bot)
-readWithoutOpen :: FutureCond RE ()
+readWithoutOpen :: Pledge RE ()
 readWithoutOpen = readFile' "secret.txt"
 
-printResult :: String -> FutureCond RE () -> IO ()
+printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

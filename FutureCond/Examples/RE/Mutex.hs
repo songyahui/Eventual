@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Mutex where
 import Prelude hiding ((<>))
-import FutureCond
+import Pledge
 
-acquire :: Int -> FutureCond RE ()
-acquire mid = FutureCond
+acquire :: Int -> Pledge RE ()
+acquire mid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "acquire" (List [Num mid]))
@@ -12,16 +12,16 @@ acquire mid = FutureCond
     }
 
 -- Precondition: acquire(mid) must have been the immediately preceding event
-release :: Int -> FutureCond RE ()
-release mid = FutureCond
+release :: Int -> Pledge RE ()
+release mid = Pledge
     { ret    = ()
     , pre    = Single (Atom "acquire" (List [Num mid]))
     , post   = Single (Atom "release" (List [Num mid]))
     , future = \_ -> universe
     }
 
-criticalWork :: FutureCond RE ()
-criticalWork = FutureCond
+criticalWork :: Pledge RE ()
+criticalWork = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "work" (List []))
@@ -29,13 +29,13 @@ criticalWork = FutureCond
     }
 
 -- Good: acquire, work, release
-safeSection :: FutureCond RE ()
+safeSection :: Pledge RE ()
 safeSection = do
     acquire 1
     release 1
 
 -- Good: nested locks, released in reverse order
-nestedLocks :: FutureCond RE ()
+nestedLocks :: Pledge RE ()
 nestedLocks = do
     acquire 1
     acquire 2
@@ -43,7 +43,7 @@ nestedLocks = do
     release 1
 
 -- Bad: acquire two locks, release only one — lock 1 future obligation remains
-lockLeak :: FutureCond RE ()
+lockLeak :: Pledge RE ()
 lockLeak = do
     acquire 1
     acquire 2
@@ -51,10 +51,10 @@ lockLeak = do
     -- release 1 missing
 
 -- Bad: release without acquire — precondition violated (pre = Bot)
-releaseWithoutAcquire :: FutureCond RE ()
+releaseWithoutAcquire :: Pledge RE ()
 releaseWithoutAcquire = release 1
 
-printResult :: String -> FutureCond RE () -> IO ()
+printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

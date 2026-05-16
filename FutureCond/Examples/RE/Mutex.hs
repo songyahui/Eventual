@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Mutex where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
-acquire :: Int -> Effectful RE ()
-acquire mid = Effectful
+acquire :: Int -> FutureCond RE ()
+acquire mid = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "acquire" (List [Num mid]))
@@ -12,16 +12,16 @@ acquire mid = Effectful
     }
 
 -- Precondition: acquire(mid) must have been the immediately preceding event
-release :: Int -> Effectful RE ()
-release mid = Effectful
+release :: Int -> FutureCond RE ()
+release mid = FutureCond
     { ret    = ()
     , pre    = Single (Atom "acquire" (List [Num mid]))
     , post   = Single (Atom "release" (List [Num mid]))
     , future = \_ -> universe
     }
 
-criticalWork :: Effectful RE ()
-criticalWork = Effectful
+criticalWork :: FutureCond RE ()
+criticalWork = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "work" (List []))
@@ -29,13 +29,13 @@ criticalWork = Effectful
     }
 
 -- Good: acquire, work, release
-safeSection :: Effectful RE ()
+safeSection :: FutureCond RE ()
 safeSection = do
     acquire 1
     release 1
 
 -- Good: nested locks, released in reverse order
-nestedLocks :: Effectful RE ()
+nestedLocks :: FutureCond RE ()
 nestedLocks = do
     acquire 1
     acquire 2
@@ -43,7 +43,7 @@ nestedLocks = do
     release 1
 
 -- Bad: acquire two locks, release only one — lock 1 future obligation remains
-lockLeak :: Effectful RE ()
+lockLeak :: FutureCond RE ()
 lockLeak = do
     acquire 1
     acquire 2
@@ -51,10 +51,10 @@ lockLeak = do
     -- release 1 missing
 
 -- Bad: release without acquire — precondition violated (pre = Bot)
-releaseWithoutAcquire :: Effectful RE ()
+releaseWithoutAcquire :: FutureCond RE ()
 releaseWithoutAcquire = release 1
 
-printResult :: String -> Effectful RE () -> IO ()
+printResult :: String -> FutureCond RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

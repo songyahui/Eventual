@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.FileHandle where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
-openFile :: String -> Effectful RE ()
-openFile path = Effectful
+openFile :: String -> FutureCond RE ()
+openFile path = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "open" (List [Str path]))
@@ -12,8 +12,8 @@ openFile path = Effectful
     }
 
 -- Precondition: last event was open or read (file must be open)
-readFile' :: String -> Effectful RE ()
-readFile' path = Effectful
+readFile' :: String -> FutureCond RE ()
+readFile' path = FutureCond
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
@@ -22,8 +22,8 @@ readFile' path = Effectful
     }
 
 -- Precondition: last event was open or read (file must be open)
-closeFile :: String -> Effectful RE ()
-closeFile path = Effectful
+closeFile :: String -> FutureCond RE ()
+closeFile path = FutureCond
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
@@ -32,30 +32,30 @@ closeFile path = Effectful
     }
 
 -- Good: open, read, close — preconditions satisfied, future discharged
-goodProgram :: Effectful RE ()
+goodProgram :: FutureCond RE ()
 goodProgram = do
     openFile "data.txt"
     readFile' "data.txt"
     closeFile "data.txt"
 
 -- Good: open then close immediately (no read)
-openThenClose :: Effectful RE ()
+openThenClose :: FutureCond RE ()
 openThenClose = do
     openFile "log.txt"
     closeFile "log.txt"
 
 -- Bad: open two files, only close one — future obligation for b.txt remains
-leakedHandle :: Effectful RE ()
+leakedHandle :: FutureCond RE ()
 leakedHandle = do
     openFile "a.txt"
     closeFile "a.txt"
     openFile "b.txt"    -- future: close(b.txt) pending
 
 -- Bad: read without open — precondition violated (pre = Bot)
-readWithoutOpen :: Effectful RE ()
+readWithoutOpen :: FutureCond RE ()
 readWithoutOpen = readFile' "secret.txt"
 
-printResult :: String -> Effectful RE () -> IO ()
+printResult :: String -> FutureCond RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

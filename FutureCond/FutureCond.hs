@@ -1,6 +1,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 
-module Future where
+module FutureCond where
 
 import Prelude hiding ((<>))
 import Data.List (union, intercalate, subsequences, nub)
@@ -349,7 +349,7 @@ normalize r = case r of
     isTop (Not Bot) = True
     isTop _         = False
 
--- ── Effectful monad ───────────────────────────────────────────────────────────
+-- ── FutureCond monad ───────────────────────────────────────────────────────────
 
 -- future is now indexed by the return value (direction 1: data-dependent
 -- future conditions).  This lets an operation's temporal obligation refer
@@ -357,7 +357,7 @@ normalize r = case r of
 --   mallocFresh addr = Effectful { ..., future = \a -> finally(free(a)) }
 -- so that the exact address returned drives the obligation.
 
-data Effectful eff a = Effectful
+data FutureCond eff a = FutureCond
     { ret    :: a
     , pre    :: eff
     , post   :: eff
@@ -366,23 +366,23 @@ data Effectful eff a = Effectful
 
 -- Convenience: evaluate the future condition at the computation's own
 -- return value.  Use this wherever you previously wrote `future e`.
-evalFuture :: Effectful eff a -> eff
+evalFuture :: FutureCond eff a -> eff
 evalFuture e = future e (ret e)
 
-instance Functor (Effectful eff) where
+instance Functor (FutureCond eff) where
     -- fmap changes the return type from a to b, so future must become
     -- b -> eff.  We evaluate it at the known original return value and
     -- ignore the new b argument (the obligation is already determined).
     fmap f e = e { ret = f (ret e), future = \_ -> future e (ret e) }
 
-instance Composable eff => Applicative (Effectful eff) where
-    pure x = Effectful
+instance Composable eff => Applicative (FutureCond eff) where
+    pure x = FutureCond
         { ret    = x
         , pre    = universe
         , post   = empty
         , future = \_ -> universe
         }
-    ef <*> ex = Effectful
+    ef <*> ex = FutureCond
         { ret    = ret ef (ret ex)
         -- Traditional precondition: pre of ef, plus whatever of pre ex
         -- is not already discharged by post ef.
@@ -393,9 +393,9 @@ instance Composable eff => Applicative (Effectful eff) where
         , future = \_ -> (post ex \\ future ef (ret ef)) /\ future ex (ret ex)
         }
 
-instance Composable eff => Monad (Effectful eff) where
+instance Composable eff => Monad (FutureCond eff) where
     return = pure
-    e >>= f = let fe = f (ret e) in Effectful
+    e >>= f = let fe = f (ret e) in FutureCond
         { ret    = ret fe
         -- Traditional precondition: pre of e, plus the residual of pre fe
         -- not covered by post e.  Mirrors the Hoare rule:

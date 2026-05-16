@@ -1,12 +1,12 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.NetworkProtocol where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
 -- TCP-like three-way handshake modelled as effectful steps.
 
-sendSYN :: Effectful RE ()
-sendSYN = Effectful
+sendSYN :: FutureCond RE ()
+sendSYN = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendSYN" (List []))
@@ -14,8 +14,8 @@ sendSYN = Effectful
     }
 
 -- Precondition: sendSYN must have just occurred
-recvSYNACK :: Effectful RE ()
-recvSYNACK = Effectful
+recvSYNACK :: FutureCond RE ()
+recvSYNACK = FutureCond
     { ret    = ()
     , pre    = Single (Atom "sendSYN" (List []))
     , post   = Single (Atom "recvSYNACK" (List []))
@@ -23,32 +23,32 @@ recvSYNACK = Effectful
     }
 
 -- Precondition: recvSYNACK must have just occurred
-sendACK :: Effectful RE ()
-sendACK = Effectful
+sendACK :: FutureCond RE ()
+sendACK = FutureCond
     { ret    = ()
     , pre    = Single (Atom "recvSYNACK" (List []))
     , post   = Single (Atom "sendACK" (List []))
     , future = \_ -> universe
     }
 
-sendData :: String -> Effectful RE ()
-sendData payload = Effectful
+sendData :: String -> FutureCond RE ()
+sendData payload = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendData" (List [Str payload]))
     , future = \_ -> universe
     }
 
-sendFIN :: Effectful RE ()
-sendFIN = Effectful
+sendFIN :: FutureCond RE ()
+sendFIN = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendFIN" (List []))
     , future = \_ -> finally (Atom "recvFINACK" (List []))
     }
 
-recvFINACK :: Effectful RE ()
-recvFINACK = Effectful
+recvFINACK :: FutureCond RE ()
+recvFINACK = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "recvFINACK" (List []))
@@ -56,7 +56,7 @@ recvFINACK = Effectful
     }
 
 -- Good: complete handshake, data, teardown — all preconditions met, no future pending
-fullSession :: Effectful RE ()
+fullSession :: FutureCond RE ()
 fullSession = do
     sendSYN
     recvSYNACK
@@ -66,18 +66,18 @@ fullSession = do
     recvFINACK
 
 -- Bad: SYN sent but handshake never completed — future pending
-stalledHandshake :: Effectful RE ()
+stalledHandshake :: FutureCond RE ()
 stalledHandshake = do
     sendSYN
 
 -- Bad: recvSYNACK called without sendSYN — precondition violated
-outOfOrder :: Effectful RE ()
+outOfOrder :: FutureCond RE ()
 outOfOrder = do
     recvSYNACK
     sendACK
 
 -- Bad: connection never torn down — future pending
-teardownMissed :: Effectful RE ()
+teardownMissed :: FutureCond RE ()
 teardownMissed = do
     sendSYN
     recvSYNACK
@@ -86,7 +86,7 @@ teardownMissed = do
     sendFIN
     -- missing recvFINACK
 
-printResult :: String -> Effectful RE () -> IO ()
+printResult :: String -> FutureCond RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

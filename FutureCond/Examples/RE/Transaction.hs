@@ -1,19 +1,19 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Transaction where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
 -- Begin a transaction: future = eventually commit or rollback
-beginTx :: Effectful RE ()
-beginTx = Effectful
+beginTx :: FutureCond RE ()
+beginTx = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "beginTx" (List []))
     , future = \_ -> Or (finally (Atom "commit" (List []))) (finally (Atom "rollback" (List [])))
     }
 
-dbWrite :: String -> Int -> Effectful RE ()
-dbWrite key val = Effectful
+dbWrite :: String -> Int -> FutureCond RE ()
+dbWrite key val = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "write" (List [Str key, Num val]))
@@ -21,8 +21,8 @@ dbWrite key val = Effectful
     }
 
 -- Precondition: a write must have just occurred (commit requires at least one write)
-commit :: Effectful RE ()
-commit = Effectful
+commit :: FutureCond RE ()
+commit = FutureCond
     { ret    = ()
     , pre    = Or (Single (Atom "beginTx" (List [])))
                   (Single (Atom "write"   (List [])))  -- wildcard args checked by RE matching
@@ -30,8 +30,8 @@ commit = Effectful
     , future = \_ -> universe
     }
 
-rollback :: Effectful RE ()
-rollback = Effectful
+rollback :: FutureCond RE ()
+rollback = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "rollback" (List []))
@@ -39,26 +39,26 @@ rollback = Effectful
     }
 
 -- Good: begin, write, commit
-committedTx :: Effectful RE ()
+committedTx :: FutureCond RE ()
 committedTx = do
     beginTx
     dbWrite "balance" 100
     commit
 
 -- Good: begin, write, rollback
-rolledBackTx :: Effectful RE ()
+rolledBackTx :: FutureCond RE ()
 rolledBackTx = do
     beginTx
     dbWrite "balance" 100
     rollback
 
 -- Bad: begin and write but no commit or rollback — future obligation remains
-openTx :: Effectful RE ()
+openTx :: FutureCond RE ()
 openTx = do
     beginTx
     dbWrite "balance" 100
 
-printResult :: String -> Effectful RE () -> IO ()
+printResult :: String -> FutureCond RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

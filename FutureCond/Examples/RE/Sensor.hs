@@ -1,18 +1,18 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Sensor where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
-sensorInit :: Int -> Effectful RE ()
-sensorInit sid = Effectful
+sensorInit :: Int -> FutureCond RE ()
+sensorInit sid = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sensorInit" (List [Num sid]))
     , future = \_ -> finally (Atom "sensorSleep" (List [Num sid]))
     }
 
-sensorRead :: Int -> Effectful RE ()
-sensorRead sid = Effectful
+sensorRead :: Int -> FutureCond RE ()
+sensorRead sid = FutureCond
     { ret    = ()
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
@@ -21,8 +21,8 @@ sensorRead sid = Effectful
     }
 
 -- Precondition: sensor must have been initialised or read before sleeping
-sensorSleep :: Int -> Effectful RE ()
-sensorSleep sid = Effectful
+sensorSleep :: Int -> FutureCond RE ()
+sensorSleep sid = FutureCond
     { ret    = ()
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
@@ -30,24 +30,24 @@ sensorSleep sid = Effectful
     , future = \_ -> universe
     }
 
-motorOn :: Int -> Effectful RE ()
-motorOn mid = Effectful
+motorOn :: Int -> FutureCond RE ()
+motorOn mid = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "motorOn" (List [Num mid]))
     , future = \_ -> finally (Atom "motorOff" (List [Num mid]))
     }
 
-motorOff :: Int -> Effectful RE ()
-motorOff mid = Effectful
+motorOff :: Int -> FutureCond RE ()
+motorOff mid = FutureCond
     { ret    = ()
     , pre    = Single (Atom "motorOn" (List [Num mid]))
     , post   = Single (Atom "motorOff" (List [Num mid]))
     , future = \_ -> universe
     }
 
-actuate :: String -> Int -> Effectful RE ()
-actuate device level = Effectful
+actuate :: String -> Int -> FutureCond RE ()
+actuate device level = FutureCond
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "actuate" (List [Str device, Num level]))
@@ -55,21 +55,21 @@ actuate device level = Effectful
     }
 
 -- Good: init, read, sleep
-safeSensorCycle :: Effectful RE ()
+safeSensorCycle :: FutureCond RE ()
 safeSensorCycle = do
     sensorInit 1
     sensorRead 1
     sensorSleep 1
 
 -- Good: motor on, actuate, motor off
-safeMotorCycle :: Effectful RE ()
+safeMotorCycle :: FutureCond RE ()
 safeMotorCycle = do
     motorOn 1
     actuate "pump" 80
     motorOff 1
 
 -- Bad: sensor 2 never slept — future pending
-sensorLeftOn :: Effectful RE ()
+sensorLeftOn :: FutureCond RE ()
 sensorLeftOn = do
     sensorInit 1
     sensorSleep 1
@@ -78,16 +78,16 @@ sensorLeftOn = do
     -- sensorSleep 2 missing
 
 -- Bad: motor left running — future pending
-motorLeftRunning :: Effectful RE ()
+motorLeftRunning :: FutureCond RE ()
 motorLeftRunning = do
     motorOn 3
     actuate "fan" 50
 
 -- Bad: sensorRead without init — precondition violated
-readWithoutInit :: Effectful RE ()
+readWithoutInit :: FutureCond RE ()
 readWithoutInit = sensorRead 5
 
-printResult :: String -> Effectful RE () -> IO ()
+printResult :: String -> FutureCond RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))

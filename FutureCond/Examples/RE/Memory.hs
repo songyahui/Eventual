@@ -1,21 +1,21 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Memory where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
 -- free requires that malloc was the immediately preceding post-event.
 -- For interleaved mallocs use `pre = universe` and rely on `future` instead.
 
-malloc :: Addr -> Effectful RE Addr
-malloc addr = Effectful
+malloc :: Addr -> FutureCond RE Addr
+malloc addr = FutureCond
     { ret    = addr
     , pre    = universe
     , post   = Single (Atom "malloc" (List [Num addr]))
     , future = \a -> finally (Atom "free" (List [Num a]))
     }
 
-free :: Addr -> Effectful RE ()
-free addr = Effectful
+free :: Addr -> FutureCond RE ()
+free addr = FutureCond
     { ret    = ()
     , pre    = previously (Atom "malloc" (List [Num addr]))
     , post   = Single (Atom "free" (List [Num addr]))
@@ -29,13 +29,13 @@ free addr = Effectful
 
 -- Good: malloc uses the returned address to parameterise the free obligation.
 -- Demonstrates data-dependent future: future = \a -> finally(free(a)).
-mallocFreeByReturnedAddr :: Addr -> Effectful RE ()
+mallocFreeByReturnedAddr :: Addr -> FutureCond RE ()
 mallocFreeByReturnedAddr n = do
     addr <- malloc n
     free addr
 
 -- Good: two sequential malloc/free pairs — each obligation is discharged in turn.
-mallocFreeSequential :: Effectful RE ()
+mallocFreeSequential :: FutureCond RE ()
 mallocFreeSequential = do
     a1 <- malloc 1
     free a1
@@ -43,11 +43,11 @@ mallocFreeSequential = do
     free a2
 
 -- Good: malloc and free every address in a loop.
-loopAllFreed :: Int -> Effectful RE ()
+loopAllFreed :: Int -> FutureCond RE ()
 loopAllFreed n = foldr (>>) (return ()) [malloc i >>= free | i <- [1..n]]
 
 -- Bad: malloc 1 and 2, only free 1 — future obligation for address 2 remains.
-missingFree :: Effectful RE ()
+missingFree :: FutureCond RE ()
 missingFree = do
     a1 <- malloc 1
     free a1
@@ -55,13 +55,13 @@ missingFree = do
     return ()
 
 -- Bad: free without a preceding malloc — precondition violated (pre = Bot).
-freeWithoutMalloc :: Effectful RE ()
+freeWithoutMalloc :: FutureCond RE ()
 freeWithoutMalloc = free 1
 
 -- Bad: allocate via malloc, free the wrong address.
 -- future of (malloc 1) evaluates to finally(free(1));
 -- free 2 does not discharge it, so finally(free(1)) remains.
-wrongAddrFree :: Effectful RE ()
+wrongAddrFree :: FutureCond RE ()
 wrongAddrFree = do
     addr <- malloc 1
     free (addr + 1)   -- frees address 2, obligation for address 1 remains
@@ -70,7 +70,7 @@ wrongAddrFree = do
 -- Bad: free the same address twice immediately.
 -- After the first free, future = noUntil(free(1), malloc(1)).
 -- The second free posts free(1) before any malloc(1), so the future becomes ∅.
-doubleFreeImmediate :: Effectful RE ()
+doubleFreeImmediate :: FutureCond RE ()
 doubleFreeImmediate = do
     addr <- malloc 1
     free addr
@@ -79,7 +79,7 @@ doubleFreeImmediate = do
 -- Bad: double-free with intervening work between the two frees.
 -- The noUntil(free(1), malloc(1)) future set by the first free is still active
 -- when the second free arrives, regardless of what happens in between.
-doubleFreeWithWork :: Effectful RE ()
+doubleFreeWithWork :: FutureCond RE ()
 doubleFreeWithWork = do
     a1 <- malloc 1
     a2 <- malloc 2   -- unrelated allocation in between
@@ -90,7 +90,7 @@ doubleFreeWithWork = do
 -- Bad: leak combined with double-free in the same program.
 -- addr 2 is never freed (leak) and addr 1 is freed twice (double-free).
 -- Both violations are captured: future carries ∅ from the double-free.
-leakAndDoubleFree :: Effectful RE ()
+leakAndDoubleFree :: FutureCond RE ()
 leakAndDoubleFree = do
     a1 <- malloc 1
     _  <- malloc 2   -- addr 2 is never freed
@@ -101,7 +101,7 @@ leakAndDoubleFree = do
 -- After free 1: future = noUntil(free(1), malloc(1)).
 -- malloc 1 resets the guard (derivative w.r.t. malloc(1) = Σ*).
 -- malloc 1 also imposes finally(free(1)), which the second free discharges.
-mallocFreeReallocFree :: Effectful RE ()
+mallocFreeReallocFree :: FutureCond RE ()
 mallocFreeReallocFree = do
     a1 <- malloc 1
     free a1
@@ -110,12 +110,12 @@ mallocFreeReallocFree = do
 
 -- Good: allocate and return the address without freeing.
 -- ret = 1; future = finally(free(1)) — obligation visible in the residual.
-allocReturnAddr :: Effectful RE Addr
+allocReturnAddr :: FutureCond RE Addr
 allocReturnAddr = malloc 1
 
 -- Bad: allocate two addresses and return both — neither obligation is discharged.
 -- ret = (1, 2); future = finally(free(1)) ∧ finally(free(2)).
-allocTwoReturnPair :: Effectful RE (Addr, Addr)
+allocTwoReturnPair :: FutureCond RE (Addr, Addr)
 allocTwoReturnPair = do
     a1 <- malloc 1
     a2 <- malloc 2
@@ -123,13 +123,13 @@ allocTwoReturnPair = do
 
 -- Good: allocate, free, and return the freed address.
 -- ret = 1; future = noUntil(free(1), malloc(1)) — guard active, no pending finally.
-allocFreeReturnAddr :: Effectful RE Addr
+allocFreeReturnAddr :: FutureCond RE Addr
 allocFreeReturnAddr = do
     a <- malloc 1
     free a
     return a
 
-printResult :: forall a. (Show a) => String -> Effectful RE a -> IO a
+printResult :: forall a. (Show a) => String -> FutureCond RE a -> IO a
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre prog))

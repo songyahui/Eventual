@@ -8,8 +8,8 @@ import Prelude hiding ((<>))
 import Data.IORef
 
 -- FutureCond spec monad — qualified to avoid clash with the 'Effectful' module
-import qualified Future as F
-import Future (RE, normalize, universe, finally, previously, noUntil)
+import qualified FutureCond as F
+import FutureCond (RE, normalize, universe, finally, previously, noUntil)
 
 -- effectful library: real effect handlers
 import Effectful
@@ -69,13 +69,13 @@ fsHandler ref _ cmd = case cmd of
     FsClose path -> liftIO $ modifyIORef ref (++ ["close(" ++ path ++ ")"])
 
 -- ── 3. Shadow type ────────────────────────────────────────────────────────
--- A Shadow pairs the pure RE specification (F.Effectful RE a, checked
+-- A Shadow pairs the pure RE specification (F.FutureCond RE a, checked
 -- statically by FutureCond) with a real Eff '[FileSystem, IOE] a program
 -- (run by the effect handler at runtime).
 -- The two sides share no state and cannot interfere.
 
 data Shadow a = Shadow
-    { spec :: F.Effectful RE a         -- pure spec, FutureCond checks this
+    { spec :: F.FutureCond RE a         -- pure spec, FutureCond checks this
     , impl :: Eff '[FileSystem, IOE] a -- real program, interpreted at runtime
     }
 
@@ -101,18 +101,18 @@ instance Monad Shadow where
     Shadow sp ef >>= f = Shadow (sp >>= spec . f) (ef >>= impl . f)
 
 -- ── 4. Spec primitives ────────────────────────────────────────────────────
--- For each Eff operation, an F.Effectful RE value carrying the RE contract.
+-- For each Eff operation, an F.FutureCond RE value carrying the RE contract.
 
-specOpen :: FilePath -> F.Effectful RE ()
-specOpen path = F.Effectful
+specOpen :: FilePath -> F.FutureCond RE ()
+specOpen path = F.FutureCond
     { F.ret    = ()
     , F.pre    = universe
     , F.post   = F.Single (F.Atom "open" (F.List [F.Str path]))
     , F.future = \_ -> finally (F.Atom "close" (F.List [F.Str path]))
     }
 
-specRead :: FilePath -> F.Effectful RE String
-specRead path = F.Effectful
+specRead :: FilePath -> F.FutureCond RE String
+specRead path = F.FutureCond
     { F.ret    = ""   -- placeholder: spec models protocol, not content
     , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
                       (F.Single (F.Atom "read" (F.List [F.Str path])))
@@ -120,8 +120,8 @@ specRead path = F.Effectful
     , F.future = \_ -> universe
     }
 
-specClose :: FilePath -> F.Effectful RE ()
-specClose path = F.Effectful
+specClose :: FilePath -> F.FutureCond RE ()
+specClose path = F.FutureCond
     { F.ret    = ()
     , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
                       (F.Single (F.Atom "read" (F.List [F.Str path])))

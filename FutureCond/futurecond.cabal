@@ -1,0 +1,29 @@
+cabal-version: 3.0
+name:          futurecond
+version:       0.1.0.0
+
+executable futurecond-main
+  hs-source-dirs:   .
+  main-is:          Examples/Main.hs
+  default-language: GHC2021
+  ghc-options:      -Wno-missing-home-modules
+  build-depends:
+      base
+    , containers
+    , effectful
+    , effectful-core
+  other-modules:
+      FutureCond
+      Examples.UnitTest
+      Examples.RE.Memory
+      Examples.RE.FileHandle
+      Examples.RE.Mutex
+      Examples.RE.Transaction
+      Examples.RE.CryptoSession
+      Examples.RE.NetworkProtocol
+      Examples.RE.Capability
+      Examples.RE.Sensor
+      Examples.RE.Shadow
+      Examples.SL.HeapMemory
+      Examples.SL.BankAccount
+      Examples.SL.LinkedList

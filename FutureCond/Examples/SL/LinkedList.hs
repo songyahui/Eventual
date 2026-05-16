@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -i../.. #-}
 module Examples.SL.LinkedList where
 import Prelude hiding ((<>))
-import Future
+import FutureCond
 
 -- ── Model ─────────────────────────────────────────────────────────────────────
 -- A singly-linked list node at address `addr` occupies two consecutive cells:
@@ -14,8 +14,8 @@ import Future
 
 -- allocNode addr val next: allocates a fresh node.
 -- Post: SepStar of the two cells (disjoint ownership).
-allocNode :: Addr -> Val -> Val -> Effectful SL ()
-allocNode addr val next = Effectful
+allocNode :: Addr -> Val -> Val -> FutureCond SL ()
+allocNode addr val next = FutureCond
     { ret    = ()
     , pre    = Top
     , post   = SepStar (Cell addr val) (Cell (addr+1) next)
@@ -25,8 +25,8 @@ allocNode addr val next = Effectful
 -- freeNode addr val next: releases a node.
 -- Pre:  own both cells of the node.
 -- Post: Emp.
-freeNode :: Addr -> Val -> Val -> Effectful SL ()
-freeNode addr val next = Effectful
+freeNode :: Addr -> Val -> Val -> FutureCond SL ()
+freeNode addr val next = FutureCond
     { ret    = ()
     , pre    = SepStar (Cell addr val) (Cell (addr+1) next)
     , post   = Emp
@@ -34,8 +34,8 @@ freeNode addr val next = Effectful
     }
 
 -- readVal addr val: reads the payload; requires (and produces nothing from) val cell.
-readVal :: Addr -> Val -> Effectful SL ()
-readVal addr val = Effectful
+readVal :: Addr -> Val -> FutureCond SL ()
+readVal addr val = FutureCond
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
@@ -43,8 +43,8 @@ readVal addr val = Effectful
     }
 
 -- readNext addr next: reads the next pointer.
-readNext :: Addr -> Val -> Effectful SL ()
-readNext addr next = Effectful
+readNext :: Addr -> Val -> FutureCond SL ()
+readNext addr next = FutureCond
     { ret    = ()
     , pre    = Cell (addr+1) next
     , post   = Emp
@@ -54,8 +54,8 @@ readNext addr next = Effectful
 -- updateNext addr oldNext newNext: rewires the next pointer.
 -- Pre:  own the next cell with oldNext.
 -- Post: Cell (addr+1) newNext.
-updateNext :: Addr -> Val -> Val -> Effectful SL ()
-updateNext addr oldNext newNext = Effectful
+updateNext :: Addr -> Val -> Val -> FutureCond SL ()
+updateNext addr oldNext newNext = FutureCond
     { ret    = ()
     , pre    = Cell (addr+1) oldNext
     , post   = Cell (addr+1) newNext
@@ -66,20 +66,20 @@ updateNext addr oldNext newNext = Effectful
 
 -- Good: single-node list [10] at addr 0, terminated with -1.
 -- Post: SepStar (Cell 0 10) (Cell 1 (-1))
-singleNode :: Effectful SL ()
+singleNode :: FutureCond SL ()
 singleNode = allocNode 0 10 (-1)
 
 -- Good: two-node list [10 -> 20] at addrs 0 and 2.
 -- Node 0: val=10, next=2
 -- Node 2: val=20, next=-1
 -- Post: SepStar of four cells (two nodes, each two cells).
-twoNodeList :: Effectful SL ()
+twoNodeList :: FutureCond SL ()
 twoNodeList = do
     allocNode 0 10 2      -- head: val=10, next→addr 2
     allocNode 2 20 (-1)   -- tail: val=20, next=NULL
 
 -- Good: three-node list [5 -> 15 -> 25].
-threeNodeList :: Effectful SL ()
+threeNodeList :: FutureCond SL ()
 threeNodeList = do
     allocNode 0 5  2
     allocNode 2 15 4
@@ -87,30 +87,30 @@ threeNodeList = do
 
 -- Good: alloc a node then immediately free it.
 -- Post normalises toward Emp; pre carries the Wand residual.
-allocFreeNode :: Effectful SL ()
+allocFreeNode :: FutureCond SL ()
 allocFreeNode = do
     allocNode 0 42 (-1)
     freeNode  0 42 (-1)
 
 -- Good: build a two-node list then rewire head's next to NULL (unlink tail).
 -- Before unlink: 0→2→NULL.  After: 0→NULL (tail still allocated but unreachable).
-unlinkTail :: Effectful SL ()
+unlinkTail :: FutureCond SL ()
 unlinkTail = do
     allocNode  0 10 2
     allocNode  2 20 (-1)
     updateNext 0 2  (-1)   -- head now points to NULL
 
 -- Bad: read a node's value without owning it — pre = Cell 0 99, unmet.
-readWithoutOwnership :: Effectful SL ()
+readWithoutOwnership :: FutureCond SL ()
 readWithoutOwnership = readVal 0 99
 
 -- Bad: free a node that was never allocated — pre = SepStar (Cell 0 1) (Cell 1 (-1)), unmet.
-freeWithoutAlloc :: Effectful SL ()
+freeWithoutAlloc :: FutureCond SL ()
 freeWithoutAlloc = freeNode 0 1 (-1)
 
 -- ── Display ───────────────────────────────────────────────────────────────────
 
-printResult :: String -> Effectful SL () -> IO ()
+printResult :: String -> FutureCond SL () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalizeSL (pre    prog))

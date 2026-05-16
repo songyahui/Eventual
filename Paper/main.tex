@@ -85,7 +85,7 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-We present \emph{FutureCond}, a Haskell library that extends the classical
+We present \emph{Pledge}, a Haskell library that extends the classical
 pre/post-condition contract model with \emph{future conditions}: specifications
 that constrain what the remainder of a program must eventually do.
 Future conditions are carried as a \emph{data-dependent} field
@@ -173,7 +173,7 @@ execution trace must match.
 It is carried as a third annotation---alongside \lstinline{pre} and
 \lstinline{post}---in an \lstinline{Effectful} monad.
 
-Two new design elements distinguish FutureCond from prior work.
+Two new design elements distinguish Pledge from prior work.
 First, the regular-expression language is extended with a
 \emph{complement} operator $\neg r$, letting us write the universal
 language as $\univ\;(=\neg\varnothing)$ and globally-always assertions
@@ -891,7 +891,7 @@ All rules apply recursively bottom-up.
 \label{sec:examples}
 %% =========================================================================
 
-We demonstrate FutureCond across six domains, three per instance.
+We demonstrate Pledge across six domains, three per instance.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
 composes them in the \lstinline{Effectful} monad, and inspects the
@@ -925,10 +925,10 @@ free a = Effectful
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: data-dependent — obligation discharged on the returned address
+-- Good: data-dependent  -  obligation discharged on the returned address
 mallocFreeByReturnedAddr n = do { addr <- malloc n; free addr }
 
--- Good: re-allocate the same address after freeing — noUntil is reset by malloc
+-- Good: re-allocate the same address after freeing  -  noUntil is reset by malloc
 mallocFreeReallocFree = do { a <- malloc 1; free a; a <- malloc 1; free a }
 
 -- Bad future: free(2) obligation remains
@@ -949,7 +949,7 @@ The three examples below return non-unit values, showing that future
 conditions are tracked regardless of the return type.
 
 \begin{lstlisting}
--- Good: ret = Addr; future = finally(free(1)) — obligation visible in residual
+-- Good: ret = Addr; future = finally(free(1))  -  obligation visible in residual
 allocReturnAddr :: Effectful RE Addr
 allocReturnAddr = malloc 1
 
@@ -957,7 +957,7 @@ allocReturnAddr = malloc 1
 allocTwoReturnPair :: Effectful RE (Addr, Addr)
 allocTwoReturnPair = do { a1 <- malloc 1; a2 <- malloc 2; return (a1, a2) }
 
--- Good: ret = Addr; future = noUntil(free(1), malloc(1)) — no pending finally
+-- Good: ret = Addr; future = noUntil(free(1), malloc(1))  -  no pending finally
 allocFreeReturnAddr :: Effectful RE Addr
 allocFreeReturnAddr = do { a <- malloc 1; free a; return a }
 \end{lstlisting}
@@ -1252,7 +1252,7 @@ pre/post-condition checking.
 Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
 monad in a dependently typed language, propagating pre/post annotations through
 monadic bind analogously to our \lstinline{Effectful} monad.
-FutureCond complements all of these by adding a \emph{temporal}
+Pledge complements all of these by adding a \emph{temporal}
 dimension---the future condition---that none of these systems address,
 and it does so without requiring type-system extensions or a dependent type
 theory.
@@ -1261,14 +1261,14 @@ theory.
 Song et al.\ propose future conditions as a first-class extension to
 pre/post-condition contracts~\cite{song2025futurecond}, formalising the
 notion that a function may leave temporal obligations for its caller to
-discharge. FutureCond realises this idea as a Haskell library, providing
+discharge. Pledge realises this idea as a Haskell library, providing
 a monadic interface and derivative-based propagation that the formal
 system does not address.
 
 \paragraph{Temporal property verification and repair.}
 ProveNFix~\cite{song2024provenfix} uses temporal properties expressed as
 regular expressions to guide automated program repair, verifying that
-patches satisfy the specification. FutureCond is complementary: rather
+patches satisfy the specification. Pledge is complementary: rather
 than repairing programs post-hoc, it carries temporal obligations as
 first-class values so that violations are surfaced statically.
 
@@ -1281,21 +1281,21 @@ than on tracking which effects are present.
 
 \paragraph{Session types.}
 Session types~\cite{honda1993,gay2010} enforce communication protocols
-at the type level, including ordering constraints. FutureCond is more
+at the type level, including ordering constraints. Pledge is more
 lightweight: it operates at the value level, uses regular expressions
 rather than types, and can be applied to any domain beyond communication.
 
 \paragraph{Runtime monitoring.}
 Runtime verification~\cite{leucker2009} checks temporal properties of
 execution traces against regular-language specifications.
-FutureCond is a \emph{static} approach: future conditions
+Pledge is a \emph{static} approach: future conditions
 are computed before any execution takes place, and the embedding of
 LTL\textsubscript{f} into RE (\S\ref{sec:ltl}) avoids automata
 entirely.
 
 \paragraph{Typestate.}
 Typestate systems~\cite{strom1986,bierhoff2007} track resource lifecycle
-in types, requiring type-system changes. FutureCond is a library-level
+in types, requiring type-system changes. Pledge is a library-level
 approach requiring no language extensions beyond standard Haskell type
 classes.
 
@@ -1327,7 +1327,7 @@ annotation computed by a static analysis pass over the \lstinline{Effectful}
 term, separating the behavioural monad from the precondition contract checker.
 
 \paragraph{Integration with effect handlers.}
-Lifting FutureCond into an effect-handler framework
+Lifting Pledge into an effect-handler framework
 (\texttt{effectful} or \texttt{polysemy}) would allow temporal
 specifications to be composed alongside algebraic effect rows, opening
 the door to modular verification of larger programs.
@@ -1376,7 +1376,7 @@ and removing the closed-world restriction.
 \paragraph{Connection to indexed and graded monads.}
 Because \lstinline{future :: a -> eff} indexes the obligation by the
 return value rather than a fixed constant
-(Section~\ref{sec:future-cond}), FutureCond echoes the
+(Section~\ref{sec:future-cond}), Pledge echoes the
 \emph{indexed-} and \emph{graded-monad} literature, where types are
 indexed by computational effects; here the index is a return value
 instead of an effect row.
@@ -1390,7 +1390,7 @@ residual RE conditions can be checked for non-emptiness by an NFA/DFA
 construction or a BDD-based automaton library, while residual SL predicates
 with Presburger arithmetic guards can be discharged by an SMT solver such as
 Z3 or CVC5.
-Integrating a solver backend would let FutureCond report concrete
+Integrating a solver backend would let Pledge report concrete
 counterexample traces (for RE) or unsatisfiable heaps (for SL) rather than
 leaving the interpretation of the residual to the user.
 
@@ -1432,7 +1432,7 @@ replacing the Brzozowski derivative with its quantitative counterpart.
 \label{sec:conclusion}
 %% =========================================================================
 
-We have presented FutureCond, a Haskell library that extends effectful
+We have presented Pledge, a Haskell library that extends effectful
 computations with future conditions---specifications that constrain what
 the remainder of a program must do.
 Three design choices make the approach work.

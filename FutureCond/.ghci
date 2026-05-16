@@ -1,3 +1,0 @@
-:set -package containers
-:set -package effectful
-:set -package effectful-core

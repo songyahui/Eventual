@@ -1331,6 +1331,34 @@ Lifting FutureCond into an effect-handler framework
 (\texttt{effectful} or \texttt{polysemy}) would allow temporal
 specifications to be composed alongside algebraic effect rows, opening
 the door to modular verification of larger programs.
+A lightweight \emph{shadow} approach requires no deep integration:
+the \lstinline{Effectful RE} computation is kept as a pure
+specification and evaluated statically, while a separate
+\lstinline{Eff es} computation carries out the real effects.
+The two are written in parallel and linked only at the top level:
+
+\begin{lstlisting}
+-- Specification (pure, statically checked)
+spec :: Effectful RE ()
+spec = do { addr <- malloc 1; free addr }
+
+-- Implementation (real IO via effectful)
+impl :: (IOE :> es) => Eff es ()
+impl = do { addr <- liftIO mallocReal; liftIO (freeReal addr) }
+
+-- Entry point: check spec, then run impl
+main :: IO ()
+main = do
+  assert (normalize (pre        spec) == top) "precondition violated"
+  assert (normalize (evalFuture spec) == top) "future obligation unmet"
+  runEff impl
+\end{lstlisting}
+
+\noindent
+The specification \lstinline{spec} and the implementation
+\lstinline{impl} share structure but live in separate monads.
+Static checking is entirely pure; no changes to the
+\texttt{effectful} stack are required.
 
 \paragraph{Closed-world alphabet assumption.}
 The \lstinline{firstWith} function handles complement soundly via
@@ -1345,26 +1373,13 @@ A fully open-world implementation would accept an explicit $\Sigma$
 declaration, enabling complement over an unrestricted event domain
 and removing the closed-world restriction.
 
-\paragraph{Data-dependent future conditions (implemented).}
-FutureCond represents \lstinline{future} as a function
-\lstinline{future :: a -> eff} of the return value, so obligations can
-refer to the resource handle an operation produces rather than a
-fixed call-site constant.
-For example, \lstinline{malloc :: Addr -> Effectful RE Addr} carries
-\lstinline{future = \r -> finally(free(r))}: the address that must
-eventually be freed is the one that was \emph{returned}, bound by the
-lambda parameter \lstinline{r}.
-The helper \lstinline{evalFuture e = future e (ret e)} evaluates the
-obligation, and the bind formula applies each \lstinline{future} to
-its own \lstinline{ret} before propagating.
-This connects FutureCond to the indexed/graded-monad literature, where
-types are indexed by computational effects; here obligations are
-indexed by return values instead.
-The companion combinator $\noUntil{e}{g}$ leverages this design to
-express \emph{conditional} safety: after \lstinline{free(a)}, the
-remaining trace must not contain another \lstinline{free(a)} unless
-\lstinline{malloc(a)} occurs first, preventing double-free while
-permitting re-allocation.
+\paragraph{Connection to indexed and graded monads.}
+Because \lstinline{future :: a -> eff} indexes the obligation by the
+return value rather than a fixed constant
+(Section~\ref{sec:future-cond}), FutureCond echoes the
+\emph{indexed-} and \emph{graded-monad} literature, where types are
+indexed by computational effects; here the index is a return value
+instead of an effect row.
 
 \paragraph{Solver-backed discharge of residual conditions.}
 Residual annotations---a \lstinline{pre} that normalises to $\varnothing$,

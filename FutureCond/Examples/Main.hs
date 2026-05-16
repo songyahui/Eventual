@@ -8,6 +8,7 @@ import qualified Examples.RE.CryptoSession   as RECryptoSession
 import qualified Examples.RE.NetworkProtocol as RENetworkProtocol
 import qualified Examples.RE.Capability      as RECapability
 import qualified Examples.RE.Sensor          as RESensor
+import qualified Examples.RE.Shadow          as REShadow
 import qualified Examples.SL.HeapMemory      as SLHeapMemory
 import qualified Examples.SL.BankAccount     as SLBankAccount
 import qualified Examples.SL.LinkedList      as SLLinkedList
@@ -43,6 +44,9 @@ main = do
 
     section "RE 8. Sensor / Actuator (IoT)"
     RESensor.main
+
+    section "RE 9. Shadow Approach (spec alongside IO)"
+    REShadow.main
 
     section "SL 1. Heap Memory (alloc/free/read/write)"
     SLHeapMemory.main

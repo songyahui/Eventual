@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -i.. #-}
-import qualified Examples.UnitTest.PledgeTest as UnitTest
+import qualified Examples.UnitTest.PledgeTest as PledgeTest
+import qualified Examples.UnitTest.PresburgerTest as PresburgerTest
 import qualified Examples.RE.Memory          as REMemory
 import qualified Examples.RE.FileHandle      as REFileHandle
 import qualified Examples.RE.Mutex           as REMutex
@@ -9,9 +10,11 @@ import qualified Examples.RE.NetworkProtocol as RENetworkProtocol
 import qualified Examples.RE.Capability      as RECapability
 import qualified Examples.RE.Sensor          as RESensor
 import qualified Examples.RE.Shadow          as REShadow
-import qualified Examples.SL.HeapMemory      as SLHeapMemory
-import qualified Examples.SL.BankAccount     as SLBankAccount
-import qualified Examples.SL.LinkedList      as SLLinkedList
+import qualified Examples.SL.HeapMemory           as SLHeapMemory
+import qualified Examples.SL.BankAccount          as SLBankAccount
+import qualified Examples.SL.LinkedList            as SLLinkedList
+import qualified Examples.ExtendedRE.Memory        as ExtREMemory
+import qualified Examples.ExtendedRE.BoundedCounter as ExtREBoundedCounter
 
 section :: String -> IO ()
 section title = putStrLn $ "\n── " ++ title ++ " " ++ replicate (50 - length title) '─'
@@ -19,7 +22,8 @@ section title = putStrLn $ "\n── " ++ title ++ " " ++ replicate (50 - length
 main :: IO ()
 main = do
     section "0. Unit Tests"
-    UnitTest.main
+    PledgeTest.main
+    PresburgerTest.main
 
     section "RE 1. Memory Management (malloc/free)"
     REMemory.main
@@ -56,3 +60,9 @@ main = do
 
     section "SL 3. Linked List (SepStar ownership)"
     SLLinkedList.main
+
+    section "ExtRE 1. Memory Management (heap liveness + trace ordering)"
+    ExtREMemory.main
+
+    section "ExtRE 2. Bounded Counter (arithmetic bounds + protocol)"
+    ExtREBoundedCounter.main

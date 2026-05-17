@@ -10,7 +10,7 @@ module Pledge.SL
 import Prelude hiding ((<>))
 import qualified Data.Map.Strict as Map
 import Pledge.Core
-import Pledge.Utils
+import Pledge.Presburger
 
 -- ── Separation Logic ──────────────────────────────────────────────────────────
 -- Symbolic separation-logic predicates over integer-addressed heaps.

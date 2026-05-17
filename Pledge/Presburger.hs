@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -i.. #-}
-module Pledge.Utils
+module Pledge.Presburger
     ( -- * Terms
       Term(..)
       -- * Events

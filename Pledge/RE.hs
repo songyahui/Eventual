@@ -26,7 +26,7 @@ module Pledge.RE
 import Prelude hiding ((<>))
 import Data.List (union, nub)
 import Pledge.Core
-import Pledge.Utils
+import Pledge.Presburger
 
 -- ── Regular Expressions ───────────────────────────────────────────────────────
 

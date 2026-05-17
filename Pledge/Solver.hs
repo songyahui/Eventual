@@ -7,7 +7,7 @@ import Control.Exception (try, SomeException)
 import Data.List (nub, intercalate)
 import qualified Data.Map.Strict as Map
 import Data.SBV hiding (Unsatisfiable)
-import Pledge.Utils
+import Pledge.Presburger
 
 -- ── Result type ───────────────────────────────────────────────────────────────
 

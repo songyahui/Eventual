@@ -1,12 +1,11 @@
 module Pledge
-    ( module Pledge.Utils
+    ( module Pledge.Presburger
     , module Pledge.Core
     , module Pledge.RE
     , module Pledge.SL
     ) where
 
-import Pledge.Utils
+import Pledge.Presburger
 import Pledge.Core
-import Pledge.Solver
 import Pledge.RE
 import Pledge.SL

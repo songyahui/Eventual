@@ -287,13 +287,12 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
 
 ```
 ./
-├── Pledge.hs          -- top-level re-export of the full library
-├── PledgeAll.hs       -- convenience: re-exports Pledge + both instances
+├── Pledge.hs          -- top-level re-export: Presburger, Core, RE, SL
 ├── Makefile           -- make check / make clean
 ├── Pledge/            -- library source
-│   ├── Utils.hs           -- Term, Event, Addr, Val, PExpr, PPred
+│   ├── Presburger.hs      -- Term, Event, Addr, Val, PExpr (PA exprs), PPred (PA preds)
 │   ├── Core.hs            -- Composable class + operators, Pledge monad
-│   ├── RE.hs              -- RE instance: derivatives, normalize, LTL
+│   ├── RE.hs              -- RE instance: derivatives, normalize, LTL translation
 │   ├── SL.hs              -- SL instance: heap predicates, magic wand
 │   └── Solver.hs          -- PPred satisfiability check via SBV / Z3
 └── Examples/
@@ -320,14 +319,16 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
 ### Module Dependency Graph
 
 ```
-Pledge.Utils  ──►  Pledge.Core  ──►  Pledge.RE
-     │                                  │
-     └──────────►  Pledge.SL  ◄─────────┘
-                       │
-                  Pledge.Solver
+Pledge.Presburger ──┬──► Pledge.RE
+                    │
+Pledge.Core ────────┤
+                    │
+                    └──► Pledge.SL
+                    │
+                    └──► Pledge.Solver   (imported separately; not re-exported by Pledge.hs)
 ```
 
-`Pledge.hs` re-exports all four submodules as a single import surface: `import Pledge`.
+`Pledge.hs` re-exports `Pledge.Presburger`, `Pledge.Core`, `Pledge.RE`, and `Pledge.SL` as a single import surface — just `import Pledge`. `Pledge.Solver` is imported directly when needed.
 
 ## Running the Examples
 

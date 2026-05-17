@@ -28,7 +28,7 @@ sendACK = Pledge
     { ret    = ()
     , pre    = Single (Atom "recvSYNACK" (List []))
     , post   = Single (Atom "sendACK" (List []))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 sendData :: String -> Pledge RE ()
@@ -36,7 +36,7 @@ sendData payload = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "sendData" (List [Str payload]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 sendFIN :: Pledge RE ()
@@ -52,7 +52,7 @@ recvFINACK = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "recvFINACK" (List []))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: complete handshake, data, teardown — all preconditions met, no future pending

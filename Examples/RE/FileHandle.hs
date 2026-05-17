@@ -18,7 +18,7 @@ readFile' path = Pledge
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
     , post   = Single (Atom "read" (List [Str path]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Precondition: last event was open or read (file must be open)
@@ -28,7 +28,7 @@ closeFile path = Pledge
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
     , post   = Single (Atom "close" (List [Str path]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: open, read, close — preconditions satisfied, future discharged

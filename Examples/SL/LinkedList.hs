@@ -19,7 +19,7 @@ allocNode addr val next = Pledge
     { ret    = ()
     , pre    = Top
     , post   = SepStar (Cell addr val) (Cell (addr+1) next)
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- freeNode addr val next: releases a node.
@@ -30,7 +30,7 @@ freeNode addr val next = Pledge
     { ret    = ()
     , pre    = SepStar (Cell addr val) (Cell (addr+1) next)
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- readVal addr val: reads the payload; requires (and produces nothing from) val cell.
@@ -39,7 +39,7 @@ readVal addr val = Pledge
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- readNext addr next: reads the next pointer.
@@ -48,7 +48,7 @@ readNext addr next = Pledge
     { ret    = ()
     , pre    = Cell (addr+1) next
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- updateNext addr oldNext newNext: rewires the next pointer.
@@ -59,7 +59,7 @@ updateNext addr oldNext newNext = Pledge
     { ret    = ()
     , pre    = Cell (addr+1) oldNext
     , post   = Cell (addr+1) newNext
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 MAIN = main
-LATEX = pdflatex
+LATEX = pdflatex -synctex=1
 BIBTEX = bibtex
 
 .PHONY: all clean

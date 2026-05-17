@@ -16,7 +16,7 @@ finalizeSession sid = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "finalizeSession" (List [Str sid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Nonce must be consumed exactly once (use-once enforcement via future)
@@ -34,7 +34,7 @@ consumeNonce nid = Pledge
     { ret    = ()
     , pre    = Single (Atom "generateNonce" (List [Num nid]))
     , post   = Single (Atom "consumeNonce" (List [Num nid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 encrypt :: String -> String -> Pledge RE ()
@@ -42,7 +42,7 @@ encrypt sid msg = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "encrypt" (List [Str sid, Str msg]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: session opened, nonce generated and consumed, session closed

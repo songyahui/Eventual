@@ -17,7 +17,7 @@ sensorRead sid = Pledge
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
     , post   = Single (Atom "sensorRead" (List [Num sid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Precondition: sensor must have been initialised or read before sleeping
@@ -27,7 +27,7 @@ sensorSleep sid = Pledge
     , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
                   (Single (Atom "sensorRead" (List [Num sid])))
     , post   = Single (Atom "sensorSleep" (List [Num sid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 motorOn :: Int -> Pledge RE ()
@@ -43,7 +43,7 @@ motorOff mid = Pledge
     { ret    = ()
     , pre    = Single (Atom "motorOn" (List [Num mid]))
     , post   = Single (Atom "motorOff" (List [Num mid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 actuate :: String -> Int -> Pledge RE ()
@@ -51,7 +51,7 @@ actuate device level = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "actuate" (List [Str device, Num level]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: init, read, sleep

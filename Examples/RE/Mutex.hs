@@ -17,7 +17,7 @@ release mid = Pledge
     { ret    = ()
     , pre    = Single (Atom "acquire" (List [Num mid]))
     , post   = Single (Atom "release" (List [Num mid]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 criticalWork :: Pledge RE ()
@@ -25,7 +25,7 @@ criticalWork = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "work" (List []))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: acquire, work, release

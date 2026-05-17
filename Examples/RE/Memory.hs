@@ -44,7 +44,7 @@ mallocFreeSequential = do
 
 -- Good: malloc and free every address in a loop.
 loopAllFreed :: Int -> Pledge RE ()
-loopAllFreed n = foldr (>>) (return ()) [malloc i >>= free | i <- [1..n]]
+loopAllFreed n = sequence_ [malloc i >>= free | i <- [1..n]]
 
 -- Bad: malloc 1 and 2, only free 1 — future obligation for address 2 remains.
 missingFree :: Pledge RE ()

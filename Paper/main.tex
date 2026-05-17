@@ -22,7 +22,8 @@
 \lstdefinelanguage{Haskell}{
   keywords={data, type, class, instance, where, let, in, do, if, then, else,
             case, of, import, module, deriving, infixl, infixr, Not, Or, And,
-            Seq, Bot, Epsilon, Single, Star, Atom, Wildcard},
+            Seq, Bot, Epsilon, Single, Star, Atom, Wildcard,
+            GuardedRE, WRE, Semiring, Prob, Tropical, PTrue, PFalse},
   keywordstyle=\color{blue!70!black}\bfseries,
   sensitive=true,
   comment=[l]{--},
@@ -51,6 +52,8 @@
 
 %% --- Math macros ---------------------------------------------------------
 \newcommand{\RE}{\mathsf{RE}}
+\newcommand{\GRE}{\mathsf{GRE}}
+\newcommand{\WRE}{\mathsf{WRE}}
 \newcommand{\SL}{\mathsf{SL}}
 \newcommand{\Eff}{\mathsf{Effectful}}
 \newcommand{\sep}{*}
@@ -97,21 +100,30 @@ evaluated at the current return value, propagated and updated
 automatically using a subtraction operator, and preconditions
 accumulate in the Hoare-rule style.
 The design is parameterised over a \lstinline{Composable} algebra, admitting
-two distinct instances.
-In the \emph{regular-expression} instance, future conditions are extended REs
-with complement---whose derivative commutes algebraically with negation,
-avoiding automaton construction---and subtraction is the Brzozowski quotient.
-In the \emph{separation-logic} instance, future conditions are heap predicates
-with separating conjunction ($*$), ordinary conjunction ($\wedge$),
+four distinct instances.
+In the \emph{regular-expression} instance ($\RE$), future conditions are
+extended REs with complement---whose derivative commutes algebraically with
+negation, avoiding automaton construction---and subtraction is the Brzozowski
+quotient.
+In the \emph{guarded regular-expression} instance ($\GRE$), a Presburger
+arithmetic predicate over the heap is conjoined with a trace RE, enabling
+arithmetic bounds (e.g.\ counter overflow) to be enforced alongside protocol
+ordering.
+In the \emph{weighted regular-expression} instance ($\WRE$), a semiring weight
+is attached to RE transitions, unifying probabilistic obligations (probability
+semiring) and min-cost scheduling (tropical semiring) in a single framework.
+In the \emph{separation-logic} instance ($\SL$), future conditions are heap
+predicates with separating conjunction ($*$), ordinary conjunction ($\wedge$),
 magic wand ($-*$), and Presburger arithmetic pure constraints;
 subtraction is the magic wand.
-Both instances reuse the same monadic bind formula, demonstrating that
-the framework captures two fundamentally different notions of resource
-obligation within a single algebraic interface.
+All four instances reuse the same monadic bind formula, demonstrating that
+the framework captures trace-based, arithmetic, quantitative, and
+heap-ownership obligations within a single algebraic interface.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
-          complement, Brzozowski derivatives, resource lifecycle, Haskell}
+          complement, Brzozowski derivatives, Presburger arithmetic,
+          semiring weights, separation logic, resource lifecycle, Haskell}
 
 \begin{CCSXML}
 <ccs2012>
@@ -173,14 +185,20 @@ execution trace must match.
 It is carried as a third annotation---alongside \lstinline{pre} and
 \lstinline{post}---in an \lstinline{Effectful} monad.
 
-Two new design elements distinguish Pledge from prior work.
+Four design elements distinguish Pledge from prior work.
 First, the regular-expression language is extended with a
 \emph{complement} operator $\neg r$, letting us write the universal
 language as $\univ\;(=\neg\varnothing)$ and globally-always assertions
 as $\neg(\univ\cdot\neg\phi)$, all without building automata:
 the derivative of $\neg r$ is $\neg(\partial_a r)$, so the whole
 apparatus is purely algebraic.
-Second, the \lstinline{pre} field is propagated in the
+Second, the $\GRE$ instance pairs each RE with a Presburger arithmetic
+predicate over the heap, checked by an SMT solver, so a single
+annotation covers both protocol ordering and arithmetic safety.
+Third, the $\WRE$ instance replaces Boolean membership with a semiring
+weight, enabling probabilistic and min-cost future conditions without
+changing the bind formula.
+Fourth, the \lstinline{pre} field is propagated in the
 \emph{Hoare-rule} style: the precondition of a sequenced computation
 is the precondition of the first step, plus the residual of the
 continuation's precondition not discharged by the first step's
@@ -200,16 +218,27 @@ postcondition.
         subtraction---the core of future-condition propagation
         (\S\ref{sec:re})---and show that LTL\textsubscript{f} operators
         embed directly as RE terms (\S\ref{sec:ltl}).
-  \item We provide a second, independent instantiation to separation-logic
+  \item We extend the RE instance to a \emph{guarded} form ($\GRE$,
+        \S\ref{sec:guardedre-instance}), pairing each RE with a Presburger
+        arithmetic predicate over a concrete heap.  The predicate is
+        evaluated by an SMT solver (Z3 via SBV) at membership-check time,
+        enabling arithmetic range constraints to be enforced alongside
+        protocol ordering in the same \lstinline{Composable} framework.
+  \item We provide a \emph{weighted} RE instance ($\WRE$,
+        \S\ref{sec:wre-instance}), parameterised over a semiring, that
+        generalises Boolean membership to a quantitative weight.  The
+        probability semiring recovers probabilistic future conditions;
+        the tropical semiring gives min-cost obligations.
+  \item We provide a fourth, independent instantiation to separation-logic
         heap predicates (\S\ref{sec:sl-instance}), where separating
         conjunction plays the role of sequential composition, magic wand
         plays the role of subtraction, and Presburger arithmetic provides
         pure constraints. This demonstrates the generality of the
         \lstinline{Composable} interface beyond trace-based specifications.
-  \item We demonstrate the approach on six use cases across both instances
+  \item We demonstrate the approach on ten use cases across all four instances
         (\S\ref{sec:examples}), showing that resource leaks, ordering
-        violations, and heap-ownership errors all surface as non-trivial
-        residual annotations.
+        violations, arithmetic overflows, probabilistic obligations, and
+        heap-ownership errors all surface as non-trivial residual annotations.
 \end{enumerate}
 
 %% =========================================================================
@@ -732,12 +761,304 @@ $\varnothing^* = \varepsilon$, $\varepsilon^* = \varepsilon$ & \lstinline{Star} 
 \end{center}
 
 %% =========================================================================
+\section{The GuardedRE Instance}
+\label{sec:guardedre-instance}
+%% =========================================================================
+
+The RE instance reasons about event traces but knows nothing about
+arithmetic state.
+The $\GRE$ instance closes this gap: a guarded regular expression pairs
+a trace RE with a Presburger arithmetic predicate over a concrete heap,
+so that one annotation can simultaneously enforce a protocol ordering
+\emph{and} an arithmetic bound.
+
+\subsection{The \texttt{GuardedRE} Type}
+
+\begin{lstlisting}
+data GuardedRE = GuardedRE PPred RE
+    deriving (Eq)
+\end{lstlisting}
+
+A state $(\text{heap},\text{trace})$ satisfies \lstinline{GuardedRE p r} iff
+\[
+  \text{heap} \models p \quad\wedge\quad \text{trace} \in L(r).
+\]
+The two sides are independent: $p$ is a static constraint on the heap,
+while $r$ advances through Brzozowski derivatives as events arrive.
+
+Two smart constructors lift a pure RE or a pure Presburger predicate:
+
+\begin{lstlisting}
+fromRE    :: RE    -> GuardedRE
+fromRE r   = GuardedRE PTrue r        -- no heap constraint
+
+fromPPred :: PPred -> GuardedRE
+fromPPred p = GuardedRE p universe    -- accept any trace
+\end{lstlisting}
+
+\subsection{The \texttt{Composable GuardedRE} Instance}
+
+\begin{lstlisting}
+instance Composable GuardedRE where
+    concatenation (GuardedRE p1 r1) (GuardedRE p2 r2) =
+        GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (Seq r1 r2))
+    conjunction (GuardedRE p1 r1) (GuardedRE p2 r2) =
+        GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (And r1 r2))
+    empty    = GuardedRE PTrue Epsilon
+    universe = GuardedRE PTrue (Not Bot)   -- = anything
+    subtraction (GuardedRE p1 r1) (GuardedRE p2 r2) =
+        GuardedRE (normalizePPred (PAnd p1 p2))
+                  (normalize (reSubtraction r1 r2))
+\end{lstlisting}
+
+\noindent
+Both \lstinline{concatenation} and \lstinline{subtraction} \emph{conjoin}
+both heap predicates: the residual must respect the constraints from
+both sides.
+The RE component uses the same \lstinline{reSubtraction} and
+\lstinline{normalize} as the plain RE instance.
+
+\subsection{Presburger Normalisation}
+
+Composing multiple \lstinline{GuardedRE} values accumulates a tree of
+\lstinline{PAnd} nodes.
+\lstinline{normalizePPred} flattens this tree, removes duplicates,
+substitutes equalities (e.g.\ $h[a]=k \Rightarrow$ replace $\mathtt{ValAt}\;a$
+by $k$ everywhere), evaluates literal comparisons, and replaces
+$\lnot\mathbf{true}$ with the canonical $\mathbf{false}$ constructor
+\lstinline{PFalse}:
+
+\begin{lstlisting}
+data PPred
+    = PTrue | PFalse      -- canonical true/false
+    | PLt PExpr PExpr | ...
+    | PNot PPred | PAnd PPred PPred
+
+normalizePPred :: PPred -> PPred
+normalizePPred p = rebuildAnd (substEqs eqs atoms)
+  where
+    atoms = flattenAnd (normStep p)
+    eqs   = [ (a, k) | PEq (ValAt a) (Lit k) <- atoms ]
+\end{lstlisting}
+
+The introduction of \lstinline{PFalse} prevents the solver from being
+invoked with expressions like $(\lnot\mathbf{true}) \wedge \cdots$ that
+are syntactically unsatisfiable; instead they normalise immediately to
+\lstinline{PFalse}.
+
+\subsection{Membership Checking}
+
+Checking whether a concrete $(heap, trace)$ satisfies a
+\lstinline{GuardedRE} involves two steps: fold \lstinline{deriveGuarded}
+over the trace (advancing only the RE side), then call
+\lstinline{nullableGuarded} which checks RE nullability \emph{and}
+invokes the SBV/Z3 backend on the instantiated Presburger predicate.
+
+\begin{lstlisting}
+deriveGuarded :: Event -> GuardedRE -> GuardedRE
+deriveGuarded e (GuardedRE p r) = GuardedRE p (normalize (derivative e r))
+
+nullableGuarded :: Map Addr Int -> GuardedRE -> IO Bool
+nullableGuarded heap (GuardedRE p r)
+    | not (nullable r) = return False
+    | otherwise = do
+        result <- checkPPred (instantiate heap p)
+        return $ case result of { Satisfied _ -> True; _ -> False }
+
+checkGuarded :: Map Addr Int -> [Event] -> GuardedRE -> IO Bool
+checkGuarded heap trace g =
+    nullableGuarded heap (foldl (flip deriveGuarded) g trace)
+\end{lstlisting}
+
+\subsection{Example: Bounded Counter}
+
+A bounded counter stored at heap address $a$ with maximum value $M$
+must follow the protocol $\mathtt{init}\cdot(\mathtt{inc}\mid\mathtt{dec})^*\cdot\mathtt{snapshot}$.
+Increment is additionally guarded by $h[a] < M$ (no overflow); decrement
+by $h[a] > 0$ (no underflow).
+
+\begin{lstlisting}
+initCounter :: Addr -> Pledge GuardedRE ()
+initCounter a = Pledge
+  { ret = ()
+  , pre  = fromRE universe
+  , post = GuardedRE (PEq (ValAt a) (Lit 0))
+                     (Single (Atom "init" [Num a]))
+  , future = \_ -> fromRE universe }
+
+increment :: Addr -> Int -> Pledge GuardedRE ()
+increment a maxVal = Pledge
+  { ret = ()
+  , pre  = GuardedRE (PLt (ValAt a) (Lit maxVal)) universe
+  , post = fromRE (Single (Atom "inc" [Num a]))
+  , future = \_ -> fromPPred (PGe (ValAt a) (Lit 0)) }
+\end{lstlisting}
+
+\noindent
+The \lstinline{pre} of \lstinline{increment} carries
+$h[a] < M$ (pure Presburger) conjoined with the universal RE.
+After composing eleven increments against a bound of~10,
+\lstinline{normalizePPred} derives the contradiction
+$h[a] < 10 \wedge \lnot(h[a] < 10) \equiv \mathbf{false}$,
+flagging the overflow before any execution takes place.
+
+\paragraph{Bad programs and residuals.}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Bad program & Residual \lstinline{pre} (Presburger) & Residual \lstinline{pre} (RE) \\
+\midrule
+\lstinline{overflow} (11 incs, max=10) & $\mathbf{false}$ & $\univ$ \\
+\lstinline{underflow} (dec at zero)    & $\mathbf{false}$ & $\univ$ \\
+\lstinline{noInit} (skip init)         & $\univ$           & $\varnothing$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%% =========================================================================
+\section{The WeightedRE Instance}
+\label{sec:wre-instance}
+%% =========================================================================
+
+The RE and $\GRE$ instances are Boolean: a future condition is either
+satisfied or violated.
+The $\WRE$ instance generalises membership to a \emph{weight} drawn from
+a semiring, enabling probabilistic and quantitative obligations.
+
+\subsection{The Semiring Class}
+
+\begin{lstlisting}
+class (Eq w, Show w) => Semiring w where
+    szero :: w          -- additive identity  (blocked path)
+    sone  :: w          -- multiplicative identity
+    sadd  :: w -> w -> w
+    smul  :: w -> w -> w
+\end{lstlisting}
+
+\noindent
+Setting $w = \mathtt{Bool}$ (with $\mathtt{sadd} = (\vee)$,
+$\mathtt{smul} = (\wedge)$) recovers the Boolean RE instance.
+Two further instances capture quantitative scenarios:
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Instance & \lstinline{szero} & \lstinline{sadd} & \lstinline{smul} \\
+\midrule
+\lstinline{Prob}     (probability) & $0$        & $\min(p_1+p_2,\,1)$ & $p_1 \times p_2$ \\
+\lstinline{Tropical} (min-cost)    & $+\infty$  & $\min$               & $+$              \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+In the probability semiring, \lstinline{sadd} is bounded addition (sum of
+probabilities capped at 1) and \lstinline{smul} is multiplication.
+In the tropical semiring, \lstinline{sadd} is minimum (taking the
+cheaper alternative) and \lstinline{smul} is addition (summing costs
+along a path).
+
+\subsection{The \texttt{WRE} Type and Operators}
+
+\begin{lstlisting}
+data WRE w
+    = WBot               -- weight szero: no accepting path
+    | WEps w             -- weight w: accept the empty trace
+    | WSingle w Event    -- weight w: accept exactly this event
+    | WSeq (WRE w) (WRE w)
+    | WAdd (WRE w) (WRE w)
+    | WAnd (WRE w) (WRE w)
+    | WStar (WRE w)
+\end{lstlisting}
+
+\noindent
+The generalised nullable function accumulates the weight of all
+accepting paths through the empty trace:
+
+\begin{lstlisting}
+wNullable :: Semiring w => WRE w -> w
+wNullable (WEps w)      = w
+wNullable (WSeq r1 r2)  = smul (wNullable r1) (wNullable r2)
+wNullable (WAdd r1 r2)  = sadd (wNullable r1) (wNullable r2)
+wNullable (WAnd r1 r2)  = smul (wNullable r1) (wNullable r2)
+wNullable (WStar r)     = sone
+wNullable _             = szero
+\end{lstlisting}
+
+\noindent
+\lstinline{wDerivative} and \lstinline{wSubtraction} follow the same
+structure as their Boolean counterparts, with semiring operations
+replacing Boolean ones.
+The \lstinline{Composable (WRE w)} instance (enabled by
+\lstinline{FlexibleInstances}) maps \lstinline{concatenation} to
+\lstinline{WSeq}, \lstinline{conjunction} to \lstinline{WAnd}, and
+\lstinline{subtraction} to \lstinline{wSubtraction}.
+
+\subsection{Derived Forms}
+
+\begin{lstlisting}
+wTop     :: Semiring w => WRE w
+wTop      = WStar (WSingle sone Wildcard)   -- sone-weighted anything
+
+wFinally :: Semiring w => w -> Event -> WRE w
+wFinally weight e = WSeq wTop (WSingle weight e)
+
+wGlobally :: Semiring w => w -> Event -> WRE w
+wGlobally weight e = WStar (WSingle weight e)
+\end{lstlisting}
+
+\subsection{Example: Probabilistic Memory (Prob Semiring)}
+
+In a probabilistic setting each \lstinline{free(a)} has an associated
+probability of being called.
+\lstinline{malloc} carries a future condition asserting that
+\lstinline{free(a)} must be called with probability $\geq p$:
+
+\begin{lstlisting}
+malloc :: Addr -> Double -> Pledge (WRE Prob) Addr
+malloc a p = Pledge
+  { ret = a, pre = wTop
+  , post   = WSingle sone (Atom "malloc" [Num a])
+  , future = \r -> wFinally (Prob p) (Atom "free" [Num r]) }
+\end{lstlisting}
+
+The residual weight of \lstinline{wNullable} at the end of a program
+measures how much of the obligation has been satisfied:
+a weight of \lstinline{Prob 1.0} means the obligation is fully
+discharged; a weight $< 1$ names the probability shortfall.
+
+\subsection{Example: Min-Cost Scheduling (Tropical Semiring)}
+
+Under the tropical semiring, \lstinline{WSingle (Tropical c) e}
+assigns cost $c$ to emitting event $e$.
+\lstinline{wNullable} then returns the minimum total cost of
+reaching the empty trace:
+
+\begin{lstlisting}
+submitJob :: Int -> Double -> Pledge (WRE Tropical) ()
+submitJob jobId cost = Pledge
+  { ret = ()
+  , pre  = wTop
+  , post = WSingle (Tropical cost) (Atom "submit" [Num jobId])
+  , future = \_ ->
+      wFinally (Tropical 0) (Atom "complete" [Num jobId]) }
+\end{lstlisting}
+
+Composing several \lstinline{submitJob} calls yields a future whose
+\lstinline{wNullable} is the minimum total cost of completing all
+submitted jobs.
+A program that omits a \lstinline{complete} event for some job~$i$
+retains \lstinline{wFinally (Tropical 0) (complete i)} in the
+residual, and the overall weight is $+\infty$ (i.e.\ \lstinline{szero}),
+flagging the missing completion.
+
+%% =========================================================================
 \section{The SL Instance}
 \label{sec:sl-instance}
 %% =========================================================================
 
 The \lstinline{Composable} typeclass is not tied to trace-based specifications.
-We demonstrate its generality with a second instance over
+We demonstrate its generality further with a fourth instance over
 \emph{separation-logic heap predicates}, where future conditions describe
 what heap state must hold when the computation completes.
 
@@ -747,18 +1068,17 @@ Table~\ref{tab:sl-re-parallel} shows the role each SL construct plays in
 the \lstinline{Composable} interface.
 
 \begin{table}[h]
-\caption{Structural parallel between the RE and SL instances of
-         \lstinline{Composable}.}
+\caption{Structural parallel between the four \lstinline{Composable} instances.}
 \label{tab:sl-re-parallel}
-\begin{tabular}{lll}
+\begin{tabular}{lllll}
 \toprule
-\lstinline{Composable} operation & RE instance & SL instance \\
+Operation & $\RE$ & $\GRE$ & $\WRE_w$ & $\SL$ \\
 \midrule
-\lstinline{concatenation} & $r_1 \cdot r_2$ (sequence) & $P \sep Q$ (separating conjunction) \\
-\lstinline{conjunction}   & $r_1 \wedge r_2$ (intersection) & $P \wedge Q$ (ordinary conjunction) \\
-\lstinline{empty}         & $\varepsilon$ (empty trace) & $\mathbf{emp}$ (empty heap) \\
-\lstinline{universe}      & $\univ$ ($\Sigma^*$) & $\top$ (any heap) \\
-\lstinline{subtraction}   & Brzozowski quotient & $P \wand Q$ (magic wand) \\
+\lstinline{concatenation} & $r_1 \cdot r_2$ & $(p_1\wedge p_2,\,r_1\cdot r_2)$ & \lstinline{WSeq} & $P \sep Q$ \\
+\lstinline{conjunction}   & $r_1 \wedge r_2$ & $(p_1\wedge p_2,\,r_1\wedge r_2)$ & \lstinline{WAnd} & $P \wedge Q$ \\
+\lstinline{empty}         & $\varepsilon$ & $(\mathbf{true},\varepsilon)$ & \lstinline{WEps sone} & $\mathbf{emp}$ \\
+\lstinline{universe}      & $\univ$ & $(\mathbf{true},\univ)$ & \lstinline{wTop} & $\top$ \\
+\lstinline{subtraction}   & Brzozowski quotient & quotient (RE) + $\wedge$ (PPred) & \lstinline{wSubtraction} & $P \wand Q$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -891,13 +1211,13 @@ All rules apply recursively bottom-up.
 \label{sec:examples}
 %% =========================================================================
 
-We demonstrate Pledge across six domains, three per instance.
+We demonstrate Pledge across ten domains spanning all four instances.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
 composes them in the \lstinline{Effectful} monad, and inspects the
 normalised annotations of the result.
-A \lstinline{future} of $\univ$ and a \lstinline{pre} of $\univ$
-together certify the computation is temporally correct.
+A \lstinline{future} of $\univ$ (or \lstinline{wNullable = sone} for $\WRE$)
+and a \lstinline{pre} of $\univ$ together certify temporal correctness.
 
 \subsection{Memory Management}
 
@@ -1017,6 +1337,83 @@ Transaction & no commit/rollback                & $\finally{\mathtt{commit}}\vee
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Bounded Counter (\texorpdfstring{$\GRE$}{GRE} Instance)}
+\label{sec:ex-bounded}
+
+The bounded counter (\S\ref{sec:guardedre-instance}) demonstrates that
+both the Presburger and RE sides are necessary.
+The RE alone would accept overflow sequences; the Presburger predicate
+alone would accept arbitrary event orders.
+
+\begin{lstlisting}
+-- Good: init, two increments, one decrement, snapshot
+normalUse :: Pledge GuardedRE ()
+normalUse = do
+  initCounter 0; increment 0 10; increment 0 10
+  decrement 0;   snapshot 0
+
+-- Bad: 11 increments against max 10
+overflow :: Pledge GuardedRE ()
+overflow = do
+  initCounter 0
+  sequence_ (replicate 11 (increment 0 10))
+  snapshot 0
+\end{lstlisting}
+
+\noindent
+For \lstinline{overflow}, the combined \lstinline{pre} after composing all
+eleven increments normalises to
+$[\mathbf{false}] \wedge \univ$: the Presburger side collapses to
+\lstinline{PFalse} while the RE side remains the universal language,
+pinpointing the arithmetic violation.
+
+\paragraph{$\GRE$ summary.}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Bad program & Residual \lstinline{pre} ($\GRE$) & Cause \\
+\midrule
+\lstinline{overflow}  & $[\mathbf{false}]\;\univ$ & $h[0] < 10$ violated \\
+\lstinline{underflow} & $[\mathbf{false}]\;\univ$ & $h[0] > 0$ violated \\
+\lstinline{noInit}    & $[\mathbf{true}]\;\varnothing$   & init event missing \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Task Scheduling (\texorpdfstring{$\WRE$}{WRE} Instance)}
+\label{sec:ex-sched}
+
+The task-scheduler example shows that the tropical semiring naturally
+accumulates minimum costs.
+Each \lstinline{submitJob} operation carries both a submission cost and
+a future condition that every submitted job must eventually complete.
+
+\begin{lstlisting}
+-- Good: submit two jobs, complete both
+goodSchedule :: Pledge (WRE Tropical) ()
+goodSchedule = do
+  submitJob 1 2.0; submitJob 2 3.0
+  completeJob 1;   completeJob 2
+
+-- Bad: job 2 never completed
+missingComplete :: Pledge (WRE Tropical) ()
+missingComplete = do
+  submitJob 1 2.0; submitJob 2 3.0
+  completeJob 1
+\end{lstlisting}
+
+\noindent
+For \lstinline{goodSchedule}, \lstinline{wNullable (evalFuture ...)}
+returns \lstinline{Tropical 0}, indicating all obligations are
+discharged at zero residual cost.
+For \lstinline{missingComplete}, the residual future still contains
+\lstinline{wFinally (Tropical 0) (complete 2)}, and the overall weight
+is $+\infty$, flagging job~2 as unfinished.
+
+The probability-semiring memory example follows analogously: a
+\lstinline{malloc a p} with $p = 0.9$ leaves a residual weight of
+$0.9$ if \lstinline{free a} is never called, dropping to $0$ when it is.
 
 \subsection{Heap Memory (SL Instance)}
 \label{sec:ex-heap}
@@ -1410,22 +1807,17 @@ Extending the \lstinline{Composable} class with a \lstinline{parallel}
 operation and deriving the corresponding bind-like combinator is a
 natural next step towards reasoning about concurrent Haskell programs.
 
-\paragraph{Quantitative and probabilistic future conditions.}
-The current framework is Boolean: a future condition is either satisfied
-(residual $= \univ$) or violated (residual $\neq \univ$), with no notion
-of degree or likelihood.
-A quantitative generalisation would replace Boolean RE membership with a
-\emph{weight}: for instance, ``\lstinline{free(a)} must be called with
-probability at least $p$'' or ``the expected number of steps before
-\lstinline{commit} is at most $k$''.
-This connects to probabilistic temporal logics such as PCTL and to
-quantitative Kleene algebras, where the star-semiring laws replace
-the Boolean lattice.
-In the SL instance, a quantitative analogue could express expected
-heap usage or amortised resource bounds.
-Such an extension would require replacing the \lstinline{Composable}
-typeclass's Boolean operations with a semiring structure, and
-replacing the Brzozowski derivative with its quantitative counterpart.
+\paragraph{Quantitative future conditions.}
+The $\WRE$ instance (\S\ref{sec:wre-instance}) generalises Boolean
+membership to a semiring weight, supporting probabilistic and
+min-cost future conditions within the same \lstinline{Composable}
+framework.
+A natural further direction is to connect $\WRE$ to probabilistic
+temporal logics such as PCTL, or to quantitative Kleene algebras where
+the star-semiring laws are studied axiomatically.
+In the SL instance, a quantitative analogue could express amortised
+resource bounds or expected heap usage; formalising the connection between
+$\WRE$ and quantitative SL remains future work.
 
 %% =========================================================================
 \section{Conclusion}
@@ -1435,28 +1827,36 @@ replacing the Brzozowski derivative with its quantitative counterpart.
 We have presented Pledge, a Haskell library that extends effectful
 computations with future conditions---specifications that constrain what
 the remainder of a program must do.
-Three design choices make the approach work.
+Four design choices make the approach work.
 First, the \lstinline{Composable} typeclass abstracts the specification
-algebra, admitting two independent instances: extended regular expressions
-with complement (using Brzozowski quotient as subtraction) and
-separation-logic heap predicates (using magic wand as subtraction).
-Both reuse the same monadic bind formula, showing that the framework
-captures trace-based temporal obligations \emph{and} heap-ownership
-obligations within a single interface.
-Second, the RE instance integrates complement with the single algebraic
+algebra, admitting four independent instances that all reuse the same
+monadic bind formula.
+Second, the $\RE$ instance integrates complement with the single algebraic
 law $\partial_a(\neg r) = \neg(\partial_a r)$, enabling globally
 assertions and LTL\textsubscript{f} embedding---all without automaton
 construction.
-Third, the SL instance adds Presburger arithmetic pure constraints via
-\lstinline{Pure PPred} inside \lstinline{Conj}, making value-dependent
+Third, the $\GRE$ instance pairs each RE with a Presburger arithmetic
+predicate over the heap, so that both protocol ordering \emph{and}
+arithmetic bounds (overflow, underflow) are enforced in one annotation;
+the predicate side is discharged by an SMT solver (Z3 via SBV) at
+membership-check time, and \lstinline{normalizePPred} introduces the
+canonical \lstinline{PFalse} constructor so syntactically unsatisfiable
+constraints are identified immediately.
+Fourth, the $\WRE$ instance replaces Boolean membership with a semiring
+weight, unifying probabilistic future conditions (probability semiring)
+and min-cost scheduling obligations (tropical semiring) within the same
+framework.
+The $\SL$ instance additionally adds Presburger arithmetic pure constraints
+via \lstinline{Pure PPred} inside \lstinline{Conj}, making value-dependent
 preconditions such as ``balance $\geq$ amount'' expressible as first-class
-heap predicates.
-The resulting system is lightweight (a single module, no language
-extensions), composable (a standard \lstinline{Monad} instance), and
-doubly informative: a residual \lstinline{future} $\neq \univ$ (or $\top$
-in the SL instance) names unmet obligations, and a residual
-\lstinline{pre} $= \varnothing$ (or an unsatisfiable guard) flags a
-precondition violation.
+heap predicates, with magic wand as subtraction.
+The resulting system is lightweight (no language extensions beyond standard
+Haskell type classes), composable (a standard \lstinline{Monad} instance),
+and informative across all four dimensions: a residual \lstinline{future}
+names unmet trace obligations, a \lstinline{PFalse} in \lstinline{pre}
+flags an arithmetic violation, a semiring weight of \lstinline{szero}
+identifies an unfulfilled quantitative obligation, and a leaked
+\lstinline{Cell} in a residual \lstinline{post} exposes a heap-ownership error.
 
 %% =========================================================================
 \bibliographystyle{ACM-Reference-Format}

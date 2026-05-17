@@ -4,6 +4,7 @@ module Examples.UnitTest.PledgeTest where
 import Prelude hiding ((<>))
 import Data.IORef
 import Data.List (sort)
+import Data.Maybe (isNothing)
 import Pledge
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,45 +51,45 @@ test_subsumesEvent counter = do
 
     -- Wildcard pattern subsumes any occurrence
     check counter "subsumesEvent a        Wildcard = True   (concrete event matches wildcard)" $
-        subsumesEvent a Wildcard == True
+        subsumesEvent a Wildcard
 
     check counter "subsumesEvent Wildcard Wildcard = True   (wildcard occurrence matches wildcard pattern)" $
-        subsumesEvent Wildcard Wildcard == True
+        subsumesEvent Wildcard Wildcard
 
     check counter "subsumesEvent send(x)  Wildcard = True   (any atom matches wildcard)" $
-        subsumesEvent sendX Wildcard == True
+        subsumesEvent sendX Wildcard
 
     -- Wildcard occurrence vs concrete pattern
     check counter "subsumesEvent Wildcard send(x) = False  (wildcard occ ≠ specific pattern)" $
-        subsumesEvent Wildcard sendX == False
+        not (subsumesEvent Wildcard sendX)
 
     -- Identical atoms
     check counter "subsumesEvent send(x) send(x) = True    (same name, same arg)" $
-        subsumesEvent sendX sendX == True
+        subsumesEvent sendX sendX
 
     check counter "subsumesEvent send(1) send(1) = True    (same name, Num arg)" $
-        subsumesEvent send1 send1 == True
+        subsumesEvent send1 send1
 
     -- Different names
     check counter "subsumesEvent send(x) recv(x) = False   (different name)" $
-        subsumesEvent sendX recvX == False
+        not (subsumesEvent sendX recvX)
 
     -- Same name, different args
     check counter "subsumesEvent send(x) send(y) = False   (same name, different Var arg)" $
-        subsumesEvent sendX sendY == False
+        not (subsumesEvent sendX sendY)
 
     check counter "subsumesEvent send(x) send(1) = False   (Var vs Num arg)" $
-        subsumesEvent sendX send1 == False
+        not (subsumesEvent sendX send1)
 
     -- List term
     check counter "subsumesEvent send([1,2]) send([1,2]) = True    (List arg equal)" $
-        subsumesEvent sendL sendL == True
+        subsumesEvent sendL sendL
 
     check counter "subsumesEvent send([1,2]) send(x) = False   (List vs Var)" $
-        subsumesEvent sendL sendX == False
+        not (subsumesEvent sendL sendX)
 
     check counter "subsumesEvent send([1,2]) Wildcard = True   (List atom matches wildcard)" $
-        subsumesEvent sendL Wildcard == True
+        subsumesEvent sendL Wildcard
 
 -- ── nullable ──────────────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r).
@@ -99,57 +100,57 @@ test_nullable counter = do
 
     -- Base cases
     check counter "nullable Bot     = False   (empty language contains no word at all)"  $
-        nullable Bot == False
+        not (nullable Bot)
 
     check counter "nullable Epsilon = True    (ε is the only word in {ε})"  $
-        nullable Epsilon == True
+        nullable Epsilon
 
     check counter "nullable (Single a) = False  (a requires exactly one event)"  $
-        nullable (Single a) == False
+        not (nullable (Single a))
 
     check counter "nullable (Single _) = False  (wildcard still consumes one step)"  $
-        nullable (Single Wildcard) == False
+        not (nullable (Single Wildcard))
 
     -- Sequence: ε ∈ r1·r2  iff  ε ∈ r1  AND  ε ∈ r2
     check counter "nullable (ε · ε) = True"  $
-        nullable (Seq Epsilon Epsilon) == True
+        nullable (Seq Epsilon Epsilon)
 
     check counter "nullable (a · b) = False"  $
-        nullable (Seq (Single a) (Single b)) == False
+        not (nullable (Seq (Single a) (Single b)))
 
     check counter "nullable (ε · a) = False  (tail is not nullable)"  $
-        nullable (Seq Epsilon (Single a)) == False
+        not (nullable (Seq Epsilon (Single a)))
 
     -- Union: ε ∈ r1 + r2  iff  ε ∈ r1  OR  ε ∈ r2
     check counter "nullable (∅ ∨ ε) = True"  $
-        nullable (Or Bot Epsilon) == True
+        nullable (Or Bot Epsilon)
 
     check counter "nullable (a ∨ b) = False"  $
-        nullable (Or (Single a) (Single b)) == False
+        not (nullable (Or (Single a) (Single b)))
 
     -- Intersection: ε ∈ r1 ∧ r2  iff  ε ∈ r1  AND  ε ∈ r2
     check counter "nullable (ε ∧ ε) = True"  $
-        nullable (And Epsilon Epsilon) == True
+        nullable (And Epsilon Epsilon)
 
     check counter "nullable (a ∧ ε) = False"  $
-        nullable (And (Single a) Epsilon) == False
+        not (nullable (And (Single a) Epsilon))
 
     -- Star: zero repetitions always accepted
     check counter "nullable (a*) = True   (zero copies of a)"  $
-        nullable (Star (Single a)) == True
+        nullable (Star (Single a))
 
     check counter "nullable (∅*) = True   (∅* = ε by RE algebra)"  $
-        nullable (Star Bot) == True
+        nullable (Star Bot)
 
     -- Complement: ν(¬r) = ¬ν(r)
     check counter "nullable (¬ε) = False  (ε ∉ complement of {ε})"  $
-        nullable (Not Epsilon) == False
+        not (nullable (Not Epsilon))
 
     check counter "nullable (¬∅) = True   (¬∅ = Σ*, which contains ε)"  $
-        nullable (Not Bot) == True
+        nullable (Not Bot)
 
     check counter "nullable (¬a) = True   (ε ∉ {a}, so ε ∈ ¬{a})"  $
-        nullable (Not (Single a)) == True
+        nullable (Not (Single a))
 
 -- ── derivative ────────────────────────────────────────────────────────────────
 -- ∂_e(r): residual RE recognised by continuations after consuming event e.
@@ -250,13 +251,13 @@ test_atoms counter = do
     putStrLn "\n── atoms ────────────────────────────────────────────────────────"
 
     check counter "atoms ∅ = []"  $
-        atoms Bot == []
+        null (atoms Bot)
 
     check counter "atoms ε = []"  $
-        atoms Epsilon == []
+        null (atoms Epsilon)
 
     check counter "atoms (_) = []   (Wildcard contributes no concrete event)"  $
-        atoms (Single Wildcard) == []
+        null (atoms (Single Wildcard))
 
     check counter "atoms (a) = [a]"  $
         atoms (Single a) == [a]
@@ -295,10 +296,10 @@ test_first counter = do
     putStrLn "\n── first / firstWith ────────────────────────────────────────────"
 
     check counter "first ∅ = []"  $
-        first Bot == []
+        null (first Bot)
 
     check counter "first ε = []   (ε starts with no event)"  $
-        first Epsilon == []
+        null (first Epsilon)
 
     check counter "first (a) = [a]"  $
         first (Single a) == [a]
@@ -330,7 +331,7 @@ test_first counter = do
         first (And (Single a) (Single a)) == [a]
 
     check counter "first (a ∧ b) = []   (a and b share no first event)"  $
-        first (And (Single a) (Single b)) == []
+        null (first (And (Single a) (Single b)))
 
     check counter "first ((a ∨ b) ∧ (b ∨ c)) = [b]   (only b is in both first sets)"  $
         first (And (Or (Single a) (Single b))
@@ -341,7 +342,7 @@ test_first counter = do
         first (Star (Single a)) == [a]
 
     check counter "first (∅*) = []   (∅* = ε, no events)"  $
-        first (Star Bot) == []
+        null (first (Star Bot))
 
     -- firstWith: complement unfolding with an explicit alphabet
     --
@@ -361,12 +362,12 @@ test_first counter = do
     --   Wait — ¬Σ* = Bot.  We test Not (Not Bot).
     --   ∂_e(Not Bot) = Not (∂_e Bot) = Not Bot (= Σ*); isTotal (Not Bot) = True → excluded.
     check counter "firstWith {a,b} (¬Σ*) = []   (¬Σ* = ∅, no first events)"  $
-        firstWith [a, b] (Not (Not Bot)) == []
+        null (firstWith [a, b] (Not (Not Bot)))
 
     -- first (¬∅) = [] when atoms is empty:
     -- atoms (Not Bot) = atoms Bot = []; so firstWith [] (Not Bot) = [].
     check counter "first (¬∅) = []   (no concrete atoms in RE → empty alphabet for unfolding)"  $
-        first (Not Bot) == []
+        null (first (Not Bot))
 
     -- firstWith with Wildcard-bearing RE: atoms does not include Wildcard,
     -- but if we supply the alphabet manually we get the right answer.
@@ -718,87 +719,87 @@ test_ltl_to_re counter = do
 
     -- Base cases
     check counter "ltl_to_re LTLTrue  = Just Σ*" $
-        ltl_to_re LTLTrue == Just (Not Bot)
+        ltlToRe LTLTrue == Just (Not Bot)
 
     check counter "ltl_to_re LTLFalse = Just ∅" $
-        ltl_to_re LTLFalse == Just Bot
+        ltlToRe LTLFalse == Just Bot
 
     check counter "ltl_to_re (LTLAtom a) = Just (Single a)" $
-        ltl_to_re (LTLAtom a) == Just (Single a)
+        ltlToRe (LTLAtom a) == Just (Single a)
 
     -- Negation
     check counter "ltl_to_re (LTLNot (LTLAtom a)) = Just (¬a)" $
-        ltl_to_re (LTLNot (LTLAtom a)) == Just (Not (Single a))
+        ltlToRe (LTLNot (LTLAtom a)) == Just (Not (Single a))
 
     check counter "ltl_to_re (LTLNot LTLTrue) = Just (¬Σ*)   (= ∅ after normalization)" $
-        ltl_to_re (LTLNot LTLTrue) == Just (Not (Not Bot))
+        ltlToRe (LTLNot LTLTrue) == Just (Not (Not Bot))
 
     check counter "ltl_to_re (LTLNot LTLFalse) = Just Σ*" $
-        ltl_to_re (LTLNot LTLFalse) == Just (Not Bot)
+        ltlToRe (LTLNot LTLFalse) == Just (Not Bot)
 
     -- Conjunction and disjunction
     check counter "ltl_to_re (LTLAnd (LTLAtom a) (LTLAtom b)) = Just (a ∧ b)" $
-        ltl_to_re (LTLAnd (LTLAtom a) (LTLAtom b)) == Just (And (Single a) (Single b))
+        ltlToRe (LTLAnd (LTLAtom a) (LTLAtom b)) == Just (And (Single a) (Single b))
 
     check counter "ltl_to_re (LTLOr (LTLAtom a) (LTLAtom b)) = Just (a ∨ b)" $
-        ltl_to_re (LTLOr (LTLAtom a) (LTLAtom b)) == Just (Or (Single a) (Single b))
+        ltlToRe (LTLOr (LTLAtom a) (LTLAtom b)) == Just (Or (Single a) (Single b))
 
     -- Next: LTLNext φ ≡ Σ · ⟦φ⟧
     check counter "ltl_to_re (LTLNext (LTLAtom a)) = Just (_ · a)" $
-        ltl_to_re (LTLNext (LTLAtom a)) == Just (Seq (Single Wildcard) (Single a))
+        ltlToRe (LTLNext (LTLAtom a)) == Just (Seq (Single Wildcard) (Single a))
 
     check counter "ltl_to_re (LTLNext (LTLNext (LTLAtom a))) = Just (_ · (_ · a))   (nested Next)" $
-        ltl_to_re (LTLNext (LTLNext (LTLAtom a)))
+        ltlToRe (LTLNext (LTLNext (LTLAtom a)))
             == Just (Seq (Single Wildcard) (Seq (Single Wildcard) (Single a)))
 
     -- Finally: LTLFinally φ ≡ Σ* · ⟦φ⟧
     check counter "ltl_to_re (LTLFinally (LTLAtom a)) = Just (Σ* · a)" $
-        ltl_to_re (LTLFinally (LTLAtom a)) == Just (Seq (Not Bot) (Single a))
+        ltlToRe (LTLFinally (LTLAtom a)) == Just (Seq (Not Bot) (Single a))
 
     check counter "ltl_to_re (LTLFinally LTLTrue) = Just (Σ* · Σ*)" $
-        ltl_to_re (LTLFinally LTLTrue) == Just (Seq (Not Bot) (Not Bot))
+        ltlToRe (LTLFinally LTLTrue) == Just (Seq (Not Bot) (Not Bot))
 
     check counter "ltl_to_re (LTLFinally LTLFalse) = Just (Σ* · ∅)" $
-        ltl_to_re (LTLFinally LTLFalse) == Just (Seq (Not Bot) Bot)
+        ltlToRe (LTLFinally LTLFalse) == Just (Seq (Not Bot) Bot)
 
     -- Globally: LTLGlobally φ ≡ ¬(Σ* · ¬⟦φ⟧)
     check counter "ltl_to_re (LTLGlobally (LTLAtom a)) = Just (¬(Σ* · ¬a))" $
-        ltl_to_re (LTLGlobally (LTLAtom a)) == Just (Not (Seq (Not Bot) (Not (Single a))))
+        ltlToRe (LTLGlobally (LTLAtom a)) == Just (Not (Seq (Not Bot) (Not (Single a))))
 
     check counter "ltl_to_re (LTLGlobally LTLTrue) = Just (¬(Σ* · ¬Σ*))" $
-        ltl_to_re (LTLGlobally LTLTrue) == Just (Not (Seq (Not Bot) (Not (Not Bot))))
+        ltlToRe (LTLGlobally LTLTrue) == Just (Not (Seq (Not Bot) (Not (Not Bot))))
 
     -- Until: LTLUntil l1 l2 ≡ step(l1)* · ⟦l2⟧
     -- toSingleStep (LTLAtom a) = Just (Single a)
     check counter "ltl_to_re (LTLAtom a `Until` LTLAtom b) = Just (a* · b)" $
-        ltl_to_re (LTLUntil (LTLAtom a) (LTLAtom b))
+        ltlToRe (LTLUntil (LTLAtom a) (LTLAtom b))
             == Just (Seq (Star (Single a)) (Single b))
 
     -- toSingleStep LTLTrue = Just (Single Wildcard)
     check counter "ltl_to_re (LTLTrue `Until` LTLAtom b) = Just (_* · b)" $
-        ltl_to_re (LTLUntil LTLTrue (LTLAtom b))
+        ltlToRe (LTLUntil LTLTrue (LTLAtom b))
             == Just (Seq (Star (Single Wildcard)) (Single b))
 
     -- toSingleStep LTLFalse = Just Bot
     check counter "ltl_to_re (LTLFalse `Until` LTLAtom b) = Just (∅* · b)   (= ε · b = b)" $
-        ltl_to_re (LTLUntil LTLFalse (LTLAtom b))
+        ltlToRe (LTLUntil LTLFalse (LTLAtom b))
             == Just (Seq (Star Bot) (Single b))
 
     -- toSingleStep returns Nothing for temporal operators → whole Until returns Nothing
     check counter "ltl_to_re (LTLNext _ `Until` LTLAtom b) = Nothing   (no single-step projection)" $
-        ltl_to_re (LTLUntil (LTLNext (LTLAtom a)) (LTLAtom b)) == Nothing
+        isNothing (ltlToRe (LTLUntil (LTLNext (LTLAtom a)) (LTLAtom b)))
 
     check counter "ltl_to_re (LTLFinally _ `Until` LTLAtom b) = Nothing" $
-        ltl_to_re (LTLUntil (LTLFinally (LTLAtom a)) (LTLAtom b)) == Nothing
+        isNothing (ltlToRe (LTLUntil (LTLFinally (LTLAtom a)) (LTLAtom b)))
 
     check counter "ltl_to_re (LTLGlobally _ `Until` LTLAtom b) = Nothing" $
-        ltl_to_re (LTLUntil (LTLGlobally (LTLAtom a)) (LTLAtom b)) == Nothing
+        isNothing (ltlToRe (LTLUntil (LTLGlobally (LTLAtom a)) (LTLAtom b)))
 
     -- Membership tests via iterated derivative + nullability
-    let Just reAtomA   = ltl_to_re (LTLAtom a)
-        Just reNextA   = ltl_to_re (LTLNext (LTLAtom a))
-        Just reAUntilB = ltl_to_re (LTLUntil (LTLAtom a) (LTLAtom b))
-        Just reFinallyA = ltl_to_re (LTLFinally (LTLAtom a))
+    let Just reAtomA   = ltlToRe (LTLAtom a)
+        Just reNextA   = ltlToRe (LTLNext (LTLAtom a))
+        Just reAUntilB = ltlToRe (LTLUntil (LTLAtom a) (LTLAtom b))
+        Just reFinallyA = ltlToRe (LTLFinally (LTLAtom a))
 
     -- LTLAtom a → Single a: matches only word [a]
     check counter "word [a] ∈ ⟦LTLAtom a⟧" $
@@ -850,35 +851,35 @@ test_effectful counter = do
 
     -- post e = ε (produces nothing): residual = ε \\ pre fe = pre fe (base case).
     -- pre = universe /\ pre fe = pre fe  (universe is identity for /\).
-    let e0  = Pledge { ret = (), pre = universe,  post = empty,    future = \_ -> universe}
-        fe0 = Pledge { ret = (), pre = Single a,  post = empty,    future = \_ -> universe}
+    let e0  = Pledge { ret = (), pre = universe,  post = empty,    future = const universe}
+        fe0 = Pledge { ret = (), pre = Single a,  post = empty,    future = const universe}
     check counter "pre (e{post=ε} >>= \\_ -> fe{pre=a}) = a   (nothing produced; full pre fe remains)" $
-        normalize (pre (e0 >>= \_ -> fe0)) == Single a
+        normalize (pre (e0 >> fe0)) == Single a
 
     -- post e = Single a, pre fe = Single a: post exactly covers pre fe.
     -- residual = a \\ a = ε.
     -- pre = universe /\ ε = ε   (isTop universe → right side = ε).
-    let e1  = Pledge { ret = (), pre = universe,  post = Single a, future = \_ -> universe}
-        fe1 = Pledge { ret = (), pre = Single a,  post = empty,    future = \_ -> universe}
+    let e1  = Pledge { ret = (), pre = universe,  post = Single a, future = const universe}
+        fe1 = Pledge { ret = (), pre = Single a,  post = empty,    future = const universe}
     check counter "pre (e{pre=Σ*,post=a} >>= \\_ -> fe{pre=a}) = ε   (Σ* /\\ ε = ε)" $
-        normalize (pre (e1 >>= \_ -> fe1)) == Epsilon
+        normalize (pre (e1 >> fe1)) == Epsilon
 
     -- pre e = Single a, post e = Single b, pre fe = Single b:
     -- residual = b \\ b = ε.
     -- pre = Single a /\ ε = And (Single a) Epsilon.
     -- nullable (Single a) = False  →  {a} ∩ {ε} = ∅ = Bot.
     -- Correct: the history cannot simultaneously be "contains a" and "is empty".
-    let e2  = Pledge { ret = (), pre = Single a,  post = Single b, future = \_ -> universe}
-        fe2 = Pledge { ret = (), pre = Single b,  post = empty,    future = \_ -> universe}
+    let e2  = Pledge { ret = (), pre = Single a,  post = Single b, future = const universe}
+        fe2 = Pledge { ret = (), pre = Single b,  post = empty,    future = const universe}
     check counter "pre (e{pre=a,post=b} >>= \\_ -> fe{pre=b}) = ∅   ({a} /\\ ε = ∅; contradictory constraints)" $
-        normalize (pre (e2 >>= \_ -> fe2)) == Bot
+        normalize (pre (e2 >> fe2)) == Bot
 
     -- post e = Single a, pre fe = Single b (a ≠ b): residual = a \\ b = ∅.
     -- pre = universe /\ ∅ = ∅  (Bot absorbs).
-    let e3  = Pledge { ret = (), pre = universe,  post = Single a, future = \_ -> universe}
-        fe3 = Pledge { ret = (), pre = Single b,  post = empty,    future = \_ -> universe}
+    let e3  = Pledge { ret = (), pre = universe,  post = Single a, future = const universe}
+        fe3 = Pledge { ret = (), pre = Single b,  post = empty,    future = const universe}
     check counter "pre (e{post=a} >>= \\_ -> fe{pre=b}) = ∅   (a ≠ b; post does not cover pre fe)" $
-        normalize (pre (e3 >>= \_ -> fe3)) == Bot
+        normalize (pre (e3 >> fe3)) == Bot
 
 -- ── Pledge SL ──────────────────────────────────────────────────────────────
 -- Mirrors test_effectful but with SL as the effect type.
@@ -892,53 +893,53 @@ test_effectful_sl counter = do
     -- ── pre: post = Emp, nothing provided ───────────────────────────────────────
     -- subtraction Emp (Cell 0 42) = Cell 0 42   (base case: Emp\q = q)
     -- pre = Top /\ Cell 0 42 = Conj Top (Cell 0 42)
-    let e0  = Pledge { ret = (), pre = Top,       post = Emp,       future = \_ -> Top }
-        fe0 = Pledge { ret = (), pre = Cell 0 42, post = Emp,       future = \_ -> Top }
+    let e0  = Pledge { ret = (), pre = Top,       post = Emp,       future = const Top }
+        fe0 = Pledge { ret = (), pre = Cell 0 42, post = Emp,       future = const Top }
     check counter "pre (e{post=Emp} >>= fe{pre=Cell 0 42}) = Conj Top (Cell 0 42)   (nothing provided; full pre fe remains)" $
-        pre (e0 >>= \_ -> fe0) == Conj Top (Cell 0 42)
+        pre (e0 >> fe0) == Conj Top (Cell 0 42)
 
     -- ── pre: post = Top, all preconditions discharged ───────────────────────────
     -- subtraction Top (Cell 0 42) = Emp          (base case: Top\_ = Emp)
     -- pre = Top /\ Emp = Conj Top Emp
-    let e1  = Pledge { ret = (), pre = Top,       post = Top,       future = \_ -> Top }
-        fe1 = Pledge { ret = (), pre = Cell 0 42, post = Emp,       future = \_ -> Top }
+    let e1  = Pledge { ret = (), pre = Top,       post = Top,       future = const Top }
+        fe1 = Pledge { ret = (), pre = Cell 0 42, post = Emp,       future = const Top }
     check counter "pre (e{post=Top} >>= fe{pre=Cell 0 42}) = Conj Top Emp   (Top discharges any precondition)" $
-        pre (e1 >>= \_ -> fe1) == Conj Top Emp
+        pre (e1 >> fe1) == Conj Top Emp
 
     -- ── post: SepStar combines disjoint heap ownership ──────────────────────────
     -- e writes Cell 0 42, fe writes Cell 1 99 (disjoint addresses).
     -- post combined = SepStar (Cell 0 42) (Cell 1 99)
-    let e2  = Pledge { ret = (), pre = Top,       post = Cell 0 42, future = \_ -> Top }
-        fe2 = Pledge { ret = (), pre = Top,       post = Cell 1 99, future = \_ -> Top }
+    let e2  = Pledge { ret = (), pre = Top,       post = Cell 0 42, future = const Top }
+        fe2 = Pledge { ret = (), pre = Top,       post = Cell 1 99, future = const Top }
     check counter "post (write{0} >> write{1}) = SepStar (Cell 0 42) (Cell 1 99)   (disjoint ownership)" $
-        post (e2 >>= \_ -> fe2) == SepStar (Cell 0 42) (Cell 1 99)
+        post (e2 >> fe2) == SepStar (Cell 0 42) (Cell 1 99)
 
     -- ── future: obligation not discharged when post fe = Emp ────────────────────
     -- e has future = Cell 0 42 (must eventually hold).
     -- subtraction Emp (Cell 0 42) = Cell 0 42    (fe produced nothing toward it)
     -- future combined = Cell 0 42 /\ Top = Conj (Cell 0 42) Top
     let e3  = Pledge { ret = (), pre = Top,       post = Emp,       future = \_ -> Cell 0 42 }
-        fe3 = Pledge { ret = (), pre = Top,       post = Emp,       future = \_ -> Top }
+        fe3 = Pledge { ret = (), pre = Top,       post = Emp,       future = const Top }
     check counter "future (e{future=Cell 0 42} >>= fe{post=Emp}) = Conj (Cell 0 42) Top   (obligation outstanding)" $
-        evalFuture (e3 >>= \_ -> fe3) == Conj (Cell 0 42) Top
+        evalFuture (e3 >> fe3) == Conj (Cell 0 42) Top
 
     -- ── future: obligation discharged when post fe = Top ────────────────────────
     -- subtraction Top (Cell 0 42) = Emp          (Top covers everything)
     -- future combined = Emp /\ Top = Conj Emp Top
     let e4  = Pledge { ret = (), pre = Top,       post = Emp,       future = \_ -> Cell 0 42 }
-        fe4 = Pledge { ret = (), pre = Top,       post = Top,       future = \_ -> Top }
+        fe4 = Pledge { ret = (), pre = Top,       post = Top,       future = const Top }
     check counter "future (e{future=Cell 0 42} >>= fe{post=Top}) = Conj Emp Top   (obligation discharged)" $
-        evalFuture (e4 >>= \_ -> fe4) == Conj Emp Top
+        evalFuture (e4 >> fe4) == Conj Emp Top
 
     -- ── pre: Pure constraint propagates through bind ─────────────────────────────
     -- fe requires h[0] > 5 AND spatial ownership of Cell 0 42.
     -- post e = Emp → residual = full pre fe   (base case)
     -- pre combined = Top /\ Conj (Pure _) (Cell 0 42)
-    let gtFive = (PGt (ValAt 0) (Lit 5))
-        e5  = Pledge { ret = (), pre = Top, post = Emp, future = \_ -> Top }
-        fe5 = Pledge { ret = (), pre = Conj (Pure gtFive) (Cell 0 42), post = Emp, future = \_ -> Top }
+    let gtFive = PGt (ValAt 0) (Lit 5)
+        e5  = Pledge { ret = (), pre = Top, post = Emp, future = const Top }
+        fe5 = Pledge { ret = (), pre = Conj (Pure gtFive) (Cell 0 42), post = Emp, future = const Top }
     check counter "pre (e{post=Emp} >>= fe{pre=⌈h[0]>5⌉∧Cell 0 42}) = Conj Top (Conj (Pure _) (Cell 0 42))" $
-        pre (e5 >>= \_ -> fe5) == Conj Top (Conj (Pure gtFive) (Cell 0 42))
+        pre (e5 >> fe5) == Conj Top (Conj (Pure gtFive) (Cell 0 42))
 
 -- ── normalizeSL ───────────────────────────────────────────────────────────────
 

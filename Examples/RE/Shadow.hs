@@ -117,7 +117,7 @@ specRead path = F.Pledge
     , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
                       (F.Single (F.Atom "read" (F.List [F.Str path])))
     , F.post   = F.Single (F.Atom "read" (F.List [F.Str path]))
-    , F.future = \_ -> universe
+    , F.future = const universe
     }
 
 specClose :: FilePath -> F.Pledge RE ()
@@ -126,7 +126,7 @@ specClose path = F.Pledge
     , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
                       (F.Single (F.Atom "read" (F.List [F.Str path])))
     , F.post   = F.Single (F.Atom "close" (F.List [F.Str path]))
-    , F.future = \_ -> universe
+    , F.future = const universe
     }
 
 -- ── 5. Shadow operations ──────────────────────────────────────────────────

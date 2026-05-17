@@ -2,6 +2,7 @@
 module Examples.GuardedRE.BoundedCounter where
 
 import Prelude hiding ((<>))
+import Control.Monad (replicateM_)
 import Pledge
 
 -- ── Model ─────────────────────────────────────────────────────────────────────
@@ -83,8 +84,8 @@ emptyRun = do
 fillAndDrain :: Int -> Pledge GuardedRE ()
 fillAndDrain maxVal = do
     initCounter 0
-    foldr (>>) (return ()) (replicate maxVal (increment 0 maxVal))
-    foldr (>>) (return ()) (replicate maxVal (decrement 0))
+    replicateM_ maxVal (increment 0 maxVal)
+    replicateM_ maxVal (decrement 0)
     snapshot    0
 
 -- Bad: increment past maximum — pre of increment carries PLt(h[0], 10)
@@ -92,7 +93,7 @@ fillAndDrain maxVal = do
 overflow :: Pledge GuardedRE ()
 overflow = do
     initCounter 0
-    foldr (>>) (return ()) (replicate 11 (increment 0 10))  -- 11th violates PLt
+    replicateM_ 11 (increment 0 10)  -- 11th violates PLt
     snapshot    0
 
 -- Bad: decrement below zero — pre of decrement carries PGt(h[0], 0)

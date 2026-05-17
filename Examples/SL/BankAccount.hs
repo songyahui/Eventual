@@ -16,7 +16,7 @@ openAccount addr = Pledge
     { ret    = ()
     , pre    = Top
     , post   = Cell addr 0
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- deposit addr old amount: unconditionally adds amount to the balance.
@@ -27,7 +27,7 @@ deposit addr old amount = Pledge
     { ret    = ()
     , pre    = Cell addr old
     , post   = Cell addr (old + amount)
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- withdraw addr old amount: subtracts amount; requires balance >= amount.
@@ -39,7 +39,7 @@ withdraw addr old amount = Pledge
     , pre    = Conj (Pure (PGe (ValAt addr) (Lit amount)))
                     (Cell addr old)
     , post   = Cell addr (old - amount)
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- transfer srcAddr srcBal dstAddr dstBal amount:
@@ -53,7 +53,7 @@ transfer src srcBal dst dstBal amount = Pledge
                     (SepStar (Cell src srcBal) (Cell dst dstBal))
     , post   = SepStar (Cell src (srcBal - amount))
                        (Cell dst (dstBal + amount))
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- closeAccount addr bal: closes account; requires balance is zero.
@@ -65,7 +65,7 @@ closeAccount addr bal = Pledge
     , pre    = Conj (Pure (PEq (ValAt addr) (Lit 0)))
                     (Cell addr bal)
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────

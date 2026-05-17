@@ -20,7 +20,7 @@ module Pledge.RE
       -- * LTL
     , LTL(..)
     , toSingleStep
-    , ltl_to_re
+    , ltlToRe
     ) where
 
 import Prelude hiding ((<>))
@@ -198,8 +198,8 @@ reSubtraction r1 r2 =
         step e =
             let dr1  = normalize (derivative e r1)
                 dr2s = antiDeriv e r2           -- Antimirov set of r2 residuals
-            in foldr Or Bot (map (reSubtraction dr1) dr2s)
-    in foldr Or Bot (map step evts)
+            in foldr (Or . reSubtraction dr1) Bot dr2s
+    in foldr (Or . step) Bot evts
 
 -- ── LTL ───────────────────────────────────────────────────────────────────────
 
@@ -221,7 +221,7 @@ data LTL
 -- This is the correct building block for LTLUntil:
 --   ⟦φ U ψ⟧  =  toSingleStep(φ)* · ⟦ψ⟧
 --
--- Using ltl_to_re l1 directly would be wrong: ⟦l1⟧ may contain words of
+-- Using ltlToRe l1 directly would be wrong: ⟦l1⟧ may contain words of
 -- length > 1 (e.g. LTLNext, LTLFinally), so Star ⟦l1⟧ iterates over
 -- multi-event matches rather than individual steps.
 --
@@ -250,19 +250,19 @@ toSingleStep _               = Nothing  -- temporal operators not representable 
 -- Complement is handled by the Not constructor directly.
 -- LTLUntil returns Nothing when the left-hand side contains a temporal
 -- operator with no single-step projection.
-ltl_to_re :: LTL -> Maybe RE
-ltl_to_re LTLTrue            = Just top                         -- ¬∅  = Σ*
-ltl_to_re LTLFalse           = Just Bot                              -- ∅
-ltl_to_re (LTLAtom e)        = Just (Single e)
-ltl_to_re (LTLNot l)         = Not <$> ltl_to_re l                  -- ¬⟦l⟧
-ltl_to_re (LTLAnd l1 l2)     = And <$> ltl_to_re l1 <*> ltl_to_re l2  -- ⟦l1⟧ ∩ ⟦l2⟧
-ltl_to_re (LTLOr  l1 l2)     = Or  <$> ltl_to_re l1 <*> ltl_to_re l2  -- ⟦l1⟧ ∪ ⟦l2⟧
-ltl_to_re (LTLNext l)        = Seq (Single Wildcard) <$> ltl_to_re l   -- Σ · ⟦l⟧
-ltl_to_re (LTLUntil l1 l2)   = Seq . Star <$> toSingleStep l1          -- step(l1)* · ⟦l2⟧
-                                           <*> ltl_to_re l2
-ltl_to_re (LTLFinally l)     = Seq top <$> ltl_to_re l            -- Σ* · ⟦l⟧
-ltl_to_re (LTLGlobally l)    = Not . Seq top . Not                 -- ¬(Σ* · ¬⟦l⟧)
-                                   <$> ltl_to_re l
+ltlToRe :: LTL -> Maybe RE
+ltlToRe LTLTrue            = Just top                         -- ¬∅  = Σ*
+ltlToRe LTLFalse           = Just Bot                              -- ∅
+ltlToRe (LTLAtom e)        = Just (Single e)
+ltlToRe (LTLNot l)         = Not <$> ltlToRe l                  -- ¬⟦l⟧
+ltlToRe (LTLAnd l1 l2)     = And <$> ltlToRe l1 <*> ltlToRe l2  -- ⟦l1⟧ ∩ ⟦l2⟧
+ltlToRe (LTLOr  l1 l2)     = Or  <$> ltlToRe l1 <*> ltlToRe l2  -- ⟦l1⟧ ∪ ⟦l2⟧
+ltlToRe (LTLNext l)        = Seq (Single Wildcard) <$> ltlToRe l   -- Σ · ⟦l⟧
+ltlToRe (LTLUntil l1 l2)   = Seq . Star <$> toSingleStep l1          -- step(l1)* · ⟦l2⟧
+                                           <*> ltlToRe l2
+ltlToRe (LTLFinally l)     = Seq top <$> ltlToRe l            -- Σ* · ⟦l⟧
+ltlToRe (LTLGlobally l)    = Not . Seq top . Not                 -- ¬(Σ* · ¬⟦l⟧)
+                                   <$> ltlToRe l
 
 -- ── Composable RE instance ────────────────────────────────────────────────────
 

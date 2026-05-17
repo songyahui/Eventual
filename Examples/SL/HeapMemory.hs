@@ -15,7 +15,7 @@ alloc addr val = Pledge
     { ret    = ()
     , pre    = Top
     , post   = Cell addr val
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- free addr val: releases ownership of a cell.
@@ -26,7 +26,7 @@ free addr val = Pledge
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- readCell addr val: borrows a cell for reading; produces no new ownership.
@@ -37,7 +37,7 @@ readCell addr val = Pledge
     { ret    = ()
     , pre    = Cell addr val
     , post   = Emp
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- writeCell addr old new: overwrites a cell.
@@ -48,7 +48,7 @@ writeCell addr old new = Pledge
     { ret    = ()
     , pre    = Cell addr old
     , post   = Cell addr new
-    , future = \_ -> Top
+    , future = const Top
     }
 
 -- ── Programs ──────────────────────────────────────────────────────────────────

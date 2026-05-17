@@ -17,7 +17,7 @@ dbWrite key val = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "write" (List [Str key, Num val]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Precondition: a write must have just occurred (commit requires at least one write)
@@ -27,7 +27,7 @@ commit = Pledge
     , pre    = Or (Single (Atom "beginTx" (List [])))
                   (Single (Atom "write"   (List [])))  -- wildcard args checked by RE matching
     , post   = Single (Atom "commit" (List []))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 rollback :: Pledge RE ()
@@ -35,7 +35,7 @@ rollback = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "rollback" (List []))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: begin, write, commit

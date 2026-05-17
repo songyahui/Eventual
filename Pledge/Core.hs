@@ -62,7 +62,7 @@ instance Composable eff => Applicative (Pledge eff) where
         { ret    = x
         , pre    = universe
         , post   = empty
-        , future = \_ -> universe
+        , future = const universe
         }
     ef <*> ex = Pledge
         { ret    = ret ef (ret ex)

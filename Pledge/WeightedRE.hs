@@ -177,7 +177,7 @@ wSubtraction r1       r2 =
         evts  = wFirstWith alph r1
         step e = wSubtraction (wNormalize (wDerivative e r1))
                                (wNormalize (wDerivative e r2))
-    in foldr WAdd WBot (map step evts)
+    in foldr (WAdd . step) WBot evts
 
 -- ── Smart constructors ────────────────────────────────────────────────────────
 

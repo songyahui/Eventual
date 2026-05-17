@@ -16,7 +16,7 @@ useToken user resource = Pledge
     { ret    = ()
     , pre    = universe
     , post   = Single (Atom "accessResource" (List [Str user, Str resource]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Precondition: a token must have just been requested for this user
@@ -25,7 +25,7 @@ revokeToken user = Pledge
     { ret    = ()
     , pre    = Single (Atom "requestToken" (List [Str user]))
     , post   = Single (Atom "revokeToken" (List [Str user]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 escalate :: String -> Pledge RE ()
@@ -41,7 +41,7 @@ deescalate role = Pledge
     { ret    = ()
     , pre    = Single (Atom "escalate" (List [Str role]))
     , post   = Single (Atom "deescalate" (List [Str role]))
-    , future = \_ -> universe
+    , future = const universe
     }
 
 -- Good: token acquired and immediately revoked

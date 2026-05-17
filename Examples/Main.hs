@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -i.. #-}
-import qualified Examples.UnitTest           as UnitTest
+import qualified Examples.UnitTest.PledgeTest as UnitTest
 import qualified Examples.RE.Memory          as REMemory
 import qualified Examples.RE.FileHandle      as REFileHandle
 import qualified Examples.RE.Mutex           as REMutex

@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -i.. #-}
-module Examples.UnitTest where
+module Examples.UnitTest.PledgeTest where
 
 import Prelude hiding ((<>))
 import Data.IORef

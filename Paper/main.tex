@@ -18,6 +18,10 @@
 \usepackage{booktabs}
 \usepackage{microtype}
 
+%% --- Fix headheight for fancyhdr -----------------------------------------
+\setlength{\headheight}{18.67603pt}
+\addtolength{\topmargin}{-5.67603pt}
+
 %% --- Haskell listings style ----------------------------------------------
 \lstdefinelanguage{Haskell}{
   keywords={data, type, class, instance, where, let, in, do, if, then, else,
@@ -48,6 +52,8 @@
   keepspaces=true,
   frame=none,
   xleftmargin=1em,
+  breaklines=true,
+  breakatwhitespace=true,
 }
 
 %% --- Math macros ---------------------------------------------------------
@@ -75,7 +81,7 @@
 \begin{document}
 
 %% --- Title / Authors -----------------------------------------------------
-\title{Effectful Computations with Future Conditions:\\
+\title{Effectful Computations with Future Conditions:\texorpdfstring{\\}{}
        A Monadic Approach to Temporal Specification}
 
 \subtitle{Functional Pearl}
@@ -83,6 +89,7 @@
 \author{Author Name}
 \affiliation{%
   \institution{Institution}
+  \city{City}
   \country{Country}
 }
 \email{author@institution.edu}
@@ -92,7 +99,7 @@ We present \emph{Pledge}, a Haskell library that extends the classical
 pre/post-condition contract model with \emph{future conditions}: specifications
 that constrain what the remainder of a program must eventually do.
 Future conditions are carried as a \emph{data-dependent} field
-\lstinline{future :: a -> eff} in the \lstinline{Effectful} monad
+\lstinline{future :: a -> eff} in the \lstinline{Pledge} monad
 alongside pre- and post-conditions, so that a single operation can
 impose obligations that refer to the resource handle it returns.
 When operations are composed via monadic bind, future conditions are
@@ -178,9 +185,9 @@ These are \emph{deferred obligations}---temporal constraints on what the
 Pre/post reasoning cannot express them: a post-condition records what is
 true \emph{now}, not what must become true \emph{later}.
 
-We propose \emph{future conditions} as a lightweight, compositional
+We propose \emph{pledges} as a lightweight, compositional
 mechanism for specifying such obligations.
-A future condition is a regular expression over events that the remaining
+A pledge is a regular expression over events that the remaining
 execution trace must match.
 It is carried as a third annotation---alongside \lstinline{pre} and
 \lstinline{post}---in an \lstinline{Effectful} monad.
@@ -427,7 +434,7 @@ The De Morgan row checks that \lstinline{firstWith} handles complement
 pushed inside a conjunction: $\neg(\neg a \wedge \neg b) = a \vee b$
 (by De Morgan and double negation), and indeed only $a$ and $b$ appear.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Selected \lstinline{firstWith} evaluations with \lstinline{Not}.
          $\Sigma_0$ is the explicitly supplied alphabet.
          Rows marked $\dagger$ produce a \emph{strict} subset of $\Sigma_0$.}
@@ -448,7 +455,7 @@ $\neg a \wedge \neg b$  & $\{a,b,c\}$ & $\{a,b\}$  & De Morgan: $=\neg(a\vee b)$
 \end{tabular}
 \end{table}
 
-\subsection{Embedding LTL\textsubscript{f}}
+\subsection{Embedding LTL\texorpdfstring{\textsubscript{f}}{f}}
 \label{sec:ltl}
 
 Because complement is a first-class constructor, the standard
@@ -456,7 +463,7 @@ LTL\textsubscript{f} operators translate directly into RE---no
 automaton construction is needed.
 Table~\ref{tab:ltl} gives the full mapping.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{LTL\textsubscript{f} to RE translation.
          $\Sigma^1 \triangleq \mathtt{Single\;Wildcard}$,
          $\univ \triangleq \neg\varnothing$.}
@@ -536,6 +543,7 @@ It is an RE-specific simplification called internally by
 need not define it at all.
 
 \subsection{The \texttt{Effectful} Type}
+\label{sec:future-cond}
 
 The \lstinline{future} field is \emph{data-dependent}: it is a function of
 the return value \lstinline{a}, allowing obligations to refer to the resource
@@ -1067,7 +1075,7 @@ what heap state must hold when the computation completes.
 Table~\ref{tab:sl-re-parallel} shows the role each SL construct plays in
 the \lstinline{Composable} interface.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Structural parallel between the four \lstinline{Composable} instances.}
 \label{tab:sl-re-parallel}
 \begin{tabular}{lllll}
@@ -1162,7 +1170,7 @@ The smart constructor \lstinline{pureSL} realises this:
 \lstinline{pureSL PTrue = Emp} (trivially pure) and
 \lstinline{pureSL p = Conj (Pure p) Emp} for non-trivial $p$.
 
-\subsection{The \lstinline{Composable SL} Instance}
+\subsection{The \texorpdfstring{\lstinline{Composable SL}}{Composable SL} Instance}
 
 \begin{lstlisting}
 instance Composable SL where
@@ -1318,7 +1326,7 @@ outstanding alternatives.
 \paragraph{RE summary.}
 Table~\ref{tab:examples-re} summarises the three RE domains.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{RE instance: bad programs and residual annotations.}
 \label{tab:examples-re}
 \begin{tabular}{llll}
@@ -1522,7 +1530,7 @@ The key difference from the RE instance is that residual annotations are
 heap predicates rather than traces: a leaked cell appears in \lstinline{post},
 an unsatisfiable ownership constraint in \lstinline{pre}.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{SL instance: bad programs and residual annotations.}
 \label{tab:examples-sl}
 \begin{tabular}{llll}

@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -i.. #-}
+{-# OPTIONS_GHC -i../.. #-}
 module Examples.UnitTest.PledgeTest where
 
 import Prelude hiding ((<>))

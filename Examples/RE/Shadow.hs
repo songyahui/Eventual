@@ -9,7 +9,7 @@ import Data.IORef
 
 -- Pledge spec monad — qualified to avoid clash with the 'Effectful' module
 import qualified Pledge as F
-import Pledge (RE, normalize, universe, finally, previously, noUntil)
+import Pledge (universe, RE, normalize, finally, previously, noUntil)
 
 -- effectful library: real effect handlers
 import Effectful

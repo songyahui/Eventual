@@ -1,18 +1,13 @@
-{-# LANGUAGE TupleSections #-}
-module Solver
+module Pledge.Solver
     ( SolverResult(..)
     , checkPPred
-    , checkSL
-    , checkPledgePre
-    , checkPledgeFuture
     ) where
 
-import Prelude hiding ((<>))
 import Control.Exception (try, SomeException)
 import Data.List (nub, intercalate)
 import qualified Data.Map.Strict as Map
 import Data.SBV hiding (Unsatisfiable)
-import Pledge
+import Pledge.Utils
 
 -- ── Result type ───────────────────────────────────────────────────────────────
 
@@ -71,7 +66,6 @@ ppredToSBV hv (PAnd p q)   = ppredToSBV hv p .&& ppredToSBV hv q
 
 -- ── Core PPred solver ─────────────────────────────────────────────────────────
 -- All ValAt references become unbounded integer variables.
--- Cell constraints are encoded as PEq equalities by slToPPred before reaching here.
 
 checkPPred :: PPred -> IO SolverResult
 checkPPred p = do
@@ -92,35 +86,3 @@ checkPPred p = do
                     return (Satisfied (Map.fromList vals))
                 else return Unsatisfiable
 
--- ── SL → PPred extraction ─────────────────────────────────────────────────────
--- Cell addr val  →  h[addr] = val  (the cell pins the address to a concrete value)
--- Pure p         →  p              (Presburger guard forwarded directly)
--- SepStar / Conj →  conjunction of sub-constraints
--- Emp / Top      →  PTrue          (no Presburger content)
--- Wand           →  PTrue          (magic wand is beyond Presburger; conservatively ignored)
-
-slToPPred :: SL -> PPred
-slToPPred Emp           = PTrue
-slToPPred Top           = PTrue
-slToPPred (Pure p)      = p
-slToPPred (Cell a v)    = PEq (ValAt a) (Lit v)
-slToPPred (SepStar p q) = PAnd (slToPPred p) (slToPPred q)
-slToPPred (Conj   p q)  = PAnd (slToPPred p) (slToPPred q)
-slToPPred (Wand   _ _)  = PTrue
-
-checkSL :: SL -> IO SolverResult
-checkSL = checkPPred . slToPPred
-
--- ── Pledge-level helpers ──────────────────────────────────────────────────────
--- Check whether the normalised precondition of a Pledge SL computation is
--- satisfiable (i.e. some heap exists that meets the entry requirement).
-
-checkPledgePre :: Pledge SL a -> IO SolverResult
-checkPledgePre = checkSL . normalizeSL . pre
-
--- Check whether the normalised future obligation is satisfiable (i.e. some
--- continuation trace exists that discharges it).  Top normalises to Top
--- which becomes PTrue → always SAT; ∅ would give UNSAT signalling a bug.
-
-checkPledgeFuture :: Pledge SL a -> IO SolverResult
-checkPledgeFuture p = checkSL (normalizeSL (evalFuture p))

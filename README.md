@@ -287,13 +287,21 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
 
 ```
 ./
-├── Pledge.hs          -- RE, SL, Composable, Pledge monad, LTL
-├── pledge.cabal       -- cabal project (deps: containers, effectful)
-├── cabal.project
+├── Pledge.hs          -- top-level re-export of the full library
+├── PledgeAll.hs       -- convenience: re-exports Pledge + both instances
+├── Makefile           -- make check / make clean
+├── Pledge/            -- library source
+│   ├── Utils.hs           -- Term, Event, Addr, Val, PExpr, PPred
+│   ├── Core.hs            -- Composable class + operators, Pledge monad
+│   ├── RE.hs              -- RE instance: derivatives, normalize, LTL
+│   ├── SL.hs              -- SL instance: heap predicates, magic wand
+│   └── Solver.hs          -- PPred satisfiability check via SBV / Z3
 └── Examples/
     ├── Main.hs            -- runs all examples
-    ├── UnitTest.hs        -- property tests
-    ├── RE/                -- regular-expression examples
+    ├── UnitTest/
+    │   ├── PledgeTest.hs      -- unit / property tests
+    │   └── SolverTest.hs      -- solver integration tests
+    ├── RE/                -- regular-expression instance examples
     │   ├── Memory.hs          -- malloc / free (data-dependent future)
     │   ├── FileHandle.hs      -- open / read / close
     │   ├── Mutex.hs           -- acquire / release
@@ -302,23 +310,41 @@ If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the rem
     │   ├── NetworkProtocol.hs -- TCP-like three-way handshake
     │   ├── Capability.hs      -- token / privilege lifecycle
     │   ├── Sensor.hs          -- IoT sensor / motor control
-    │   └── Shadow.hs          -- Pledge spec + effectful handler
-    └── SL/                -- separation-logic examples
+    │   └── Shadow.hs          -- Pledge spec alongside effectful handler
+    └── SL/                -- separation-logic instance examples
         ├── HeapMemory.hs      -- alloc / free / read / write
         ├── BankAccount.hs     -- deposit / withdraw / transfer
         └── LinkedList.hs      -- node alloc / unlink / ownership
 ```
 
-## Running the Examples
+### Module Dependency Graph
 
-With cabal (recommended):
-
-```bash
-cabal build
-cabal run pledge-main
+```
+Pledge.Utils  ──►  Pledge.Core  ──►  Pledge.RE
+     │                                  │
+     └──────────►  Pledge.SL  ◄─────────┘
+                       │
+                  Pledge.Solver
 ```
 
-Or directly with `runghc`:
+`Pledge.hs` re-exports all four submodules as a single import surface: `import Pledge`.
+
+## Running the Examples
+
+Type-check all modules at once (no output files produced):
+
+```bash
+make check
+```
+
+Or load interactively in GHCi:
+
+```bash
+ghci
+:l Examples/Main.hs
+```
+
+Or run directly with `runghc`:
 
 ```bash
 runghc -i. Examples/Main.hs

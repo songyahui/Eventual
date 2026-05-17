@@ -27,3 +27,16 @@ executable pledge-main
       Examples.SL.HeapMemory
       Examples.SL.BankAccount
       Examples.SL.LinkedList
+
+executable pledge-solver-test
+  hs-source-dirs:   .
+  main-is:          Examples/SL/SolverTest.hs
+  default-language: GHC2021
+  ghc-options:      -Wno-missing-home-modules
+  build-depends:
+      base
+    , containers
+    , sbv
+  other-modules:
+      Pledge
+      Solver

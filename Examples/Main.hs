@@ -13,8 +13,10 @@ import qualified Examples.RE.Shadow          as REShadow
 import qualified Examples.SL.HeapMemory           as SLHeapMemory
 import qualified Examples.SL.BankAccount          as SLBankAccount
 import qualified Examples.SL.LinkedList            as SLLinkedList
-import qualified Examples.ExtendedRE.Memory        as ExtREMemory
-import qualified Examples.ExtendedRE.BoundedCounter as ExtREBoundedCounter
+import qualified Examples.GuardedRE.Memory        as ExtREMemory
+import qualified Examples.GuardedRE.BoundedCounter as ExtREBoundedCounter
+import qualified Examples.WeightedRE.Memory               as WREMemory
+import qualified Examples.WeightedRE.TaskScheduler        as WRETaskScheduler
 
 section :: String -> IO ()
 section title = putStrLn $ "\n── " ++ title ++ " " ++ replicate (50 - length title) '─'
@@ -66,3 +68,9 @@ main = do
 
     section "ExtRE 2. Bounded Counter (arithmetic bounds + protocol)"
     ExtREBoundedCounter.main
+
+    section "WRE 1. Probabilistic Memory (Prob semiring)"
+    WREMemory.main
+
+    section "WRE 2. Min-Cost Task Scheduling (Tropical semiring)"
+    WRETaskScheduler.main

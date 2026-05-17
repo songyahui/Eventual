@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -i../.. #-}
-module Examples.ExtendedRE.BoundedCounter where
+module Examples.GuardedRE.BoundedCounter where
 
 import Prelude hiding ((<>))
 import Pledge
@@ -18,21 +18,21 @@ import Pledge
 
 -- ── Primitives ────────────────────────────────────────────────────────────────
 
-initCounter :: Addr -> Pledge ExtendedRE ()
+initCounter :: Addr -> Pledge GuardedRE ()
 initCounter addr = Pledge
     { ret    = ()
     , pre    = fromRE universe
-    , post   = ExtendedRE
+    , post   = GuardedRE
                   (PEq (ValAt addr) (Lit 0))        -- heap: starts at zero
                   (Single (Atom "init" (List [Num addr])))
     , future = \_ -> fromRE universe
     }
 
-increment :: Addr -> Int -> Pledge ExtendedRE ()
+increment :: Addr -> Int -> Pledge GuardedRE ()
 increment addr maxVal = Pledge
     { ret    = ()
       -- pre: must not already be at the maximum
-    , pre    = ExtendedRE
+    , pre    = GuardedRE
                   (PLt (ValAt addr) (Lit maxVal))
                   universe
     , post   = fromRE (Single (Atom "inc" (List [Num addr])))
@@ -40,11 +40,11 @@ increment addr maxVal = Pledge
     , future = \_ -> fromPPred (PGe (ValAt addr) (Lit 0))
     }
 
-decrement :: Addr -> Pledge ExtendedRE ()
+decrement :: Addr -> Pledge GuardedRE ()
 decrement addr = Pledge
     { ret    = ()
       -- pre: must not already be at zero
-    , pre    = ExtendedRE
+    , pre    = GuardedRE
                   (PGt (ValAt addr) (Lit 0))
                   universe
     , post   = fromRE (Single (Atom "dec" (List [Num addr])))
@@ -52,11 +52,11 @@ decrement addr = Pledge
     , future = \_ -> fromPPred (PGe (ValAt addr) (Lit 0))
     }
 
-snapshot :: Addr -> Pledge ExtendedRE ()
+snapshot :: Addr -> Pledge GuardedRE ()
 snapshot addr = Pledge
     { ret    = ()
     , pre    = fromRE universe
-    , post   = ExtendedRE
+    , post   = GuardedRE
                   PTrue
                   (Single (Atom "snapshot" (List [Num addr])))
     , future = \_ -> fromRE universe
@@ -65,7 +65,7 @@ snapshot addr = Pledge
 -- ── Programs ──────────────────────────────────────────────────────────────────
 
 -- Good: init, two increments, one decrement, snapshot.
-normalUse :: Pledge ExtendedRE ()
+normalUse :: Pledge GuardedRE ()
 normalUse = do
     initCounter 0
     increment   0 10
@@ -74,13 +74,13 @@ normalUse = do
     snapshot    0
 
 -- Good: init and immediately snapshot (counter stays at zero).
-emptyRun :: Pledge ExtendedRE ()
+emptyRun :: Pledge GuardedRE ()
 emptyRun = do
     initCounter 0
     snapshot    0
 
 -- Good: fill to max, then drain to zero.
-fillAndDrain :: Int -> Pledge ExtendedRE ()
+fillAndDrain :: Int -> Pledge GuardedRE ()
 fillAndDrain maxVal = do
     initCounter 0
     foldr (>>) (return ()) (replicate maxVal (increment 0 maxVal))
@@ -89,7 +89,7 @@ fillAndDrain maxVal = do
 
 -- Bad: increment past maximum — pre of increment carries PLt(h[0], 10)
 --      but after 10 increments h[0] = 10, so the 11th pre is violated.
-overflow :: Pledge ExtendedRE ()
+overflow :: Pledge GuardedRE ()
 overflow = do
     initCounter 0
     foldr (>>) (return ()) (replicate 11 (increment 0 10))  -- 11th violates PLt
@@ -97,25 +97,25 @@ overflow = do
 
 -- Bad: decrement below zero — pre of decrement carries PGt(h[0], 0)
 --      but after init the counter is 0, so the first decrement is rejected.
-underflow :: Pledge ExtendedRE ()
+underflow :: Pledge GuardedRE ()
 underflow = do
     initCounter 0
     decrement   0   -- pre requires h[0] > 0, but h[0] = 0
 
 -- Bad: skip init — trace pre of initCounter not satisfied.
-noInit :: Pledge ExtendedRE ()
+noInit :: Pledge GuardedRE ()
 noInit = do
     increment 0 10
     snapshot  0
 
 -- ── Display ───────────────────────────────────────────────────────────────────
 
-printResult :: String -> Pledge ExtendedRE () -> IO ()
+printResult :: String -> Pledge GuardedRE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    let ExtendedRE prePred  preRE  = pre        prog
-        ExtendedRE postPred postRE = post       prog
-        ExtendedRE futPred  futRE  = evalFuture prog
+    let GuardedRE prePred  preRE  = pre        prog
+        GuardedRE postPred postRE = post       prog
+        GuardedRE futPred  futRE  = evalFuture prog
     putStrLn $ "Pre:    [" ++ show prePred  ++ "]  " ++ show (normalize preRE)
     putStrLn $ "Post:   [" ++ show postPred ++ "]  " ++ show (normalize postRE)
     putStrLn $ "Future: [" ++ show futPred  ++ "]  " ++ show (normalize futRE)

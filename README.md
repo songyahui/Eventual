@@ -36,7 +36,15 @@ malloc addr = Pledge
     }
 ```
 
-`eff` is instantiated to `RE` (regular expressions over events) or `SL` (separation-logic predicates).
+`eff` can be instantiated to any of:
+
+| Type | Description |
+|---|---|
+| `RE` | Regular expressions over events — trace ordering obligations |
+| `SL` | Separation-logic predicates — heap ownership |
+| `GuardedRE` | Conjunction of a Presburger predicate and an RE — heap invariants + trace ordering |
+| `WRE Prob` | Weighted RE over the probability semiring — reliability of obligations |
+| `WRE Tropical` | Weighted RE over the tropical semiring — minimum cost to discharge obligations |
 
 A convenience accessor evaluates `future` at the computation's own return value:
 
@@ -52,7 +60,7 @@ When operations are sequenced via `>>=`, the `Pledge` monad propagates specifica
 ### Precondition (Hoare-logic style)
 
 ```
-pre(e >>= f)  =  pre(e)  /\  (post(e) \\ pre(f(ret e)))
+pre(e >>= f)  =  pre e /\ (post e \\ pre fe)
 ```
 
 `post(e) \\ pre(f)` is the **Brzozowski quotient** — the residual precondition of `f` not already discharged by `e`'s postcondition. When `post(e)` fully covers `pre(f)`, the quotient collapses to `ε` and the overall `pre` is just `pre(e)`. When `post(e)` does not cover `pre(f)`, the residual is `∅` — flagging the violation.
@@ -60,7 +68,7 @@ pre(e >>= f)  =  pre(e)  /\  (post(e) \\ pre(f(ret e)))
 ### Future condition
 
 ```
-future(e >>= f)  =  (post(f(ret e)) \\ future(e))  /\  future(f(ret e))
+future(e >>= f)  =  \_ -> (post fe \\ future e (ret e)) /\ future fe (ret fe)
 ```
 
 - `\\` removes from `future(e)` the obligations discharged by `f`'s `post`
@@ -140,9 +148,30 @@ ltl_to_re (LTLGlobally l)   = Not  (Seq universe (Not (ltl_to_re l)))
 ltl_to_re (LTLUntil l1 l2)  = Seq  (Star (toSingleStep l1)) (ltl_to_re l2)
 ```
 
+## Presburger Arithmetic Predicates
+
+`PPred` is a language of **linear arithmetic predicates** over heap values, used in both `SL` and `GuardedRE`:
+
+```haskell
+data PExpr = Lit Int | ValAt Addr | Add PExpr PExpr | Mul Int PExpr
+data PPred
+    = PTrue | PFalse
+    | PLt PExpr PExpr | PLe PExpr PExpr | PEq PExpr PExpr
+    | PGt PExpr PExpr | PGe PExpr PExpr
+    | PNot PPred | PAnd PPred PPred
+```
+
+`normalizePPred` simplifies predicates by:
+- Eliminating `PTrue` from `PAnd` (identity) and absorbing with `PFalse`
+- Deduplicating conjuncts
+- Substituting ground equalities (`h[a] = k`) into sibling conjuncts
+- Evaluating literal comparisons (`3 < 5 → PTrue`, `0 > 0 → PFalse`)
+
+`checkPPred :: PPred -> IO SolverResult` discharges satisfiability queries to Z3 via SBV.
+
 ## Separation Logic (SL)
 
-`Pledge` can also instantiate `eff` to `SL` — symbolic separation-logic predicates — for heap-reasoning:
+`Pledge` can instantiate `eff` to `SL` — symbolic separation-logic predicates — for heap-reasoning:
 
 ```haskell
 data SL
@@ -157,37 +186,96 @@ data SL
 
 The `Composable SL` instance uses `SepStar` as concatenation, `Conj` as conjunction, and the magic wand `P -* Q` as the subtraction operator (replacing the Brzozowski quotient).
 
-Example — heap cell alloc/free:
+## GuardedRE
+
+`GuardedRE` pairs a Presburger predicate with an RE as a **conjunction of two independent constraints**:
 
 ```haskell
-alloc :: Addr -> Val -> Pledge SL ()
-alloc addr val = Pledge
-    { ret    = ()
-    , pre    = Top                -- no ownership required
-    , post   = Cell addr val      -- establishes ownership
-    , future = \_ -> Top          -- no deferred obligation
-    }
+data GuardedRE = GuardedRE PPred RE
+```
 
-free :: Addr -> Val -> Pledge SL ()
-free addr val = Pledge
-    { ret    = ()
-    , pre    = Cell addr val      -- must own the cell
-    , post   = Emp                -- relinquishes ownership
-    , future = \_ -> Top
+A state `(heap, trace)` satisfies `GuardedRE p r` iff `heap |= p` (Presburger side) **and** `trace ∈ L(r)` (trace side). This lets a single `eff` type enforce both heap invariants and event-ordering obligations simultaneously:
+
+```haskell
+-- free requires h[addr] > 0 (heap liveness) AND malloc was previously observed (trace)
+free addr = Pledge
+    { pre    = GuardedRE (PGt (ValAt addr) (Lit 0))
+                         (previously (Atom "malloc" (List [Num addr])))
+    , ...
     }
+```
+
+Key operations:
+- `conjoin :: GuardedRE -> GuardedRE -> GuardedRE` — `(p1,r1) ∧ (p2,r2) = (p1∧p2, r1∩r2)`
+- `deriveGuarded :: Event -> GuardedRE -> GuardedRE` — advances only the RE side; `PPred` is static
+- `nullableGuarded :: Map Addr Int -> GuardedRE -> IO Bool` — checks both nullable RE and SAT predicate
+- `checkGuarded :: Map Addr Int -> [Event] -> GuardedRE -> IO Bool` — full membership test
+
+Smart constructors:
+```haskell
+fromRE    :: RE    -> GuardedRE   -- lift RE (no heap constraint)
+fromPPred :: PPred -> GuardedRE   -- lift PPred (any trace)
+```
+
+## WeightedRE
+
+`WRE w` is a regular expression whose transitions carry **weights from a semiring `w`**, generalising the Boolean `RE`:
+
+```haskell
+data WRE w
+    = WBot               -- zero (empty language)
+    | WEps w             -- ε accepted with weight w
+    | WSingle w Event    -- single event accepted with weight w
+    | WSeq (WRE w) (WRE w)
+    | WAdd (WRE w) (WRE w)   -- weighted choice  (⊕)
+    | WAnd (WRE w) (WRE w)   -- weighted conjunction
+    | WStar (WRE w)
+```
+
+The language of `WRE w` is a function `Σ* → w`. `wNullable r` returns the semiring weight of ε, generalising `nullable :: RE -> Bool`.
+
+### Semiring instances
+
+```haskell
+class (Eq w, Show w) => Semiring w where
+    szero :: w;  sone :: w;  sadd :: w -> w -> w;  smul :: w -> w -> w
+```
+
+| Instance | `sadd` | `smul` | `szero` | `sone` | Use case |
+|---|---|---|---|---|---|
+| `Bool` | `\|\|` | `&&` | `False` | `True` | Recovers plain `RE` |
+| `Prob` | `min(+,1)` | `×` | `0` | `1` | Probability an obligation is met |
+| `Tropical` | `min` | `+` | `∞` | `0` | Minimum steps to discharge |
+
+`instance Semiring w => Composable (WRE w)` makes `Pledge (WRE Prob) a` and `Pledge (WRE Tropical) a` work out of the box:
+
+```haskell
+-- Probability: end-to-end reliability of malloc → free
+malloc addr = Pledge
+    { future = \a -> wFinally (Prob 0.95) (Atom "free" (List [Num a])) }
+
+-- wNullable (evalFuture mallocThenFree) = 95%
+```
+
+```haskell
+-- Tropical: minimum steps to complete a submitted task
+submit taskId = Pledge
+    { future = \_ -> wFinally (Tropical 1) (Atom "complete" (List [Num taskId])) }
+
+-- wNullable (evalFuture submitOnly) = ∞ steps  (obligation not dischargeable)
 ```
 
 ## The Composable Class
 
-Both `RE` and `SL` are instances of a shared algebra:
+All `eff` types are instances of a shared algebra:
 
 ```haskell
 class Composable a where
-    concatenation :: a -> a -> a   -- (<>)  Seq / SepStar
-    conjunction   :: a -> a -> a   -- (/\)  And / Conj
+    concatenation :: a -> a -> a   -- (<>)  Seq / SepStar / WSeq
+    conjunction   :: a -> a -> a   -- (/\)  And / Conj  / WAnd
     subtraction   :: a -> a -> a   -- (\\)  Brzozowski quotient / magic wand
-    empty         :: a             -- ε   / Emp
-    universe      :: a             -- Σ*  / Top
+    empty         :: a             -- ε   / Emp  / WEps sone
+    universe      :: a             -- Σ*  / Top  / WStar (WSingle sone Wildcard)
 ```
 
 | Operator | Precedence | Meaning |
@@ -200,42 +288,13 @@ class Composable a where
 
 `Shadow.hs` demonstrates running `Pledge RE a` as a **pure specification** alongside a real `effectful` computation. The two monads stay completely separate — Pledge checks the spec statically; the handler library runs the actual effects.
 
-A `FileSystem` effect is declared as a GADT and interpreted by two handlers:
-
 ```haskell
-data FileSystem :: Effect where
-    FsOpen  :: FilePath -> FileSystem m ()
-    FsRead  :: FilePath -> FileSystem m String
-    FsClose :: FilePath -> FileSystem m ()
-
--- Handler: interprets FileSystem into IOE, logging events to an IORef
-fsHandler :: IORef [String] -> EffectHandler FileSystem '[IOE]
-
--- Shadow: pairs the spec with the real Eff program
 data Shadow a = Shadow
-    { spec :: Pledge RE a          -- checked statically
-    , impl :: Eff '[FileSystem, IOE] a -- run by the handler
+    { spec :: Pledge RE a                  -- checked statically
+    , impl :: Eff '[FileSystem, IOE] a     -- run by the handler
     }
-```
 
-Each `Shadow` operation bundles the spec primitive with the `effectful` send — same protocol, two interpretations:
-
-```haskell
 shOpen path = Shadow (specOpen path) (fsOpen path)
-```
-
-Programs are written in `Shadow` do-notation:
-
-```haskell
-goodFile :: Shadow String
-goodFile = do
-    shOpen "data.txt"
-    contents <- shRead "data.txt"
-    shClose "data.txt"
-    return contents
-
--- spec:  Future = ε    (close obligation discharged)
--- trace: ["open(data.txt)", "read(data.txt)", "close(data.txt)"]
 ```
 
 ## Defining Your Own Operations
@@ -244,7 +303,7 @@ goodFile = do
 openFile :: String -> Pledge RE ()
 openFile path = Pledge
     { ret    = ()
-    , pre    = universe                                   -- no precondition
+    , pre    = universe
     , post   = Single (Atom "open" (List [Str path]))
     , future = \_ -> finally (Atom "close" (List [Str path]))
     }
@@ -255,11 +314,9 @@ closeFile path = Pledge
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
     , post   = Single (Atom "close" (List [Str path]))
-    , future = \_ -> universe                             -- obligation discharged
+    , future = \_ -> universe
     }
 ```
-
-Sequence them in the `Pledge` monad:
 
 ```haskell
 program :: Pledge RE ()
@@ -271,68 +328,67 @@ program = do
 -- normalize (evalFuture  program) == universe  =>  all future obligations met
 ```
 
-## Checking Results Programmatically
-
-```haskell
-preOk :: Pledge RE () -> Bool
-preOk prog = normalize (pre prog) == universe
-
-futureOk :: Pledge RE () -> Bool
-futureOk prog = normalize (evalFuture prog) == universe
-```
-
-If `futureOk` returns `False`, inspect `normalize (evalFuture prog)` — the remaining `F(...)` terms name the unmet obligations precisely.
-
 ## File Layout
 
 ```
 ./
-├── Pledge.hs          -- top-level re-export: Presburger, Core, RE, SL
-├── Makefile           -- make check / make clean
-├── Pledge/            -- library source
-│   ├── Presburger.hs      -- Term, Event, Addr, Val, PExpr (PA exprs), PPred (PA preds)
-│   ├── Core.hs            -- Composable class + operators, Pledge monad
-│   ├── RE.hs              -- RE instance: derivatives, normalize, LTL translation
-│   ├── SL.hs              -- SL instance: heap predicates, magic wand
-│   └── Solver.hs          -- PPred satisfiability check via SBV / Z3
+├── Pledge.hs              -- top-level re-export: all library modules
+├── Makefile               -- make check / make clean
+├── Pledge/                -- library source
+│   ├── Core.hs                -- Composable class + operators, Pledge monad
+│   ├── Presburger.hs          -- Term, Event, PExpr, PPred, normalizePPred, checkPPred
+│   ├── RE.hs                  -- RE, derivatives, normalize, LTL translation
+│   ├── SL.hs                  -- SL, separating conjunction, magic wand
+│   ├── GuardedRE.hs           -- GuardedRE = (PPred, RE), Composable instance
+│   ├── Semiring.hs            -- Semiring class, Prob, Tropical instances
+│   └── WeightedRE.hs          -- WRE w, wNullable, wDerivative, Composable instance
 └── Examples/
-    ├── Main.hs            -- runs all examples
+    ├── Main.hs                -- runs all examples
     ├── UnitTest/
-    │   ├── PledgeTest.hs      -- unit / property tests
-    │   └── SolverTest.hs      -- solver integration tests
-    ├── RE/                -- regular-expression instance examples
-    │   ├── Memory.hs          -- malloc / free (data-dependent future)
-    │   ├── FileHandle.hs      -- open / read / close
-    │   ├── Mutex.hs           -- acquire / release
-    │   ├── Transaction.hs     -- beginTx / commit / rollback
-    │   ├── CryptoSession.hs   -- initSession / nonce lifecycle
-    │   ├── NetworkProtocol.hs -- TCP-like three-way handshake
-    │   ├── Capability.hs      -- token / privilege lifecycle
-    │   ├── Sensor.hs          -- IoT sensor / motor control
-    │   └── Shadow.hs          -- Pledge spec alongside effectful handler
-    └── SL/                -- separation-logic instance examples
-        ├── HeapMemory.hs      -- alloc / free / read / write
-        ├── BankAccount.hs     -- deposit / withdraw / transfer
-        └── LinkedList.hs      -- node alloc / unlink / ownership
+    │   ├── PledgeTest.hs          -- RE / monad unit tests
+    │   └── PresburgerTest.hs      -- checkPPred solver tests
+    ├── RE/                    -- RE instance examples
+    │   ├── Memory.hs              -- malloc / free (data-dependent future)
+    │   ├── FileHandle.hs          -- open / read / close
+    │   ├── Mutex.hs               -- acquire / release
+    │   ├── Transaction.hs         -- beginTx / commit / rollback
+    │   ├── CryptoSession.hs       -- initSession / nonce lifecycle
+    │   ├── NetworkProtocol.hs     -- TCP-like three-way handshake
+    │   ├── Capability.hs          -- token / privilege lifecycle
+    │   ├── Sensor.hs              -- IoT sensor / motor control
+    │   └── Shadow.hs              -- Pledge spec alongside effectful handler
+    ├── SL/                    -- separation-logic instance examples
+    │   ├── HeapMemory.hs          -- alloc / free / read / write
+    │   ├── BankAccount.hs         -- deposit / withdraw / transfer
+    │   └── LinkedList.hs          -- node alloc / unlink / ownership
+    ├── GuardedRE/             -- GuardedRE instance examples
+    │   ├── Memory.hs              -- heap liveness (PPred) + trace ordering (RE)
+    │   └── BoundedCounter.hs      -- arithmetic bounds + inc/dec/snapshot protocol
+    └── WRE/                   -- WeightedRE instance examples
+        ├── Memory.hs              -- probabilistic malloc/free (Prob semiring)
+        └── TaskScheduler.hs       -- min-cost task scheduling (Tropical semiring)
 ```
 
 ### Module Dependency Graph
 
 ```
-Pledge.Presburger ──┬──► Pledge.RE
-                    │
-Pledge.Core ────────┤
-                    │
-                    └──► Pledge.SL
-                    │
-                    └──► Pledge.Solver   (imported separately; not re-exported by Pledge.hs)
+Pledge.Core ────────────────────────────────────────────┐
+                                                        │
+Pledge.Presburger ──┬──► Pledge.RE ────────────────────►│
+                    │                                   │
+                    ├──► Pledge.SL ────────────────────►│
+                    │                                   ▼
+                    ├──► Pledge.GuardedRE              Pledge.hs
+                    │       (RE + Presburger)           (re-exports all)
+                    │                                   ▲
+                    └──► Pledge.Semiring ──► Pledge.WeightedRE ──►│
 ```
 
-`Pledge.hs` re-exports `Pledge.Presburger`, `Pledge.Core`, `Pledge.RE`, and `Pledge.SL` as a single import surface — just `import Pledge`. `Pledge.Solver` is imported directly when needed.
+`Pledge.hs` re-exports all library modules as a single import surface — just `import Pledge`.
 
 ## Running the Examples
 
-Type-check all modules at once (no output files produced):
+Type-check all modules at once:
 
 ```bash
 make check
@@ -351,13 +407,14 @@ Or run directly with `runghc`:
 runghc -i. Examples/Main.hs
 ```
 
-Each example prints three fields per test program:
+Each example prints per test program:
 
 | Field | Meaning |
 |---|---|
-| `Pre` | `Σ*` = all preconditions satisfied; `∅` = precondition violated |
-| `Post` | trace of events produced by the computation |
-| `Future` | `Σ*` = all obligations discharged; anything else = outstanding obligation |
+| `Pre` | `Σ*` = preconditions satisfied; `∅` = violated |
+| `Post` | trace of events produced |
+| `Future` | `Σ*` = obligations discharged; otherwise = outstanding obligation |
+| `Weight` | (WRE only) semiring weight of the future at ε |
 
 ## Lean 4 Formalization
 

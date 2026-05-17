@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -i../.. #-}
-module Examples.ExtendedRE.Memory where
+module Examples.GuardedRE.Memory where
 
 import Prelude hiding ((<>))
 import Pledge
@@ -14,26 +14,26 @@ import Pledge
 --
 -- Using plain RE would miss the heap liveness check.
 -- Using plain PPred would miss the trace ordering (malloc-before-free).
--- ExtendedRE captures both simultaneously.
+-- GuardedRE captures both simultaneously.
 
 -- ── Primitives ────────────────────────────────────────────────────────────────
 
-malloc :: Addr -> Pledge ExtendedRE Addr
+malloc :: Addr -> Pledge GuardedRE Addr
 malloc addr = Pledge
     { ret    = addr
     , pre    = fromRE universe                  -- no precondition
     , post   = fromRE (Single (Atom "malloc" (List [Num addr])))
       -- future: the cell must be live (h[addr] > 0) AND free must eventually happen
-    , future = \a -> ExtendedRE
+    , future = \a -> GuardedRE
                         (PGt (ValAt a) (Lit 0))
                         (finally (Atom "free" (List [Num a])))
     }
 
-free :: Addr -> Pledge ExtendedRE ()
+free :: Addr -> Pledge GuardedRE ()
 free addr = Pledge
     { ret    = ()
       -- pre: cell must be live (heap side) AND malloc must have been observed (trace side)
-    , pre    = ExtendedRE
+    , pre    = GuardedRE
                   (PGt (ValAt addr) (Lit 0))
                   (previously (Atom "malloc" (List [Num addr])))
     , post   = fromRE (Single (Atom "free" (List [Num addr])))
@@ -45,13 +45,13 @@ free addr = Pledge
 -- ── Programs ──────────────────────────────────────────────────────────────────
 
 -- Good: malloc then free — both constraints satisfied.
-mallocThenFree :: Pledge ExtendedRE ()
+mallocThenFree :: Pledge GuardedRE ()
 mallocThenFree = do
     addr <- malloc 1
     free addr
 
 -- Good: sequential pairs — each obligation discharged in turn.
-sequential :: Pledge ExtendedRE ()
+sequential :: Pledge GuardedRE ()
 sequential = do
     a1 <- malloc 1
     free a1
@@ -59,30 +59,30 @@ sequential = do
     free a2
 
 -- Bad: missing free — future carries finally(free(1)) ∧ h[1] > 0.
-missingFree :: Pledge ExtendedRE ()
+missingFree :: Pledge GuardedRE ()
 missingFree = do
     _ <- malloc 1
     return ()
 
 -- Bad: free without malloc — pre contains previously(malloc(1)) which is not met.
-freeWithoutMalloc :: Pledge ExtendedRE ()
+freeWithoutMalloc :: Pledge GuardedRE ()
 freeWithoutMalloc = free 1
 
 -- Bad: double-free — noUntil guard triggers on the second free.
-doubleFree :: Pledge ExtendedRE ()
+doubleFree :: Pledge GuardedRE ()
 doubleFree = do
     addr <- malloc 1
     free addr
     free addr
 
 -- Bad: free wrong address — future(malloc 1) = finally(free(1)) remains undischarged.
-wrongFree :: Pledge ExtendedRE ()
+wrongFree :: Pledge GuardedRE ()
 wrongFree = do
     addr <- malloc 1
     free (addr + 1)
 
 -- Good: reallocate after free — noUntil guard reset by the second malloc.
-reallocate :: Pledge ExtendedRE ()
+reallocate :: Pledge GuardedRE ()
 reallocate = do
     a <- malloc 1
     free a
@@ -91,12 +91,12 @@ reallocate = do
 
 -- ── Display ───────────────────────────────────────────────────────────────────
 
-printResult :: forall a. Show a => String -> Pledge ExtendedRE a -> IO ()
+printResult :: forall a. Show a => String -> Pledge GuardedRE a -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    let ExtendedRE prePred  preRE  = pre         prog
-        ExtendedRE postPred postRE = post        prog
-        ExtendedRE futPred  futRE  = evalFuture  prog
+    let GuardedRE prePred  preRE  = pre         prog
+        GuardedRE postPred postRE = post        prog
+        GuardedRE futPred  futRE  = evalFuture  prog
     putStrLn $ "Pre:    [" ++ show prePred  ++ "]  " ++ show (normalize preRE)
     putStrLn $ "Post:   [" ++ show postPred ++ "]  " ++ show (normalize postRE)
     putStrLn $ "Future: [" ++ show futPred  ++ "]  " ++ show (normalize futRE)

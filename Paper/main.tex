@@ -95,35 +95,25 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-We present \emph{Pledge}, a Haskell library that extends the classical
+This paper presents \emph{Pledge}, a Haskell library that extends the classical
 pre/post-condition contract model with \emph{future conditions}: specifications
-that constrain what the remainder of a program must eventually do.
+that impose \emph{trace obligations} on the remainder of a program's execution.
 Future conditions are carried as a \emph{data-dependent} field
-\lstinline{future :: a -> eff} in the \lstinline{Pledge} monad
-alongside pre- and post-conditions, so that a single operation can
-impose obligations that refer to the resource handle it returns.
+$\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad
+alongside pre- and post-conditions, so that the future obligation of an 
+operation can depend on its own return value, e.g., requiring that a returned file handle be eventually closed.
 When operations are composed via monadic bind, future conditions are
-evaluated at the current return value, propagated and updated
-automatically using a subtraction operator, and preconditions
-accumulate in the Hoare-rule style.
-The design is parameterised over a \lstinline{Composable} algebra, admitting
-four distinct instances.
-In the \emph{regular-expression} instance ($\RE$), future conditions are
-extended REs with complement---whose derivative commutes algebraically with
-negation, avoiding automaton construction---and subtraction is the Brzozowski
-quotient.
-In the \emph{guarded regular-expression} instance ($\GRE$), a Presburger
-arithmetic predicate over the heap is conjoined with a trace RE, enabling
-arithmetic bounds (e.g.\ counter overflow) to be enforced alongside protocol
-ordering.
-In the \emph{weighted regular-expression} instance ($\WRE$), a semiring weight
-is attached to RE transitions, unifying probabilistic obligations (probability
-semiring) and min-cost scheduling (tropical semiring) in a single framework.
-In the \emph{separation-logic} instance ($\SL$), future conditions are heap
-predicates with separating conjunction ($*$), ordinary conjunction ($\wedge$),
-magic wand ($-*$), and Presburger arithmetic pure constraints;
-subtraction is the magic wand.
-All four instances reuse the same monadic bind formula, demonstrating that
+applied to the current return value and propagated automatically
+using a subtraction operator. Preconditions and postconditions compose 
+in the Hoare-rule style.
+The design is parameterised over a \lstinline{Composable} algebra -- 
+requiring concatenation~($\diamond$), conjunction~($\wedge$), subtraction~($\setminus$),
+with identity elements \lstinline{empty} (for concatenation) and \lstinline{universe} (for conjunction).
+Here presents four instances of the framework: trace protocols via regular expressions ($\RE$);
+trace protocols enriched with arithmetic bounds ($\GRE$);
+quantitative obligations via semiring-weighted regular expressions ($\WRE$);
+and heap-ownership obligations via separation logic ($\SL$).
+All four instances share the same monadic bind formula, demonstrating that
 the framework captures trace-based, arithmetic, quantitative, and
 heap-ownership obligations within a single algebraic interface.
 \end{abstract}

@@ -95,26 +95,28 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-This paper presents \emph{Pledge}, a Haskell library that extends the classical
+We present \emph{Pledge}, a Haskell library that extends the classical
 pre/post-condition contract model with \emph{future conditions}: specifications
 that impose \emph{trace obligations} on the remainder of a program's execution.
 Future conditions are carried as a \emph{data-dependent} field
 $\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad
 alongside pre- and post-conditions, so that the future obligation of an 
-operation can depend on its own return value, e.g., requiring that a returned file handle be eventually closed.
+operation can depend on its own return value, e.g.,
+a returned file handle must be eventually closed.
 When operations are composed via monadic bind, future conditions are
 applied to the current return value and propagated automatically
-using a subtraction operator. Preconditions and postconditions compose 
+using a subtraction operator; pre- and post-conditions compose
 in the Hoare-rule style.
-The design is parameterised over a \lstinline{Composable} algebra -- 
-requiring concatenation~($\diamond$), conjunction~($\wedge$), subtraction~($\setminus$),
-with identity elements \lstinline{empty} (for concatenation) and \lstinline{universe} (for conjunction).
-Here presents four instances of the framework: trace protocols via regular expressions ($\RE$);
+The design is parameterised over a \lstinline{Composable} algebra,
+requiring concatenation~($\diamond$), conjunction~($\wedge$), and
+subtraction~($\setminus$), together with identity elements
+\lstinline{empty} (for concatenation) and \lstinline{universe} (for conjunction).
+We present four instances of the framework: trace protocols via regular expressions ($\RE$);
 trace protocols enriched with arithmetic bounds ($\GRE$);
 quantitative obligations via semiring-weighted regular expressions ($\WRE$);
 and heap-ownership obligations via separation logic ($\SL$).
-All four instances share the same monadic bind formula, demonstrating that
-the framework captures trace-based, arithmetic, quantitative, and
+All four instances share a uniform monadic bind formula, demonstrating
+that \emph{Pledge} captures trace-based, arithmetic, quantitative, and
 heap-ownership obligations within a single algebraic interface.
 \end{abstract}
 
@@ -154,70 +156,72 @@ heap-ownership obligations within a single algebraic interface.
 
 Pre- and post-conditions are the workhorse of modular program specification.
 A pre-condition constrains the state in which an operation may be called;
-a post-condition describes what holds once it returns. Together they reason
-about a single \emph{call boundary}. Yet many correctness properties span
-multiple calls separated by unbounded intervening computation:
+a post-condition describes what holds once it returns. Together they characterise the behaviour of a single operation in isolation; yet many correctness properties span
+multiple calls with arbitrary computation in between:
 
 \begin{itemize}
-  \item Every \lstinline{malloc(a)} must eventually be followed by
-        \lstinline{free(a)}, and \lstinline{free(a)} must not be called twice
-        without an intervening \lstinline{malloc(a)}.
-  \item Every \lstinline{open(f)} must eventually be followed by
-        \lstinline{close(f)}.
-  \item Every \lstinline{beginTx} must eventually reach
-        \lstinline{commit} or \lstinline{rollback}.
-  \item Every \lstinline{acquire(m)} must eventually be followed by
-        \lstinline{release(m)}.
+  \item \emph{(Trace protocol, $\RE$)}
+        Every \lstinline{malloc(a)} must eventually be followed by
+        exactly one \lstinline{free(a)} (no double-free), and every
+        \lstinline{beginTx} must eventually reach \lstinline{commit}
+        or \lstinline{rollback}.
+  \item \emph{(Arithmetic bounds, $\GRE$)}
+        A counter must not exceed its declared maximum before being reset;
+        both the ordering constraint and the numeric bound must hold simultaneously.
+  \item \emph{(Quantitative obligation, $\WRE$)}
+        A submitted task must complete with probability at least $p$,
+        or be scheduled within a minimum-cost number of steps.
+  \item \emph{(Heap ownership, $\SL$)}
+        Heap cells must be owned before access and released after use;
+        separating conjunction ensures that each cell is owned by
+        exactly one caller at a time.
 \end{itemize}
 
-These are \emph{deferred obligations}---temporal constraints on what the
-\emph{rest} of the program must do after an operation is invoked.
-Pre/post reasoning cannot express them: a post-condition records what is
-true \emph{now}, not what must become true \emph{later}.
+These are \emph{future conditions}: obligations that an operation imposes
+on the \emph{remainder} of the program upon completion.
+Pre- and post-conditions are insufficient to express them.
+A pre-condition constrains the state \emph{before} an operation executes;
+a post-condition characterises the state \emph{immediately after} it returns.
+Both are local to a single operation boundary, discharged at the point of the call.
+A future condition, by contrast, is \emph{persistent}: it is propagated
+through subsequent monadic bind steps, refined as the program progresses,
+and fully discharged only when the requisite sequence of operations has been completed.
+Should a computation terminate with an undischarged future condition,
+the residual annotation identifies precisely what remains outstanding.
 
-We propose \emph{pledges} as a lightweight, compositional
+We propose the \lstinline{Pledge} monad as a lightweight, compositional
 mechanism for specifying such obligations.
-A pledge is a regular expression over events that the remaining
-execution trace must match.
-It is carried as a third annotation---alongside \lstinline{pre} and
-\lstinline{post}---in an \lstinline{Effectful} monad.
-
-Four design elements distinguish Pledge from prior work.
-First, the regular-expression language is extended with a
-\emph{complement} operator $\neg r$, letting us write the universal
-language as $\univ\;(=\neg\varnothing)$ and globally-always assertions
-as $\neg(\univ\cdot\neg\phi)$, all without building automata:
-the derivative of $\neg r$ is $\neg(\partial_a r)$, so the whole
-apparatus is purely algebraic.
-Second, the $\GRE$ instance pairs each RE with a Presburger arithmetic
-predicate over the heap, checked by an SMT solver, so a single
-annotation covers both protocol ordering and arithmetic safety.
-Third, the $\WRE$ instance replaces Boolean membership with a semiring
-weight, enabling probabilistic and min-cost future conditions without
-changing the bind formula.
-Fourth, the \lstinline{pre} field is propagated in the
-\emph{Hoare-rule} style: the precondition of a sequenced computation
-is the precondition of the first step, plus the residual of the
-continuation's precondition not discharged by the first step's
-postcondition.
+A value of type \lstinline{Pledge eff a} represents a computation
+that returns a value of type $a$ and carries three annotations:
+a precondition $\mathtt{pre} :: \mathit{eff}$, a postcondition $\mathtt{post} :: \mathit{eff}$,
+and a data-dependent future condition $\mathtt{future} :: a \to \mathit{eff}$ that
+expresses what the remaining execution must satisfy as a function of
+the return value of type $a$.
+When two computations are sequenced via monadic bind, the future
+condition of the first is \emph{partially discharged} by the
+postcondition of the continuation using the \lstinline{subtraction}
+operator of the \lstinline{Composable} algebra; the residual is then
+conjoined with the continuation's own future condition.
+The user annotates individual operations only; propagation is handled
+automatically by the monad.
 
 \paragraph{Contributions.}
 \begin{enumerate}
-  \item We define the \lstinline{Effectful} monad (\S\ref{sec:effectful}),
+  \item We define the \lstinline{Pledge} monad (\S\ref{sec:effectful}),
         parameterised over a \lstinline{Composable} algebra, with
-        \lstinline{pre}, \lstinline{post}, and \lstinline{future :: a -> eff}
+        $\mathtt{pre} :: \mathit{eff}$, $\mathtt{post} :: \mathit{eff}$, and $\mathtt{future} :: a \to \mathit{eff}$
         fields.  The \lstinline{future} field is \emph{data-dependent}: it is
         a function of the return value, so obligations can refer to the
         resource handle an operation produces.  We verify that the monad laws
         hold for the $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
   \item We instantiate the algebra to extended regular expressions over
         events with complement, using Brzozowski derivatives to implement
-        subtraction---the core of future-condition propagation
-        (\S\ref{sec:re})---and show that LTL\textsubscript{f} operators
-        embed directly as RE terms (\S\ref{sec:ltl}).
+        subtraction (\S\ref{sec:re}).
+        We also show that LTL\textsubscript{f} operators embed directly
+        as RE terms (\S\ref{sec:ltl}).
   \item We extend the RE instance to a \emph{guarded} form ($\GRE$,
         \S\ref{sec:guardedre-instance}), pairing each RE with a Presburger
-        arithmetic predicate over a concrete heap.  The predicate is
+        arithmetic predicate over program variables.  The predicate is
         evaluated by an SMT solver (Z3 via SBV) at membership-check time,
         enabling arithmetic range constraints to be enforced alongside
         protocol ordering in the same \lstinline{Composable} framework.
@@ -228,8 +232,8 @@ postcondition.
         the tropical semiring gives min-cost obligations.
   \item We provide a fourth, independent instantiation to separation-logic
         heap predicates (\S\ref{sec:sl-instance}), where separating
-        conjunction plays the role of sequential composition, magic wand
-        plays the role of subtraction, and Presburger arithmetic provides
+        conjunction serves as sequential composition, magic wand as
+        subtraction, and Presburger arithmetic provides
         pure constraints. This demonstrates the generality of the
         \lstinline{Composable} interface beyond trace-based specifications.
   \item We demonstrate the approach on ten use cases across all four instances
@@ -346,8 +350,8 @@ derivative e (Star r)     = Seq (derivative e r) (Star r)
 derivative _ _            = Bot
 \end{lstlisting}
 
-The \lstinline{firstWith} function returns the set of events---drawn from
-a supplied finite alphabet $\Sigma_0$---that can begin a word in $L(r)$,
+The \lstinline{firstWith} function returns the set of events (drawn from
+a supplied finite alphabet $\Sigma_0$) that can begin a word in $L(r)$,
 driving the subtraction algorithm.
 The complement case requires care.
 Naively writing \lstinline{first (Not r) = first r} is \emph{unsound}:
@@ -365,8 +369,8 @@ The correct characterisation is:
 \end{equation}
 
 That is, $e$ can open a word in $L(\neg r)$ iff after consuming $e$,
-the residual $\partial_e(r)$ does \emph{not} cover the whole future---there
-exists some continuation that stays outside $L(r)$.
+the residual $\partial_e(r)$ does \emph{not} cover the whole future;
+there exists some continuation that stays outside $L(r)$.
 The alphabet $\Sigma_0$ is collected from an RE via \lstinline{atoms},
 which recursively gathers all concrete (\lstinline{Atom}) events,
 excluding \lstinline{Wildcard}.
@@ -408,7 +412,7 @@ Table~\ref{tab:firstwith-not} gives representative evaluations of
 \lstinline{firstWith} with \lstinline{Not}, ordered from simple to
 non-trivial.
 The first three rows confirm that the complement of a single pattern,
-a sequence, or a union does not exclude any alphabet event---every event
+a sequence, or a union does not exclude any alphabet event: every event
 can open some word in the complement.
 The double-negation row shows that \lstinline{firstWith} correctly restores
 the original first set: $\partial_b(\neg a) = \neg\varnothing = \Sigma^*$
@@ -416,8 +420,8 @@ is total, so $b$ is filtered out by the $\lceil\cdot\rceil \neq \univ$
 check.
 The last two rows are the most instructive.
 In $\neg(a \cdot \Sigma^*)$ (words not starting with $a$), the derivative
-$\partial_a(a \cdot \Sigma^*)$ normalises to $\Sigma^*$---consuming $a$
-leaves every future possible---so $a$ is \emph{excluded}; only $b$ survives.
+$\partial_a(a \cdot \Sigma^*)$ normalises to $\Sigma^*$ (consuming $a$
+leaves every future possible), so $a$ is \emph{excluded}; only $b$ survives.
 Similarly, $\neg(a\cdot\Sigma^* \vee b\cdot\Sigma^*)$ excludes both $a$
 and $b$, leaving only $c$.
 The De Morgan row checks that \lstinline{firstWith} handles complement
@@ -449,8 +453,8 @@ $\neg a \wedge \neg b$  & $\{a,b,c\}$ & $\{a,b\}$  & De Morgan: $=\neg(a\vee b)$
 \label{sec:ltl}
 
 Because complement is a first-class constructor, the standard
-LTL\textsubscript{f} operators translate directly into RE---no
-automaton construction is needed.
+LTL\textsubscript{f} operators translate directly into RE, with no
+automaton construction needed.
 Table~\ref{tab:ltl} gives the full mapping.
 
 \begin{table}[ht]
@@ -480,22 +484,21 @@ $\phi\,U\,\psi$     & $\mathit{step}(\phi)^* \cdot \sem{\psi}$
 The complement operator does the heavy lifting.
 $\neg\phi$ maps to $\neg\sem{\phi}$ in one step.
 $G\,\phi \triangleq \neg F\neg\phi$ unfolds to
-$\neg(\univ\cdot\neg\sem{\phi})$---``no suffix violates
-$\phi$''---using two applications of $\neg$ and no auxiliary
-construction.
+$\neg(\univ\cdot\neg\sem{\phi})$ (``no suffix violates $\phi$''),
+using two applications of $\neg$ and no auxiliary construction.
 $F\,\phi$ and $X\,\phi$ need only concatenation.
 
 The $U$ case is the exception.
 $\phi\,U\,\psi$ requires $\phi$ to hold at each individual step
 before $\psi$, so the translation uses
-$\mathit{step}(\phi)$---the length-1 RE for a single event
+$\mathit{step}(\phi)$, the length-1 RE for a single event
 satisfying $\phi$.
 This is well-defined when $\phi$ is propositional; for temporal
 $\phi$ (e.g.\ $X\,\phi'$) there is no valid single-step projection,
 and the translation is undefined.
 
 %% =========================================================================
-\section{The \texttt{Effectful} Monad}
+\section{The \texttt{Pledge} Monad}
 \label{sec:effectful}
 %% =========================================================================
 
@@ -514,7 +517,7 @@ class Composable a where
 
 \noindent
 The five operations form exactly the interface required by the bind
-formula---no more, no less.
+formula: no more, no less.
 \lstinline{concatenation} sequences effects (used for \lstinline{post}
 and \lstinline{pre}); \lstinline{conjunction} combines simultaneous
 constraints (used for \lstinline{future}); \lstinline{subtraction}
@@ -532,7 +535,7 @@ It is an RE-specific simplification called internally by
 \lstinline{subtraction}; a different \lstinline{Composable} instance
 need not define it at all.
 
-\subsection{The \texttt{Effectful} Type}
+\subsection{The \texttt{Pledge} Type}
 \label{sec:future-cond}
 
 The \lstinline{future} field is \emph{data-dependent}: it is a function of
@@ -542,14 +545,14 @@ The helper \lstinline{evalFuture} evaluates this function at the
 computation's own return value.
 
 \begin{lstlisting}
-data Effectful eff a = Effectful
+data Pledge eff a = Pledge
   { ret    :: a
   , pre    :: eff        -- what must have occurred before
   , post   :: eff        -- what this computation produces
   , future :: a -> eff   -- obligation indexed by the return value
   }
 
-evalFuture :: Effectful eff a -> eff
+evalFuture :: Pledge eff a -> eff
 evalFuture e = future e (ret e)
 \end{lstlisting}
 
@@ -558,7 +561,7 @@ evalFuture e = future e (ret e)
 \lstinline{pure} introduces a computation with no effect and no obligation:
 
 \begin{lstlisting}
-pure x = Effectful
+pure x = Pledge
   { ret = x, pre = universe, post = empty, future = \_ -> universe }
 \end{lstlisting}
 
@@ -566,7 +569,7 @@ The bind operator sequences two computations.
 Let $e_2 = f(\ret(e))$.
 
 \begin{lstlisting}
-e >>= f = let fe = f (ret e) in Effectful
+e >>= f = let fe = f (ret e) in Pledge
   { ret    = ret fe
   , pre    = pre e /\ (post e \\ pre fe)
   , post   = post e <> post fe
@@ -619,7 +622,7 @@ The outcome depends on whether $\varepsilon \in L(\pre(e))$:
 \begin{itemize}
   \item $\pre(e) = \univ$ (nullable, $\varepsilon \in L(\univ)$):
         $\univ \wedge \varepsilon = \varepsilon$.
-        The composed computation requires an empty input history---it
+        The composed computation requires an empty input history: it
         can be called at the very start, once the internal
         $\post(e) \vdash \pre(e_2)$ handshake is satisfied within the
         composition.
@@ -647,14 +650,14 @@ allowing re-allocation.
 \begin{lstlisting}
 type Addr = Int
 
-malloc :: Addr -> Effectful RE Addr
-malloc a = Effectful
+malloc :: Addr -> Pledge RE Addr
+malloc a = Pledge
   { ret = a, pre = universe
   , post   = Single (Atom "malloc" [Num a])
   , future = \r -> finally (Atom "free" [Num r]) }
 
-free :: Addr -> Effectful RE ()
-free a = Effectful
+free :: Addr -> Pledge RE ()
+free a = Pledge
   { ret = ()
   , pre    = previously (Atom "malloc" [Num a])
   , post   = Single (Atom "free" [Num a])
@@ -734,8 +737,8 @@ before calling \lstinline{firstWith}: this ensures that an event
 appearing only in $r_2$ (e.g.\ a future obligation) is still considered
 as a potential first step when $r_1$ contains a complement.
 Equation~\eqref{eq:first-not} then checks, for each candidate $e$,
-whether $\lceil\partial_e(r_1)\rceil \neq \univ$---confirming that
-$e$ can genuinely open a word outside $L(r_1)$---before the
+whether $\lceil\partial_e(r_1)\rceil \neq \univ$ (confirming that
+$e$ can genuinely open a word outside $L(r_1)$) before the
 derivative pair is explored.
 
 \lstinline{normalize} sits outside the instance and applies the
@@ -1119,7 +1122,7 @@ $\mathtt{Conj}\;\mathbf{top}\;P = P$, and
 $\mathtt{Conj}\;(\mathtt{Cell}\;l_1\;v_1)\;(\mathtt{Cell}\;l_2\;v_2) =
 \mathbf{false}$ for distinct addresses $l_1 \neq l_2$.
 The constructor becomes genuinely useful when one side is a \emph{pure
-constraint}---a predicate that holds independently of the heap:
+constraint}: a predicate that holds independently of the heap:
 \[
   \lceil\phi\rceil \wedge (\ell \mapsto v)
   \qquad\text{(pure condition $\phi$ and spatial ownership $\ell \mapsto v$)}
@@ -1212,7 +1215,7 @@ All rules apply recursively bottom-up.
 We demonstrate Pledge across ten domains spanning all four instances.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
-composes them in the \lstinline{Effectful} monad, and inspects the
+composes them in the \lstinline{Pledge} monad, and inspects the
 normalised annotations of the result.
 A \lstinline{future} of $\univ$ (or \lstinline{wNullable = sone} for $\WRE$)
 and a \lstinline{pre} of $\univ$ together certify temporal correctness.
@@ -1228,14 +1231,14 @@ as its future, forbidding a second \lstinline{free(a)} unless
 \lstinline{malloc(a)} resets the guard first.
 
 \begin{lstlisting}
-malloc :: Addr -> Effectful RE Addr
-malloc a = Effectful
+malloc :: Addr -> Pledge RE Addr
+malloc a = Pledge
   { ret = a, pre = universe
   , post   = Single (Atom "malloc" [Num a])
   , future = \r -> finally (Atom "free" [Num r]) }
 
-free :: Addr -> Effectful RE ()
-free a = Effectful
+free :: Addr -> Pledge RE ()
+free a = Pledge
   { ret = ()
   , pre    = previously (Atom "malloc" [Num a])
   , post   = Single (Atom "free" [Num a])
@@ -1268,23 +1271,23 @@ conditions are tracked regardless of the return type.
 
 \begin{lstlisting}
 -- Good: ret = Addr; future = finally(free(1))  -  obligation visible in residual
-allocReturnAddr :: Effectful RE Addr
+allocReturnAddr :: Pledge RE Addr
 allocReturnAddr = malloc 1
 
 -- Bad future: ret = (Addr, Addr); future = finally(free(1)) /\ finally(free(2))
-allocTwoReturnPair :: Effectful RE (Addr, Addr)
+allocTwoReturnPair :: Pledge RE (Addr, Addr)
 allocTwoReturnPair = do { a1 <- malloc 1; a2 <- malloc 2; return (a1, a2) }
 
 -- Good: ret = Addr; future = noUntil(free(1), malloc(1))  -  no pending finally
-allocFreeReturnAddr :: Effectful RE Addr
+allocFreeReturnAddr :: Pledge RE Addr
 allocFreeReturnAddr = do { a <- malloc 1; free a; return a }
 \end{lstlisting}
 
 \subsection{Mutex / Lock Lifecycle}
 
 \begin{lstlisting}
-release :: Int -> Effectful RE ()
-release m = Effectful
+release :: Int -> Pledge RE ()
+release m = Pledge
   { ret = ()
   , pre    = Single (Atom "acquire" [Num m])
   , post   = Single (Atom "release" [Num m])
@@ -1299,19 +1302,44 @@ releaseWithoutAcquire = release 1
 
 \subsection{Database Transactions}
 
-\lstinline{beginTx} carries a \emph{disjunctive} future condition:
+\lstinline{beginTx} carries a \emph{disjunctive} future condition
+requiring that the transaction is eventually either committed or rolled back.
+\lstinline{commit} and \lstinline{rollback} discharge this obligation:
 
 \begin{lstlisting}
-beginTx = Effectful
+beginTx :: Pledge RE ()
+beginTx = Pledge
   { ret = (), pre = universe
   , post   = Single (Atom "beginTx" [])
   , future = Or (finally (Atom "commit" []))
                 (finally (Atom "rollback" [])) }
+
+commit :: Pledge RE ()
+commit = Pledge
+  { ret = (), pre = Single (Atom "beginTx" [])
+  , post   = Single (Atom "commit" [])
+  , future = universe }
+
+rollback :: Pledge RE ()
+rollback = Pledge
+  { ret = (), pre = Single (Atom "beginTx" [])
+  , post   = Single (Atom "rollback" [])
+  , future = universe }
+
+-- Bad future: transaction never closed
+openTx = do { beginTx }
+
+-- Good: transaction properly committed
+committedTx = do { beginTx; commit }
+
+-- Good: transaction properly rolled back
+abortedTx = do { beginTx; rollback }
 \end{lstlisting}
 
-A program ending with neither \lstinline{commit} nor \lstinline{rollback}
-retains the full disjunction as its residual future, naming both
-outstanding alternatives.
+\noindent\lstinline{openTx} retains the full disjunction
+$\finally{\mathtt{commit}} \vee \finally{\mathtt{rollback}}$ as its
+residual future. \lstinline{committedTx} and \lstinline{abortedTx}
+fully discharge the obligation, yielding $\univ$.
 
 \paragraph{RE summary.}
 Table~\ref{tab:examples-re} summarises the three RE domains.
@@ -1420,16 +1448,16 @@ The heap-memory example mirrors the RE memory example but uses heap
 ownership rather than event traces.
 
 \begin{lstlisting}
-alloc :: Addr -> Val -> Effectful SL ()
-alloc a v = Effectful
+alloc :: Addr -> Val -> Pledge SL ()
+alloc a v = Pledge
   { ret = (), pre = Top, post = Cell a v, future = Top }
 
-free :: Addr -> Val -> Effectful SL ()
-free a v = Effectful
+free :: Addr -> Val -> Pledge SL ()
+free a v = Pledge
   { ret = (), pre = Cell a v, post = Emp, future = Top }
 
-writeCell :: Addr -> Val -> Val -> Effectful SL ()
-writeCell a old new = Effectful
+writeCell :: Addr -> Val -> Val -> Pledge SL ()
+writeCell a old new = Pledge
   { ret = (), pre = Cell a old, post = Cell a new, future = Top }
 \end{lstlisting}
 
@@ -1457,15 +1485,15 @@ The bank account example demonstrates \lstinline{Pure} Presburger
 constraints inside \lstinline{Conj}.
 
 \begin{lstlisting}
-withdraw :: Addr -> Val -> Val -> Effectful SL ()
-withdraw a old amount = Effectful
+withdraw :: Addr -> Val -> Val -> Pledge SL ()
+withdraw a old amount = Pledge
   { ret = ()
   , pre  = Conj (Pure (PGe (ValAt a) (Lit amount))) (Cell a old)
   , post = Cell a (old - amount)
   , future = Top }
 
-closeAccount :: Addr -> Val -> Effectful SL ()
-closeAccount a bal = Effectful
+closeAccount :: Addr -> Val -> Pledge SL ()
+closeAccount a bal = Pledge
   { ret = ()
   , pre  = Conj (Pure (PEq (ValAt a) (Lit 0))) (Cell a bal)
   , post = Emp, future = Top }
@@ -1495,8 +1523,8 @@ A singly-linked-list node occupies two consecutive cells:
 address $a$ holds the payload value and address $a{+}1$ holds the next pointer.
 
 \begin{lstlisting}
-allocNode :: Addr -> Val -> Val -> Effectful SL ()
-allocNode a val next = Effectful
+allocNode :: Addr -> Val -> Val -> Pledge SL ()
+allocNode a val next = Pledge
   { ret = (), pre = Top
   , post = SepStar (Cell a val) (Cell (a+1) next)
   , future = Top }
@@ -1616,13 +1644,13 @@ associativity of $\wedge$.
 
 \paragraph{Precondition.}
 The \lstinline{pre} field propagates constraints via $\wedge$ (intersection).
-When $\post(e)$ fully covers $\pre(e_2)$---i.e.\
-$\post(e) \setminus \pre(e_2) = \varepsilon$---Equation~\eqref{eq:pre-bind}
+When $\post(e)$ fully covers $\pre(e_2)$ (i.e.\
+$\post(e) \setminus \pre(e_2) = \varepsilon$), Equation~\eqref{eq:pre-bind}
 gives $\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e) \wedge \varepsilon$.
 If $\pre(e) = \univ$ (the common case for pure computations) this reduces
 to $\varepsilon$, meaning the composed computation can run from an empty
 start.
-If $\pre(e)$ is non-nullable---e.g.\ $\pre(e) = \{a\}$---the intersection
+If $\pre(e)$ is non-nullable (e.g.\ $\pre(e) = \{a\}$), the intersection
 $\{a\} \wedge \varepsilon = \varnothing$ flags a contradiction: no history
 can satisfy both constraints simultaneously.
 In general, the residual $\post(e) \setminus \pre(e_2)$ records
@@ -1646,9 +1674,9 @@ QuickCheck~\cite{claessen2000} supports conditional properties via the
 pre/post-condition checking.
 Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
 monad in a dependently typed language, propagating pre/post annotations through
-monadic bind analogously to our \lstinline{Effectful} monad.
+monadic bind analogously to our \lstinline{Pledge} monad.
 Pledge complements all of these by adding a \emph{temporal}
-dimension---the future condition---that none of these systems address,
+dimension (the future condition) that none of these systems address,
 and it does so without requiring type-system extensions or a dependent type
 theory.
 
@@ -1668,10 +1696,10 @@ than repairing programs post-hoc, it carries temporal obligations as
 first-class values so that violations are surfaced statically.
 
 \paragraph{Effect systems and monads.}
-The \lstinline{Effectful} monad is related to effect handlers~\cite{pretnar2015}
+The \lstinline{Pledge} monad is related to effect handlers~\cite{pretnar2015}
 and graded/indexed monads~\cite{orchard2014,katsumata2014} that track
 effects in types. Our contribution is orthogonal: we focus on the
-\emph{temporal} dimension of effects---what must happen \emph{after}---rather
+\emph{temporal} dimension of effects (what must happen \emph{after}), rather
 than on tracking which effects are present.
 
 \paragraph{Session types.}
@@ -1710,7 +1738,7 @@ propagation in a monadic setting.
 \paragraph{Decidability.}
 Equality of normalised regular expressions is decidable, so the
 fixed-point computation in \lstinline{subtraction} terminates whenever
-the derivative sequence is finite---which holds for the regular
+the derivative sequence is finite, which holds for the regular
 languages used in our examples. Extending to context-free or
 $\omega$-regular specifications remains future work.
 
@@ -1718,7 +1746,7 @@ $\omega$-regular specifications remains future work.
 The \lstinline{pre} field satisfies the Hoare-rule property
 rather than strict monad-law equality (Section~\ref{sec:monad-laws}).
 A natural refinement is to make \lstinline{pre} a separate, non-monadic
-annotation computed by a static analysis pass over the \lstinline{Effectful}
+annotation computed by a static analysis pass over the \lstinline{Pledge}
 term, separating the behavioural monad from the precondition contract checker.
 
 \paragraph{Integration with effect handlers.}
@@ -1727,14 +1755,14 @@ Lifting Pledge into an effect-handler framework
 specifications to be composed alongside algebraic effect rows, opening
 the door to modular verification of larger programs.
 A lightweight \emph{shadow} approach requires no deep integration:
-the \lstinline{Effectful RE} computation is kept as a pure
+the \lstinline{Pledge RE} computation is kept as a pure
 specification and evaluated statically, while a separate
 \lstinline{Eff es} computation carries out the real effects.
 The two are written in parallel and linked only at the top level:
 
 \begin{lstlisting}
 -- Specification (pure, statically checked)
-spec :: Effectful RE ()
+spec :: Pledge RE ()
 spec = do { addr <- malloc 1; free addr }
 
 -- Implementation (real IO via effectful)
@@ -1769,7 +1797,7 @@ declaration, enabling complement over an unrestricted event domain
 and removing the closed-world restriction.
 
 \paragraph{Connection to indexed and graded monads.}
-Because \lstinline{future :: a -> eff} indexes the obligation by the
+Because $\mathtt{future} :: a \to \mathit{eff}$ indexes the obligation by the
 return value rather than a fixed constant
 (Section~\ref{sec:future-cond}), Pledge echoes the
 \emph{indexed-} and \emph{graded-monad} literature, where types are
@@ -1777,8 +1805,8 @@ indexed by computational effects; here the index is a return value
 instead of an effect row.
 
 \paragraph{Solver-backed discharge of residual conditions.}
-Residual annotations---a \lstinline{pre} that normalises to $\varnothing$,
-or a \lstinline{future} that does not reduce to $\univ$---are currently
+Residual annotations (a \lstinline{pre} that normalises to $\varnothing$,
+or a \lstinline{future} that does not reduce to $\univ$) are currently
 surfaced as symbolic expressions that the programmer must inspect manually.
 A natural extension is to connect these expressions to an automatic solver:
 residual RE conditions can be checked for non-emptiness by an NFA/DFA
@@ -1790,7 +1818,7 @@ counterexample traces (for RE) or unsatisfiable heaps (for SL) rather than
 leaving the interpretation of the residual to the user.
 
 \paragraph{Parallel composition.}
-The \lstinline{Effectful} monad is inherently sequential: bind models
+The \lstinline{Pledge} monad is inherently sequential: bind models
 one computation followed by another.
 Concurrent programs require a \emph{parallel} combinator $e_1 \parallel e_2$
 in which the two sub-computations interleave freely.
@@ -1823,7 +1851,7 @@ $\WRE$ and quantitative SL remains future work.
 %% =========================================================================
 
 We have presented Pledge, a Haskell library that extends effectful
-computations with future conditions---specifications that constrain what
+computations with future conditions: specifications that constrain what
 the remainder of a program must do.
 Four design choices make the approach work.
 First, the \lstinline{Composable} typeclass abstracts the specification
@@ -1831,7 +1859,7 @@ algebra, admitting four independent instances that all reuse the same
 monadic bind formula.
 Second, the $\RE$ instance integrates complement with the single algebraic
 law $\partial_a(\neg r) = \neg(\partial_a r)$, enabling globally
-assertions and LTL\textsubscript{f} embedding---all without automaton
+assertions and LTL\textsubscript{f} embedding, all without automaton
 construction.
 Third, the $\GRE$ instance pairs each RE with a Presburger arithmetic
 predicate over the heap, so that both protocol ordering \emph{and}

@@ -326,7 +326,7 @@ at the level of the \lstinline{Composable} algebra.
 \subsection{Extended Regular Expressions over Events}
 \label{sec:re}
 
-Events carry a name and typed arguments.
+Events are the atomic units of observation; each carries a name and a list of typed arguments.
 
 \begin{lstlisting}
 data Term  = Var String | Str String | Num Int
@@ -429,10 +429,10 @@ derivative _ _            = Bot
 The \lstinline{firstWith} function returns the set of events (drawn from
 a supplied finite alphabet $\Sigma_0$) that can begin a word in $L(r)$,
 driving the subtraction algorithm.
-The complement case requires care.
+The complement case requires particular care.
 Naively writing \lstinline{first (Not r) = first r} is \emph{unsound}:
 $L(\neg r)$ can begin with events \emph{not} in $\mathit{first}(r)$,
-so the na\"ive rule explores the wrong direction.
+so the naive rule explores the wrong direction.
 The correct characterisation is:
 
 \begin{equation}
@@ -593,7 +593,7 @@ class Composable a where
 
 \noindent
 The five operations form exactly the interface required by the bind
-formula: no more, no less.
+formula, and no more.
 \lstinline{concatenation} sequences effects (used for \lstinline{post}
 and \lstinline{pre}); \lstinline{conjunction} combines simultaneous
 constraints (used for \lstinline{future}); \lstinline{subtraction}
@@ -606,17 +606,17 @@ The class assumes \lstinline{(<>)} is associative with unit
 \lstinline{(/\\)}; \lstinline{subtraction} satisfies
 $\varepsilon \setminus r = r$ and $\univ \setminus r = \varepsilon$.
 
-Normalization is \emph{not} part of the class.
-It is an RE-specific simplification called internally by
-\lstinline{subtraction}; a different \lstinline{Composable} instance
+Normalisation is \emph{not} part of the class.
+It is an RE-specific simplification invoked internally by
+\lstinline{subtraction}; alternative \lstinline{Composable} instances
 need not define it at all.
 
 \subsection{The \texttt{Pledge} Type}
 \label{sec:future-cond}
 
 The \lstinline{future} field is \emph{data-dependent}: it is a function of
-the return value \lstinline{a}, allowing obligations to refer to the resource
-handle an operation produces.
+the return value \lstinline{a}, allowing obligations to refer to the specific
+resource handle that an operation produces.
 The helper \lstinline{evalFuture} evaluates this function at the
 computation's own return value.
 
@@ -634,15 +634,14 @@ evalFuture e = future e (ret e)
 
 \subsection{Monad Instances}
 
-\lstinline{pure} introduces a computation with no effect and no obligation:
+\lstinline{pure} introduces a value with no effect and no obligation:
 
 \begin{lstlisting}
 pure x = Pledge
   { ret = x, pre = universe, post = empty, future = \_ -> universe }
 \end{lstlisting}
 
-The bind operator sequences two computations.
-Let $e_2 = f(\ret(e))$.
+The bind operator sequences two computations; write $e_2 = f(\ret(e))$.
 
 \begin{lstlisting}
 e >>= f = let fe = f (ret e) in Pledge
@@ -666,7 +665,7 @@ Each \lstinline{future} function is applied to the corresponding
   \label{eq:future-bind}
 \end{equation}
 
-removes from $e$'s future obligation (evaluated at $e$'s return value)
+This removes from $e$'s future obligation (evaluated at $e$'s return value)
 those traces that $e_2$'s postcondition satisfies, then intersects the
 residual with $e_2$'s own future obligation (evaluated at $e_2$'s return
 value).
@@ -720,8 +719,8 @@ conflict rather than silently discarding one side.
 the future condition is data-dependent, referring to whatever address
 was actually returned via the lambda parameter \lstinline{r}.
 \lstinline{free} asserts that \lstinline{free(a)} must not recur
-until \lstinline{malloc(a)} happens first, preventing double-free while
-allowing re-allocation.
+until \lstinline{malloc(a)} is called again, preventing double-free while
+permitting re-allocation.
 
 \begin{lstlisting}
 type Addr = Int
@@ -783,7 +782,7 @@ yields $\varnothing$, so the combined future is $\varnothing$.\ \texttimes
 \label{sec:re-instance}
 %% =========================================================================
 
-The \lstinline{Composable RE} instance maps library operations onto
+The \lstinline{Composable RE} instance maps the algebra operations onto
 \lstinline{RE} constructors and implements subtraction via derivatives:
 
 \begin{lstlisting}
@@ -806,19 +805,19 @@ normalize :: RE -> RE   -- RE-specific; not part of Composable
 normalize r = {- ... algebraic simplification ... -}
 \end{lstlisting}
 
-The third clause handles the universal-precondition case:
+The second clause handles the universal case:
 $\univ \setminus r = \varepsilon$ for any $r$.
 The general clause collects the alphabet from \emph{both} operands
 before calling \lstinline{firstWith}: this ensures that an event
 appearing only in $r_2$ (e.g.\ a future obligation) is still considered
 as a potential first step when $r_1$ contains a complement.
-Equation~\eqref{eq:first-not} then checks, for each candidate $e$,
+Equation~\eqref{eq:first-not} then verifies, for each candidate $e$,
 whether $\lceil\partial_e(r_1)\rceil \neq \univ$ (confirming that
 $e$ can genuinely open a word outside $L(r_1)$) before the
 derivative pair is explored.
 
-\lstinline{normalize} sits outside the instance and applies the
-following RE-specific laws, exploiting the complement constructor:
+\lstinline{normalize} is defined outside the instance and applies the
+following RE-specific laws, which exploit the complement constructor:
 
 \begin{center}
 \begin{tabular}{ll}
@@ -842,11 +841,11 @@ $\varnothing^* = \varepsilon$, $\varepsilon^* = \varepsilon$ & \lstinline{Star} 
 \label{sec:guardedre-instance}
 %% =========================================================================
 
-The RE instance reasons about event traces but knows nothing about
+The RE instance reasons about event traces but is entirely silent about
 arithmetic state.
 The $\GRE$ instance closes this gap: a guarded regular expression pairs
 a trace RE with a Presburger arithmetic predicate over a concrete heap,
-so that one annotation can simultaneously enforce a protocol ordering
+so that a single annotation can simultaneously enforce a protocol ordering
 \emph{and} an arithmetic bound.
 
 \subsection{The \texttt{GuardedRE} Type}
@@ -889,9 +888,9 @@ instance Composable GuardedRE where
 \end{lstlisting}
 
 \noindent
-Both \lstinline{concatenation} and \lstinline{subtraction} \emph{conjoin}
+Both \lstinline{concatenation} and \lstinline{subtraction} conjoin
 both heap predicates: the residual must respect the constraints from
-both sides.
+both operands.
 The RE component uses the same \lstinline{reSubtraction} and
 \lstinline{normalize} as the plain RE instance.
 
@@ -901,7 +900,7 @@ Composing multiple \lstinline{GuardedRE} values accumulates a tree of
 \lstinline{PAnd} nodes.
 \lstinline{normalizePPred} flattens this tree, removes duplicates,
 substitutes equalities (e.g.\ $h[a]=k \Rightarrow$ replace $\mathtt{ValAt}\;a$
-by $k$ everywhere), evaluates literal comparisons, and replaces
+by $k$ throughout), evaluates literal comparisons, and replaces
 $\lnot\mathbf{true}$ with the canonical $\mathbf{false}$ constructor
 \lstinline{PFalse}:
 
@@ -919,9 +918,9 @@ normalizePPred p = rebuildAnd (substEqs eqs atoms)
 \end{lstlisting}
 
 The introduction of \lstinline{PFalse} prevents the solver from being
-invoked with expressions like $(\lnot\mathbf{true}) \wedge \cdots$ that
-are syntactically unsatisfiable; instead they normalise immediately to
-\lstinline{PFalse}.
+invoked with expressions such as $(\lnot\mathbf{true}) \wedge \cdots$ that
+are syntactically unsatisfiable; these normalise immediately to
+\lstinline{PFalse} without any solver call.
 
 \subsection{Membership Checking}
 
@@ -1000,7 +999,8 @@ Bad program & Residual \lstinline{pre} (Presburger) & Residual \lstinline{pre} (
 The RE and $\GRE$ instances are Boolean: a future condition is either
 satisfied or violated.
 The $\WRE$ instance generalises membership to a \emph{weight} drawn from
-a semiring, enabling probabilistic and quantitative obligations.
+a semiring, enabling probabilistic and quantitative obligations to be
+expressed within the same \lstinline{Composable} framework.
 
 \subsection{The Semiring Class}
 
@@ -1065,7 +1065,7 @@ wNullable _             = szero
 \noindent
 \lstinline{wDerivative} and \lstinline{wSubtraction} follow the same
 structure as their Boolean counterparts, with semiring operations
-replacing Boolean ones.
+substituted for Boolean ones.
 The \lstinline{Composable (WRE w)} instance (enabled by
 \lstinline{FlexibleInstances}) maps \lstinline{concatenation} to
 \lstinline{WSeq}, \lstinline{conjunction} to \lstinline{WAnd}, and
@@ -1086,10 +1086,10 @@ wGlobally weight e = WStar (WSingle weight e)
 
 \subsection{Example: Probabilistic Memory (Prob Semiring)}
 
-In a probabilistic setting each \lstinline{free(a)} has an associated
+In a probabilistic setting, each \lstinline{free(a)} has an associated
 probability of being called.
 \lstinline{malloc} carries a future condition asserting that
-\lstinline{free(a)} must be called with probability $\geq p$:
+\lstinline{free(a)} must be called with probability at least $p$:
 
 \begin{lstlisting}
 malloc :: Addr -> Double -> Pledge (WRE Prob) Addr
@@ -1101,15 +1101,14 @@ malloc a p = Pledge
 
 The residual weight of \lstinline{wNullable} at the end of a program
 measures how much of the obligation has been satisfied:
-a weight of \lstinline{Prob 1.0} means the obligation is fully
-discharged; a weight $< 1$ names the probability shortfall.
+a weight of \lstinline{Prob 1.0} indicates that the obligation is fully
+discharged; a weight strictly less than~$1$ quantifies the probability shortfall.
 
 \subsection{Example: Min-Cost Scheduling (Tropical Semiring)}
 
 Under the tropical semiring, \lstinline{WSingle (Tropical c) e}
-assigns cost $c$ to emitting event $e$.
-\lstinline{wNullable} then returns the minimum total cost of
-reaching the empty trace:
+assigns cost $c$ to emitting event $e$; \lstinline{wNullable} then
+returns the minimum total cost of reaching an accepting state:
 
 \begin{lstlisting}
 submitJob :: Int -> Double -> Pledge (WRE Tropical) ()
@@ -1134,10 +1133,11 @@ flagging the missing completion.
 \label{sec:sl-instance}
 %% =========================================================================
 
-The \lstinline{Composable} typeclass is not tied to trace-based specifications.
-We demonstrate its generality further with a fourth instance over
+The \lstinline{Composable} typeclass is not inherently tied to
+trace-based specifications.
+We demonstrate its generality with a fourth instance over
 \emph{separation-logic heap predicates}, where future conditions describe
-what heap state must hold when the computation completes.
+what heap state must hold upon completion of the computation.
 
 \subsection{Structural Parallel with RE}
 
@@ -1258,7 +1258,7 @@ The two base cases mirror those of the RE instance:
 $\varepsilon \setminus r = r$ becomes $\mathbf{emp} \wand Q = Q$
 (providing no heap leaves the obligation unchanged), and
 $\univ \setminus r = \varepsilon$ becomes $\top \wand Q = \mathbf{emp}$
-(a $\top$ postcondition covers any precondition).
+(a $\top$ postcondition covers any precondition, leaving no residual).
 The general case records the wand symbolically for later evaluation
 or normalisation.
 
@@ -1288,7 +1288,7 @@ All rules apply recursively bottom-up.
 \label{sec:examples}
 %% =========================================================================
 
-We demonstrate Pledge across ten domains spanning all four instances.
+We demonstrate \lstinline{Pledge} across ten use cases spanning all four instances.
 Each example defines primitive operations annotated with
 \lstinline{pre}, \lstinline{post}, and \lstinline{future},
 composes them in the \lstinline{Pledge} monad, and inspects the
@@ -1379,8 +1379,8 @@ releaseWithoutAcquire = release 1
 \subsection{Database Transactions}
 
 \lstinline{beginTx} carries a \emph{disjunctive} future condition
-requiring that the transaction is eventually either committed or rolled back.
-\lstinline{commit} and \lstinline{rollback} discharge this obligation:
+requiring that the transaction is eventually either committed or rolled back;
+\lstinline{commit} and \lstinline{rollback} each discharge this obligation:
 
 \begin{lstlisting}
 beginTx :: Pledge RE ()
@@ -1444,9 +1444,9 @@ Transaction & no commit/rollback                & $\finally{\mathtt{commit}}\vee
 \label{sec:ex-bounded}
 
 The bounded counter (\S\ref{sec:guardedre-instance}) demonstrates that
-both the Presburger and RE sides are necessary.
+both the Presburger and RE components are necessary.
 The RE alone would accept overflow sequences; the Presburger predicate
-alone would accept arbitrary event orders.
+alone would accept arbitrarily ordered events.
 
 \begin{lstlisting}
 -- Good: init, two increments, one decrement, snapshot
@@ -1486,10 +1486,10 @@ Bad program & Residual \lstinline{pre} ($\GRE$) & Cause \\
 \subsection{Task Scheduling (\texorpdfstring{$\WRE$}{WRE} Instance)}
 \label{sec:ex-sched}
 
-The task-scheduler example shows that the tropical semiring naturally
+The task-scheduling example shows that the tropical semiring naturally
 accumulates minimum costs.
 Each \lstinline{submitJob} operation carries both a submission cost and
-a future condition that every submitted job must eventually complete.
+a future condition requiring that every submitted job eventually completes.
 
 \begin{lstlisting}
 -- Good: submit two jobs, complete both
@@ -1651,14 +1651,14 @@ are stated in terms of \lstinline{evalFuture}, defined as
 computation's own return value.
 We write $\widehat{\fut}(e)$ for $\mathit{evalFuture}(e)$ for brevity.
 The laws hold for the triple $(\ret, \post, \widehat{\fut})$ under the
-assumption that \lstinline{Composable} forms a monoid for
-\lstinline{<>} (\lstinline{empty} is the unit) and that
-\lstinline{universe} is the unit for \lstinline{/\\}.
+assumption that \lstinline{Composable} forms a monoid under
+\lstinline{<>} with unit \lstinline{empty}, and that
+\lstinline{universe} is the unit for \lstinline{(/\\)}.
 The \lstinline{pre} field satisfies the Hoare-rule property
 (Equation~\ref{eq:pre-bind}) rather than strict monad-law equality;
-we discuss this below.
+we discuss this in the final paragraph of this section.
 
-\paragraph{Left identity} \lstinline{pure x >>= f = f x}.
+\paragraph{Left identity.} \lstinline{pure x >>= f = f x}.
 
 $\ret$: $\ret(f\,x)$. \checkmark \quad
 $\post$: $\varepsilon \mathbin{<>} \post(f\,x) = \post(f\,x)$. \checkmark
@@ -1677,11 +1677,10 @@ $\widehat{\fut}(\mathtt{pure}\;x) = \univ$.
      \;=\; \widehat{\fut}(f\,x). \;\checkmark
 \end{align*}
 
-The subtraction $r \setminus \univ = \varepsilon$ holds because
-$\univ \setminus r = \varepsilon$ is a base case of
-\lstinline{reSubtraction}.
+The identity $r \setminus \univ = \varepsilon$ follows from the base case
+$\univ \setminus r = \varepsilon$ of \lstinline{reSubtraction}.
 
-\paragraph{Right identity} \lstinline{e >>= pure = e}.
+\paragraph{Right identity.} \lstinline{e >>= pure = e}.
 
 $\ret$: $\ret(e)$. \checkmark \quad
 $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark

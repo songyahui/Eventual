@@ -95,29 +95,44 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-We present \emph{Pledge}, a Haskell library that extends the classical
-pre/post-condition contract model with \emph{future conditions}: specifications
-that impose \emph{trace obligations} on the remainder of a program's execution.
-Future conditions are carried as a \emph{data-dependent} field
-$\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad
-alongside pre- and post-conditions, so that the future obligation of an 
-operation can depend on its own return value, e.g.,
-a returned file handle must be eventually closed.
-When operations are composed via monadic bind, future conditions are
-applied to the current return value and propagated automatically
-using a subtraction operator; pre- and post-conditions compose
-in the Hoare-rule style.
-The design is parameterised over a \lstinline{Composable} algebra,
+Pre- and post-conditions are the standard vocabulary for modular program
+specification, yet they are silent about what happens \emph{between} calls.
+Properties such as ``every acquired lock must eventually be released,''
+``a file handle must not be used after it is closed,'' or ``a submitted
+task must complete with probability at least~$p$'' span multiple operations
+and resist expression in any single pre/post pair.
+We present \emph{Pledge}, a Haskell library that fills this gap by
+augmenting the classical contract model with \emph{future conditions}:
+annotations that propagate obligations forward through a computation
+until they are fully discharged.
+
+Future conditions are carried as a data-dependent field
+$\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad,
+alongside pre- and post-conditions. The dependence on the return value $a$
+is essential: it allows an obligation to name the specific resource
+handle that an operation produces, requiring, for instance, that a
+\emph{particular} returned address be eventually freed.
+When operations are sequenced via monadic bind, the future condition of
+the first computation is partially discharged by the postcondition of
+its continuation through a \emph{subtraction} operator; the residual is
+then conjoined with the continuation's own future condition.
+The user annotates individual operations only; propagation and
+discharge are handled automatically by the monad.
+
+The design is parameterised over a \lstinline{Composable} algebra
 requiring concatenation~($\diamond$), conjunction~($\wedge$), and
 subtraction~($\setminus$), together with identity elements
-\lstinline{empty} (for concatenation) and \lstinline{universe} (for conjunction).
-We present four instances of the framework: trace protocols via regular expressions ($\RE$);
-trace protocols enriched with arithmetic bounds ($\GRE$);
-quantitative obligations via semiring-weighted regular expressions ($\WRE$);
-and heap-ownership obligations via separation logic ($\SL$).
-All four instances share a uniform monadic bind formula, demonstrating
-that \emph{Pledge} captures trace-based, arithmetic, quantitative, and
-heap-ownership obligations within a single algebraic interface.
+\lstinline{empty} and \lstinline{universe}.
+We present four instances: trace protocols via extended regular
+expressions~($\RE$, with Brzozowski-derivative subtraction and a direct
+embedding of LTL$_f$); trace protocols enriched with Presburger
+arithmetic bounds~($\GRE$, discharged by an SMT solver); quantitative
+obligations via semiring-weighted regular expressions~($\WRE$, capturing
+probabilistic and min-cost scenarios); and heap-ownership obligations via
+separation logic~($\SL$, with magic wand as subtraction).
+All four instances share a single monadic bind formula, demonstrating
+that \emph{Pledge} subsumes trace-based, arithmetic, quantitative, and
+heap-ownership obligations within one algebraic interface.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
@@ -155,91 +170,152 @@ heap-ownership obligations within a single algebraic interface.
 %% =========================================================================
 
 Pre- and post-conditions are the workhorse of modular program specification.
-A pre-condition constrains the state in which an operation may be called;
-a post-condition describes what holds once it returns. Together they characterise the behaviour of a single operation in isolation; yet many correctness properties span
-multiple calls with arbitrary computation in between:
+A pre-condition constrains the state in which an operation may be invoked;
+a post-condition describes what holds immediately after it returns.
+Together they characterise the behaviour of a single operation in isolation.
+Yet a great many correctness properties are not local to a single call
+boundary: they \emph{span} a sequence of operations, with arbitrary
+computation in between.
 
-\begin{itemize}
-  \item \emph{(Trace protocol, $\RE$)}
-        Every \lstinline{malloc(a)} must eventually be followed by
-        exactly one \lstinline{free(a)} (no double-free), and every
-        \lstinline{beginTx} must eventually reach \lstinline{commit}
-        or \lstinline{rollback}.
-  \item \emph{(Arithmetic bounds, $\GRE$)}
-        A counter must not exceed its declared maximum before being reset;
-        both the ordering constraint and the numeric bound must hold simultaneously.
-  \item \emph{(Quantitative obligation, $\WRE$)}
-        A submitted task must complete with probability at least $p$,
-        or be scheduled within a minimum-cost number of steps.
-  \item \emph{(Heap ownership, $\SL$)}
-        Heap cells must be owned before access and released after use;
-        separating conjunction ensures that each cell is owned by
-        exactly one caller at a time.
-\end{itemize}
+Consider a few representative scenarios.
+A call to \lstinline{malloc} is not erroneous in isolation, but it creates
+an \emph{obligation}: the returned address must eventually be freed,
+exactly once, with no intervening double-free.
+A \lstinline{beginTx} similarly obliges the program to eventually reach
+either \lstinline{commit} or \lstinline{rollback}; no single postcondition
+on \lstinline{beginTx} can express this, because the balancing call lies
+in an unknown future context.
+Nor is the phenomenon confined to resource lifecycle.
+A probabilistic scheduler may require that every submitted job completes
+with probability at least~$p$; a bounded counter must not overflow before
+being reset; a heap cell must remain exclusively owned between allocation
+and release.
+In each case the \emph{postcondition} of the initiating operation cannot
+name what comes next; it can only record a debt that the rest of the
+program must honour.
 
 These are \emph{future conditions}: obligations that an operation imposes
-on the \emph{remainder} of the program upon completion.
-Pre- and post-conditions are insufficient to express them.
+on the remainder of the program upon completion.
 A pre-condition constrains the state \emph{before} an operation executes;
 a post-condition characterises the state \emph{immediately after} it returns.
-Both are local to a single operation boundary, discharged at the point of the call.
+Both are local to a single operation boundary, discharged at the point of
+the call.
 A future condition, by contrast, is \emph{persistent}: it is propagated
 through subsequent monadic bind steps, refined as the program progresses,
-and fully discharged only when the requisite sequence of operations has been completed.
-Should a computation terminate with an undischarged future condition,
-the residual annotation identifies precisely what remains outstanding.
+and fully discharged only when the requisite sequence of operations has
+been completed.
+Should a computation terminate with an undischarged future condition, the
+residual annotation identifies precisely what remains outstanding,
+naming, for instance, which specific address was never freed, or which transaction
+was left open.
 
 We propose the \lstinline{Pledge} monad as a lightweight, compositional
 mechanism for specifying such obligations.
-A value of type \lstinline{Pledge eff a} represents a computation
-that returns a value of type $a$ and carries three annotations:
-a precondition $\mathtt{pre} :: \mathit{eff}$, a postcondition $\mathtt{post} :: \mathit{eff}$,
-and a data-dependent future condition $\mathtt{future} :: a \to \mathit{eff}$ that
-expresses what the remaining execution must satisfy as a function of
-the return value of type $a$.
-When two computations are sequenced via monadic bind, the future
-condition of the first is \emph{partially discharged} by the
-postcondition of the continuation using the \lstinline{subtraction}
-operator of the \lstinline{Composable} algebra; the residual is then
-conjoined with the continuation's own future condition.
+A value of type \lstinline{Pledge eff a} represents a computation that
+returns a value of type~$a$ and carries three annotations:
+a precondition $\mathtt{pre} :: \mathit{eff}$,
+a postcondition $\mathtt{post} :: \mathit{eff}$,
+and a data-dependent future condition
+$\mathtt{future} :: a \to \mathit{eff}$
+that expresses what the remaining execution must satisfy \emph{as a
+function of the return value}.
+The dependence on the return value is essential: it allows an obligation
+to refer to the specific resource handle that an operation produces.
+For example, \lstinline{malloc} can declare that \emph{whichever} address
+it returns must eventually be freed: not a fixed address determined at
+specification time, but the one actually allocated at runtime.
+When two computations are sequenced via monadic bind, the future condition
+of the first is \emph{partially discharged} by the postcondition of the
+continuation, using the \lstinline{subtraction} operator of the
+\lstinline{Composable} algebra; the residual is then conjoined with the
+continuation's own future condition.
 The user annotates individual operations only; propagation is handled
 automatically by the monad.
+
+The \lstinline{Composable} typeclass abstracts the specification algebra
+into five operations: concatenation~($\diamond$), conjunction~($\wedge$),
+subtraction~($\setminus$), and their respective identities
+\lstinline{empty} and \lstinline{universe}. It admits four independent
+instances:
+
+\begin{itemize}
+  \item \emph{(Trace protocol, $\RE$)}
+        Extended regular expressions over events, with complement as a
+        first-class constructor. Subtraction is implemented via
+        Brzozowski derivatives; LTL$_f$ operators embed directly as RE
+        terms without automaton construction. This instance handles
+        \lstinline{malloc}/\lstinline{free} pairing, transaction
+        lifecycle, and lock discipline.
+
+  \item \emph{(Arithmetic bounds, $\GRE$)}
+        Each RE is paired with a Presburger arithmetic predicate over
+        program variables, evaluated by an SMT solver (Z3 via SBV) at
+        membership-check time. A single annotation simultaneously
+        enforces a protocol ordering \emph{and} a numeric bound,
+        catching, for example, counter overflow before any execution
+        takes place.
+
+  \item \emph{(Quantitative obligation, $\WRE$)}
+        Boolean membership is generalised to a semiring weight.
+        The probability semiring captures obligations of the form
+        ``this job completes with probability at least~$p$'';
+        the tropical semiring gives minimum-cost scheduling obligations.
+        A weight of \lstinline{szero} in the residual signals an
+        unfulfilled quantitative commitment.
+
+  \item \emph{(Heap ownership, $\SL$)}
+        Separation-logic heap predicates, with separating conjunction as
+        sequential composition and magic wand as subtraction. Future
+        conditions describe what heap state must hold when the
+        computation completes; a leaked \lstinline{Cell} in the residual
+        post names the unreleased ownership precisely.
+\end{itemize}
+
+All four instances share a single monadic bind formula, demonstrating
+that trace-based, arithmetic, quantitative, and heap-ownership
+obligations are not merely analogous; they are structurally identical
+at the level of the \lstinline{Composable} algebra.
 
 \paragraph{Contributions.}
 \begin{enumerate}
   \item We define the \lstinline{Pledge} monad (\S\ref{sec:effectful}),
         parameterised over a \lstinline{Composable} algebra, with
-        $\mathtt{pre} :: \mathit{eff}$, $\mathtt{post} :: \mathit{eff}$, and $\mathtt{future} :: a \to \mathit{eff}$
-        fields.  The \lstinline{future} field is \emph{data-dependent}: it is
-        a function of the return value, so obligations can refer to the
-        resource handle an operation produces.  We verify that the monad laws
-        hold for the $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
+        $\mathtt{pre} :: \mathit{eff}$,
+        $\mathtt{post} :: \mathit{eff}$, and
+        $\mathtt{future} :: a \to \mathit{eff}$ fields.
+        The \lstinline{future} field is \emph{data-dependent}: it is a
+        function of the return value, so obligations can refer to the
+        resource handle an operation produces.
+        We verify that the monad laws hold for the
+        $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
+
   \item We instantiate the algebra to extended regular expressions over
         events with complement, using Brzozowski derivatives to implement
-        subtraction (\S\ref{sec:re}).
-        We also show that LTL\textsubscript{f} operators embed directly
-        as RE terms (\S\ref{sec:ltl}).
-  \item We extend the RE instance to a \emph{guarded} form ($\GRE$,
-        \S\ref{sec:guardedre-instance}), pairing each RE with a Presburger
-        arithmetic predicate over program variables.  The predicate is
-        evaluated by an SMT solver (Z3 via SBV) at membership-check time,
-        enabling arithmetic range constraints to be enforced alongside
-        protocol ordering in the same \lstinline{Composable} framework.
-  \item We provide a \emph{weighted} RE instance ($\WRE$,
+        subtraction (\S\ref{sec:re}), and show that LTL$_f$ operators
+        embed directly as RE terms (\S\ref{sec:ltl}).
+
+  \item We extend the RE instance to a guarded form ($\GRE$,
+        \S\ref{sec:guardedre-instance}), pairing each RE with a
+        Presburger arithmetic predicate over program variables,
+        evaluated by an SMT solver (Z3 via SBV) at membership-check
+        time.
+
+  \item We provide a weighted RE instance ($\WRE$,
         \S\ref{sec:wre-instance}), parameterised over a semiring, that
-        generalises Boolean membership to a quantitative weight.  The
-        probability semiring recovers probabilistic future conditions;
-        the tropical semiring gives min-cost obligations.
-  \item We provide a fourth, independent instantiation to separation-logic
-        heap predicates (\S\ref{sec:sl-instance}), where separating
-        conjunction serves as sequential composition, magic wand as
-        subtraction, and Presburger arithmetic provides
-        pure constraints. This demonstrates the generality of the
-        \lstinline{Composable} interface beyond trace-based specifications.
-  \item We demonstrate the approach on ten use cases across all four instances
-        (\S\ref{sec:examples}), showing that resource leaks, ordering
-        violations, arithmetic overflows, probabilistic obligations, and
-        heap-ownership errors all surface as non-trivial residual annotations.
+        generalises Boolean membership to a quantitative weight,
+        recovering probabilistic and min-cost future conditions as
+        special cases.
+
+  \item We provide a fourth, independent instantiation to
+        separation-logic heap predicates (\S\ref{sec:sl-instance}),
+        demonstrating that the \lstinline{Composable} interface extends
+        beyond trace-based specifications.
+
+  \item We demonstrate the approach on ten use cases across all four
+        instances (\S\ref{sec:examples}), showing that resource leaks,
+        ordering violations, arithmetic overflows, probabilistic
+        obligations, and heap-ownership errors all surface as
+        non-trivial residual annotations.
 \end{enumerate}
 
 %% =========================================================================
@@ -1658,77 +1734,83 @@ precisely which precondition obligations of the continuation remain unmet.
 
 %% =========================================================================
 \section{Related Work}
-
 \label{sec:related}
 
 \paragraph{Pre/post-condition contracts in Haskell.}
 Several lines of work encode pre/post-condition contracts in Haskell.
 \emph{Liquid Haskell}~\cite{vazou2014} extends GHC with refinement types,
-expressing preconditions as refinements on input types and postconditions as
-refinements on output types, verified statically via an SMT solver.
+expressing preconditions as type refinements on inputs and postconditions
+as refinements on outputs, verified statically via an SMT solver.
 Findler and Felleisen~\cite{findler2002} establish a runtime contract
-discipline for higher-order functions that directly influences Haskell
-contract libraries.
+discipline for higher-order functions that has directly informed subsequent
+Haskell contract libraries.
 QuickCheck~\cite{claessen2000} supports conditional properties via the
-\lstinline{==>} combinator, providing a lightweight, test-based form of
+\lstinline{==>} combinator, offering a lightweight, test-based form of
 pre/post-condition checking.
 Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
-monad in a dependently typed language, propagating pre/post annotations through
-monadic bind analogously to our \lstinline{Pledge} monad.
-Pledge complements all of these by adding a \emph{temporal}
-dimension (the future condition) that none of these systems address,
-and it does so without requiring type-system extensions or a dependent type
-theory.
+monad in a dependently typed language, propagating pre/post annotations
+through monadic bind in a manner analogous to \lstinline{Pledge}.
+Pledge complements all of these by introducing a \emph{temporal} dimension
+through the future condition, which none of the above systems address,
+and does so without requiring type-system extensions or dependent types.
 
 \paragraph{Future conditions.}
 Song et al.\ propose future conditions as a first-class extension to
 pre/post-condition contracts~\cite{song2025futurecond}, formalising the
-notion that a function may leave temporal obligations for its caller to
-discharge. Pledge realises this idea as a Haskell library, providing
-a monadic interface and derivative-based propagation that the formal
-system does not address.
+notion that an operation may discharge temporal obligations onto its
+continuation. Pledge realises this idea as a Haskell library, contributing
+a monadic interface, derivative-based propagation, and four concrete
+\lstinline{Composable} instances that the formal system leaves unaddressed.
 
 \paragraph{Temporal property verification and repair.}
-ProveNFix~\cite{song2024provenfix} uses temporal properties expressed as
-regular expressions to guide automated program repair, verifying that
-patches satisfy the specification. Pledge is complementary: rather
-than repairing programs post-hoc, it carries temporal obligations as
-first-class values so that violations are surfaced statically.
+ProveNFix~\cite{song2024provenfix} encodes temporal properties as regular
+expressions to guide automated program repair, verifying that synthesised
+patches satisfy the specification. Pledge is complementary in orientation:
+rather than repairing programs after the fact, it carries temporal
+obligations as first-class annotations so that violations are identified
+statically, prior to any execution.
 
 \paragraph{Effect systems and monads.}
 The \lstinline{Pledge} monad is related to effect handlers~\cite{pretnar2015}
-and graded/indexed monads~\cite{orchard2014,katsumata2014} that track
-effects in types. Our contribution is orthogonal: we focus on the
-\emph{temporal} dimension of effects (what must happen \emph{after}), rather
-than on tracking which effects are present.
+and to graded and indexed monads~\cite{orchard2014,katsumata2014}, which
+track computational effects in types. Our contribution is orthogonal: we
+focus on the \emph{temporal} dimension of effects: what the program must
+do \emph{after} a given point, rather than on classifying which effects
+are present. The future field $\mathtt{future} :: a \to \mathit{eff}$, which
+indexes the obligation by the return value, echoes the type-indexing of
+graded monads, but at the value level rather than the type level.
 
 \paragraph{Session types.}
-Session types~\cite{honda1993,gay2010} enforce communication protocols
-at the type level, including ordering constraints. Pledge is more
-lightweight: it operates at the value level, uses regular expressions
-rather than types, and can be applied to any domain beyond communication.
+Session types~\cite{honda1993,gay2010} enforce communication protocols at
+the type level, statically guaranteeing ordering and duality constraints.
+Pledge is more lightweight: it operates at the value level using regular
+expressions, requires no type-system changes, and is applicable to
+domains beyond message-passing communication, including heap ownership
+and quantitative resource obligations.
 
 \paragraph{Runtime monitoring.}
 Runtime verification~\cite{leucker2009} checks temporal properties of
-execution traces against regular-language specifications.
-Pledge is a \emph{static} approach: future conditions
-are computed before any execution takes place, and the embedding of
-LTL\textsubscript{f} into RE (\S\ref{sec:ltl}) avoids automata
-entirely.
+execution traces against regular-language or LTL specifications after
+the fact. Pledge takes a \emph{static} approach: future conditions are
+propagated and normalised before any execution takes place, and the
+embedding of LTL$_f$ into RE (\S\ref{sec:ltl}) eliminates the need for
+automaton construction entirely.
 
 \paragraph{Typestate.}
-Typestate systems~\cite{strom1986,bierhoff2007} track resource lifecycle
-in types, requiring type-system changes. Pledge is a library-level
-approach requiring no language extensions beyond standard Haskell type
-classes.
+Typestate systems~\cite{strom1986,bierhoff2007} encode resource lifecycle
+protocols directly in the type system, providing strong static guarantees
+at the cost of requiring language or type-checker extensions. Pledge
+achieves comparable expressiveness at the library level, relying solely
+on standard Haskell type classes and requiring no modifications to GHC.
 
 \paragraph{Brzozowski derivatives.}
 Derivatives of regular expressions were introduced by
-Brzozowski~\cite{brzozowski1964} and have found wide application in
-parsing~\cite{owens2009,might2011} and model checking. Equation
-\eqref{eq:deriv-not} extends the classical definition to complement;
-our subtraction operator is a novel application to future-condition
-propagation in a monadic setting.
+Brzozowski~\cite{brzozowski1964} and have since found application in
+parsing~\cite{owens2009,might2011} and model checking.
+Equation~\eqref{eq:deriv-not} extends the classical derivative to
+complement via the algebraic law $\partial_a(\neg r) = \neg(\partial_a r)$;
+our subtraction operator constitutes a novel application of this
+construction to the propagation of future conditions in a monadic setting.
 
 %% =========================================================================
 \section{Discussion and Future Work}
@@ -1850,39 +1932,49 @@ $\WRE$ and quantitative SL remains future work.
 \label{sec:conclusion}
 %% =========================================================================
 
-We have presented Pledge, a Haskell library that extends effectful
-computations with future conditions: specifications that constrain what
-the remainder of a program must do.
-Four design choices make the approach work.
+We have presented \emph{Pledge}, a Haskell library that augments effectful
+computations with \emph{future conditions}: annotations that constrain what
+the remainder of a program must accomplish. Four design decisions underpin
+the approach.
+
 First, the \lstinline{Composable} typeclass abstracts the specification
-algebra, admitting four independent instances that all reuse the same
-monadic bind formula.
-Second, the $\RE$ instance integrates complement with the single algebraic
-law $\partial_a(\neg r) = \neg(\partial_a r)$, enabling globally
-assertions and LTL\textsubscript{f} embedding, all without automaton
-construction.
+algebra into five operations: concatenation, conjunction, subtraction,
+and their respective identity elements. It admits four independent
+instances that all share the same monadic bind formula. This uniformity
+demonstrates that trace-based, arithmetic, quantitative, and
+heap-ownership obligations are not merely analogous, but structurally
+identical at the algebraic level.
+
+Second, the $\RE$ instance incorporates complement as a first-class
+constructor, exploiting the single law $\partial_a(\neg r) = \neg(\partial_a r)$
+to support globally assertions and a direct embedding of LTL$_f$,
+without any automaton construction.
+
 Third, the $\GRE$ instance pairs each RE with a Presburger arithmetic
-predicate over the heap, so that both protocol ordering \emph{and}
-arithmetic bounds (overflow, underflow) are enforced in one annotation;
-the predicate side is discharged by an SMT solver (Z3 via SBV) at
-membership-check time, and \lstinline{normalizePPred} introduces the
-canonical \lstinline{PFalse} constructor so syntactically unsatisfiable
-constraints are identified immediately.
-Fourth, the $\WRE$ instance replaces Boolean membership with a semiring
-weight, unifying probabilistic future conditions (probability semiring)
-and min-cost scheduling obligations (tropical semiring) within the same
-framework.
-The $\SL$ instance additionally adds Presburger arithmetic pure constraints
-via \lstinline{Pure PPred} inside \lstinline{Conj}, making value-dependent
-preconditions such as ``balance $\geq$ amount'' expressible as first-class
-heap predicates, with magic wand as subtraction.
-The resulting system is lightweight (no language extensions beyond standard
-Haskell type classes), composable (a standard \lstinline{Monad} instance),
-and informative across all four dimensions: a residual \lstinline{future}
-names unmet trace obligations, a \lstinline{PFalse} in \lstinline{pre}
-flags an arithmetic violation, a semiring weight of \lstinline{szero}
-identifies an unfulfilled quantitative obligation, and a leaked
-\lstinline{Cell} in a residual \lstinline{post} exposes a heap-ownership error.
+predicate, so that a single annotation simultaneously enforces a protocol
+ordering and a numeric bound; the \lstinline{normalizePPred} procedure
+eagerly introduces the canonical \lstinline{PFalse} constructor,
+identifying syntactically unsatisfiable constraints before any solver
+call is issued.
+
+Fourth, the $\WRE$ instance generalises Boolean membership to a semiring
+weight, unifying probabilistic future conditions under the probability
+semiring and min-cost scheduling obligations under the tropical semiring
+within a single framework. The $\SL$ instance further demonstrates the
+breadth of the \lstinline{Composable} interface by instantiating
+separating conjunction as sequential composition and magic wand as
+subtraction, with \lstinline{Pure PPred} inside \lstinline{Conj}
+making value-dependent preconditions such as ``balance $\geq$ amount''
+expressible as first-class heap predicates.
+
+The resulting system is lightweight (no language extensions
+beyond standard Haskell type classes), composable via a standard
+\lstinline{Monad} instance, and diagnostically precise across all four
+dimensions: a residual \lstinline{future} identifies unmet trace
+obligations; a \lstinline{PFalse} in \lstinline{pre} flags an arithmetic
+violation; a semiring weight of \lstinline{szero} signals an unfulfilled
+quantitative obligation; and a leaked \lstinline{Cell} in a residual
+\lstinline{post} exposes a heap-ownership error.
 
 %% =========================================================================
 \bibliographystyle{ACM-Reference-Format}

@@ -42,10 +42,10 @@ test_subsumesEvent :: IORef Int -> IO ()
 test_subsumesEvent counter = do
     putStrLn "\n── subsumesEvent ────────────────────────────────────────────────"
 
-    let x = Var "x"
+    let x = Str "x"
         sendX = Atom "send" x
         recvX = Atom "recv" x
-        sendY = Atom "send" (Var "y")
+        sendY = Atom "send" (Str "y")
         send1 = Atom "send" (Num 1)
         sendL = Atom "send" (List [Num 1, Num 2])
 
@@ -75,17 +75,17 @@ test_subsumesEvent counter = do
         not (subsumesEvent sendX recvX)
 
     -- Same name, different args
-    check counter "subsumesEvent send(x) send(y) = False   (same name, different Var arg)" $
+    check counter "subsumesEvent send(x) send(y) = False   (same name, different Str arg)" $
         not (subsumesEvent sendX sendY)
 
-    check counter "subsumesEvent send(x) send(1) = False   (Var vs Num arg)" $
+    check counter "subsumesEvent send(x) send(1) = False   (Str vs Num arg)" $
         not (subsumesEvent sendX send1)
 
     -- List term
     check counter "subsumesEvent send([1,2]) send([1,2]) = True    (List arg equal)" $
         subsumesEvent sendL sendL
 
-    check counter "subsumesEvent send([1,2]) send(x) = False   (List vs Var)" $
+    check counter "subsumesEvent send([1,2]) send(x) = False   (List vs Str)" $
         not (subsumesEvent sendL sendX)
 
     check counter "subsumesEvent send([1,2]) Wildcard = True   (List atom matches wildcard)" $

@@ -1,0 +1,133 @@
+# Future Conditions in Haskell: Where Forward-Propagating Monadic Obligations Pay Off
+
+**TL;DR**
+- Future conditions — type-level obligations attached to a monadic computation that thread through every subsequent `>>=` until a designated operation discharges them — are most clearly justified in Haskell's *real* code in eight places: ResourceT/`Acquire`/`managed` resource lifecycles, `bracket`/`withFile`/`mask`-style scopes, the conduit pipeline's `bracketP`/`yieldOr` finalizers (the latter removed in conduit 1.3.0), persistent's `runSqlConn` transaction bracket and explicit `transactionSave`/`transactionUndo` pairs, STM's `atomically` boundary, `tls` handshake→`bye` lifecycles and Noise-style cryptographic protocols, session-typed channels (sessiontypes, sessiontypes-distributed) and BSD-socket typestate, and Yesod/Servant session/CSRF token flows.
+- The formal foundation already exists — Atkey's *parameterised monads* (JFP 2009) and the indexed-monad libraries built on them (sessiontypes, freer-indexed, Polysemy's `Scoped`, linear-base's `RIO`) — but mainstream libraries today fall back on the *bracket pattern* and `Acquire`/`Managed` applicatives. A first-class future-condition system would unify these and statically rule out classes of bugs bracket cannot: forgetting to discharge a CSRF token, dropping a half-written `transactionSave`, leaving a TLS context without `bye`, or letting an `MVar` lock outlive a critical section.
+- Recommended next step for a Haskell library author: prototype future conditions as an indexed effect on top of Polysemy's `Scoped` or as a phantom-index layer over `linear-base`'s `RIO`, target the two highest-value domains first (TLS/cryptographic protocols and SQL transactions with `transactionSave`), and only then attempt to retrofit conduit/pipes finalization or Servant authentication.
+
+## Key Findings
+
+**1. The concept already has a name and a 16-year-old formal model.** Atkey's "Parameterised Notions of Computation" (*Journal of Functional Programming* 19(3–4):335–376, 2009) gives the categorical basis: a parameterised monad `T(S₁, S₂, A)` is "a computation that starts in states described by S1 and ends in states described by S2, yielding values of type A. … only pairs of computations where the former's post-state matches the latter's pre-state may be sequenced." This is exactly the discipline a future-condition system encodes — the post-state index *is* the residual obligation. Atkey also motivates it explicitly for Hoare-logic-style pre/post conditions ("type systems inspired by Hoare Logic … type the current store explicitly and restrict the range of possible operations according to the current store type"), which is precisely what a future condition specifies. The judgment shape Atkey introduces, `Γ; S1 ⊢ c : A; S2`, is the formalism subsequent Haskell indexed-monad libraries (e.g. `STTerm m s s' a` in `sessiontypes`) implement directly.
+
+**2. The closest existing Haskell mechanisms are not enough.** `bracket` lexically scopes obligations — it cannot express obligations that must escape the scope of one operation and be discharged at an arbitrary later point in the same monadic chain. `Acquire`/`Managed` (Gabriel Gonzalez, 2013; now in `resourcet`'s `Data.Acquire`) come closest: they thread cleanup actions through every bind, with Gonzalez's monad instance literally defined as
+
+```haskell
+m >>= f = Resource $ do
+  (m', release1) <- acquire m
+  (x,  release2) <- acquire (f m') `onException` release1
+  return (x, release2 >> release1)
+```
+
+— but they only model the *cleanup* half of the obligation, and they are discharged uniformly by `runManaged :: Managed () -> IO ()` (which "[runs] a Managed computation, enforcing that no acquired resources leak") or `with :: MonadUnliftIO m => Acquire a -> (a -> m b) -> m b`, not by application-specific dischargers (`commit`, `bye`, `verifyCSRF`, `setMessage→getMessage`).
+
+**3. The strongest case is for protocols, not just resources.** Resource lifecycles can be handled adequately with `bracket` plus discipline. Protocol obligations — TLS handshake → optional renegotiation → `bye`; SQL `BEGIN` → optional `SAVEPOINT` → `COMMIT`/`ROLLBACK`; Noise pattern messages in a specific order; two-phase commit `prepare`→`commit`; CSRF token issuance → next-request verification — are where bracket *fundamentally* fails because the obligation crosses operation boundaries, sometimes crosses request boundaries, and is discharged by a different operation than the one that established it.
+
+## Details
+
+### 1. Resource lifecycle management
+
+**File handles, sockets, DB connections.** The standard idiom is `bracket :: IO a -> (a -> IO b) -> (a -> IO c) -> IO c` (Control.Exception) or `withFile`. This is lexical: the obligation to close *is* the scope of the third argument. As soon as a resource needs to be acquired in one function and used (or closed) in a logically separate function — the actual pattern in any non-trivial server — bracket forces awkward higher-order plumbing.
+
+`ResourceT` (Snoyman, `resourcet`) was created precisely to escape that scope: "Its main advantage over the simpler bracket pattern is that it allows interleaving of allocations, allowing for more complicated programs to be created efficiently." A future-condition system would model `allocate :: IO a -> (a -> IO ()) -> ResourceT IO a` as introducing an obligation `Released a` into the post-state; subsequent `bind` propagates it; only `release` or end-of-ResourceT discharges it. Today the Haskell type system does *not* track which `ReleaseKey`s remain undischarged. Pre/post-conditions would only catch "this function received an open handle and must close it before returning"; they cannot say "this handle, once opened, must be closed *somewhere* downstream in the computation," which is what bare `bind` chains actually look like.
+
+**Linear-base's `RIO` is the closest production-grade attempt to encode the obligation in types.** `openFile :: FilePath -> IOMode -> RIO Handle`, where `Handle` is *linear* — so the type checker forces every code path to consume it exactly once, via `hClose :: Handle %1 -> RIO ()` (or another linear consumer). Tweag's announcement is direct: linearity "ensures that all open handles are eventually closed (at least for terminating computations) since variables of type Handle cannot be dropped." This is a *future condition* expressed via linear types rather than indexed monads: the obligation to close propagates with the handle through every bind.
+
+**Acquire / Managed.** Gonzalez's `Managed`/`Acquire` applicative is the canonical Haskell example of forward-propagating cleanup obligations. The signature `managed :: MonadManaged m => (forall r. (a -> IO r) -> IO r) -> m a` wraps any callback into a value whose bind composes cleanup in reverse. `resourcet`'s `Data.Acquire` documents the lineage: "This data type provides Functor/Applicative/Monad instances for composing different resources together. … This concept was originally introduced by Gabriel Gonzalez and described at: http://www.haskellforall.com/2013/06/the-resource-applicative.html". The underlying data type is `newtype Resource a = Resource { acquire :: IO (a, IO ()) }`, where the second component is a finalizer accumulated through every bind. A future-condition system would generalize Acquire from "must release IO action" to arbitrary typed obligations.
+
+### 2. Concurrency and STM
+
+**STM.** Inside `atomically :: STM a -> IO a`, every `readTVar`/`writeTVar` accumulates into a transaction log that is committed or retried atomically. The "future condition" here is degenerate but real: any STM action is *implicitly* obliged to be wrapped in a top-level `atomically` before being run, and Haskell's type system already enforces this by virtue of the `STM` monad being distinct from `IO`. A richer future-condition system would let you encode the additional obligation that *certain* TVars, once read, must be written before commit (an invariant strictly stronger than STM's optimistic concurrency control). 
+
+GHC actually shipped `alwaysSucceeds` / `always` invariants for exactly this purpose. Per GHC Proposal #77 they were deprecated in 8.4.1 ("For GHC 8.4.1 we mark Control.Monad.STM.always and Control.Monad.STM.alwaysSucceeds with DEPRECATED pragmas") and removed entirely in 8.6.1, where the release notes record that "the STM assertions mechanism … has been removed" and the proposal records the reason as "the feature is complex, buggy, and not pulling its weight" (broken per Trac issue #14310 for roughly a decade and synchronization-heavy per #7930). A type-level future-condition layer would be the principled replacement.
+
+**MVar-based locking.** The standard pattern is `mask $ \restore -> do { x <- takeMVar m; x' <- restore (f x) \`catch\` (\\e -> putMVar m x >> throw e); putMVar m x' }`. The future condition is `MustPut m` — an obligation introduced by `takeMVar` and discharged only by `putMVar`. Async-exception correctness in Haskell is *exactly* the discipline of ensuring this obligation is discharged on every code path. Joey Hess's audit ("bracketing and async exceptions in haskell," joeyh.name, June 2020) reports that "So far, around half of the libraries I've looked at, that use `bracket` or `onException` or the like probably have this problem." That is direct evidence that pre/post-conditions are insufficient in practice: programmers prove their function works fine in isolation, but the obligation, once introduced, must hold across the entire continuation including async-exception interruption points.
+
+### 3. Streaming pipelines (conduit / pipes)
+
+Conduit historically offered `bracketP :: MonadResource m => IO a -> (a -> IO ()) -> (a -> ConduitT i o m r) -> ConduitT i o m r` together with `yieldOr :: Monad m => o -> m () -> ConduitT i o m ()` ("additionally takes a finalizer to be run if the downstream component terminates"), promising that finalization "will be prompt … as early as possible … exception safe." Conduit 1.3.0 then *removed* the per-yield mechanism. The official conduit ChangeLog 1.3.0 entry reads verbatim: "Less guarantees about prompt finalization · No more `yieldOr`, `addCleanup`." 
+
+Gabriel Gonzalez's earlier pipes-2.0 `Control.Pipe.Final` documented why per-yield finalization is hard: "On the output end, the pipe must supply its most up-to-date finalizer alongside every value it yields downstream. This finalizer is guaranteed to be called if downstream terminates first." That is a future condition in everything but name. A type-level future condition `YieldedWithFinalizer` propagated through bind would let conduit re-introduce prompt finalization without the runtime gymnastics that motivated the 1.3.0 simplification.
+
+### 4. Web frameworks: sessions, CSRF, authentication
+
+**Yesod's flash messages** (Post/Redirect/Get) are a textbook case. The Yesod book: "`setMessage` stores a value in the session, and `getMessage` both reads the value most recently put into the session, and clears the old value so it is not displayed twice." `setMessage` introduces the future condition `MessagePending` *across the redirect and into the next request handler*. The session/cookie is the carrier; the obligation is to display-and-clear on the next render. A pre/post-condition cannot express this because the obligation crosses request boundaries.
+
+**Servant's CSRF / JWT handling.** `servant-auth-server` issues an `XSRF-TOKEN` cookie *and* expects every subsequent state-modifying request to carry the matching `X-XSRF-TOKEN` header (issue #77 in `haskell-servant/servant-auth` notes that the check applies "irrespective of the request type"). The token issuance introduces an obligation on every subsequent unsafe-method request; the server enforces it at runtime by returning 401. A future-condition system would make this obligation visible at the API-type level (the `Auth '[Cookie] User :> api` combinator already gestures at this) and statically reject handlers that perform state changes without consuming the token. William Yao's "Writing Servant combinators for fun and profit" (2023) shows that custom Servant combinators can already encode header-injection obligations at the *response* level via `AddSetCookie`; future-condition framing generalizes that pattern to obligations that survive across requests.
+
+**Setting cookies.** `servant-auth-server`'s response type literally lists the obligation: `Verb 'POST 204 '[JSON] (Headers '[ Header "Set-Cookie" SetCookie, Header "Set-Cookie" SetCookie] NoContent)`. The pattern works for responses; it does not extend to obligations that must be honored across subsequent handlers.
+
+### 5. Database transactions
+
+`persistent`'s `runSqlConn :: ReaderT backend m a -> backend -> m a` is documented thus: "`runSqlConn` … brackets its provided action with a transaction begin/commit pair." That alone is a `bracket`. The interesting cases are the explicit savepoints: `transactionSave :: MonadIO m => ReaderT SqlBackend m ()` "commit[s] the current transaction and begin[s] a new one … used when a transaction commit is required within the context of `runSqlConn`," and `transactionUndo` "rolls back to the state of the last call to `transactionSave` or the enclosing `runSqlConn` call." These two operations *introduce* and *discharge* obligations within an outer transaction; a future-condition type could express "after `transactionSave`, all subsequent writes are within a fresh inner transaction whose obligation to commit-or-undo persists until either `transactionSave`/`transactionUndo` or exit of `runSqlConn`." This is exactly an indexed-monad index ("inside-savepoint" vs. "top-level"), and exactly the kind of property pre/post-conditions on individual functions cannot capture because the obligation is *between* calls.
+
+Two-phase commit across multiple backends in Haskell — for which there is no canonical library, only ad-hoc XA-style code — is the cleanest example. The coordinator must broadcast `prepare`, collect votes, and either send `commit` or `abort` to every participant. The future condition is `Prepared { participants }` propagated through bind, dischargeable only by a `commit-all` or `abort-all` that names every participant. Squeal's indexed session monad for schema migrations (Wespiser, 2020) demonstrates this style in production: "Squeal uses indexed session monads for tracking schema migrations."
+
+`persistent-mtl`'s `withTransaction` (Brandon Chinn, Hackage 2021) shows how the obligation can be made explicit at the type-class level: "fooAndBar will run both foo and bar in the same transaction. Note that foo and bar themselves don't say anything about transactions. By default, using a persistent function without `withTransaction` will run each query in its own transaction." Today this is enforced *dynamically* — the future condition would be visible at the type level.
+
+### 6. Cryptographic protocol obligations
+
+The `tls` package (now `haskell-tls`, Kazu Yamamoto et al.) exemplifies the protocol-obligation case. Its lifecycle is: `contextNew` → `handshake` → arbitrary `sendData`/`recvData` → `bye`. The documentation: "notify the context that this side wants to close connection. this is important that it is called before closing the handle, otherwise the session might not be resumable (for version < TLS1.2)." Skipping `bye` is silent corruption of session tickets. The future condition `MustCallBye :: Context -> ...` introduced by a successful `handshake` and discharged by `bye` is exactly the discipline.
+
+TLS 1.3 adds further obligations: `updateKey :: Context -> KeyUpdateRequest -> m Bool` for traffic-key rotation, post-handshake `requestCertificate` for client auth, and `sendData` must precede `bye`. Each is a future condition naturally indexed on `Context`'s protocol state. The `Network.TLS.Handshake.Server` module's internal `RecvStateHandshake`/`RecvStateNext`/`RecvStateDone` chain is essentially a hand-coded typestate — exactly what a future-condition system would replace with type-level indices.
+
+Noise protocols (e.g. `haskell-noise`) and SSH handshakes follow the same pattern: a strictly-ordered sequence of `writeMessage`/`readMessage` pairs must complete before bulk-data traffic, and key rotation must be explicitly performed at intervals. The `sessiontypes` library demonstrates the technique works: "A session type describes a communication protocol at the type-level. The motivation for using session types is that it gives you a static guarantee that a program correctly implements a protocol. It may even guarantee that no deadlocking can occur."
+
+### 7. Hardware / FFI
+
+**ForeignPtr and finalizers.** `newForeignPtr :: FinalizerPtr a -> Ptr a -> IO (ForeignPtr a)` attaches a finalizer to be run when the Haskell GC collects the pointer. This is *not* a deterministic discharge — it is exactly the failure mode pre/post-conditions cannot catch. `mallocForeignPtr` is now recommended over manual `newForeignPtr` because GHC handles the lifetime; but for C-library pointers that *must* be freed with a specific deallocator (e.g. PCRE's `pcre_free`), the obligation is a future condition: "The correct approach would be to call C function to deallocate memory" (Haskell-Exists blog).
+
+**Allocator-matched free.** A subtle FFI hazard: memory `malloc`'d by a C library *must* be freed by that same C library, not by Haskell's `free`. The `Foreign.Marshal.Pool` API and the continuation-monad / `Managed`-based approach Roman Cheplyaka described (ro-che.info, 2017) are workarounds; a future condition `FreeWith libcA` propagated with the pointer and dischargeable only by the matching `libcA_free` would catch the bug at compile time.
+
+**GHC's `StablePtr` + `hs_try_putmvar`.** The `makeExternalCall` pattern (GHC user guide) requires `newStablePtrPrimMVar` followed by `freeStablePtr` in the C callback. Forgetting the free is a real leak. Future-condition modeling: `MustFreeStablePtr sp` introduced by allocation, discharged only by the callback or explicit `freeStablePtr`.
+
+**OpenGL / GPU buffers.** The `caramia` package advertises "safe and automatic finalization of OpenGL resources, with optional prompt finalization. No implicit state (that is, no `glBind*` mess or equivalent)." The "no implicit state" goal is itself a workaround for the protocol obligations OpenGL imposes (bind → use → unbind, framebuffer attachment lifetimes). The OpenGL wiki notes: "Because objects in OpenGL are defined as a collection of state, to modify objects, you must first bind them to the OpenGL context." A future-condition system would carry the binding state and force unbinding at scope exit *with the same binding target*.
+
+### 8. Other Haskell-specific domains
+
+**Polysemy `Scoped` effects.** `Scoped resource effect` (Tweag, "Scoped Effect Resources for Polysemy," 2022; `polysemy-conc`) is a scoped-resource abstraction where "each program using the effect `Consume` is interpreted with its own copy of the event channel; or a database transaction, in which a transaction handle is created for the wrapped program and passed to the interpreter for the database effect." This is a Polysemy-native indexed-monad encoding of future obligations: the scope establishes the obligation, the interpreter discharges it.
+
+**`async` / `forkIO` cancellation.** `forkIOWithUnmask` + `killThread` requires the parent thread to either await the child or explicitly cancel; `async`'s `withAsync` is a `bracket`-style escape. The future condition `MustWaitOrCancel tid` would propagate through bind until discharged by `wait`, `cancel`, or `link`.
+
+**JVM / `inline-java` GC roots** (Tweag): "Haskell users create GC roots for every object in the JVM's heap that they want to reference directly. These GC roots must be released as soon as the reference is no longer useful. … Linear types enable working with a single global resource scope, while still guaranteeing eventual deletion of roots, in any order. Affine types do not." This is the canonical illustration that *lexical* scope (bracket) is insufficient: roots created deep inside a computation must outlive that scope but must still be guaranteed to be released.
+
+### Why pre/post-conditions alone are insufficient — concretely
+
+A pre/post-condition pair `{P} f {Q}` characterizes the *immediate* effect of a single function call. The obligations above are characterized by *temporal* properties over the suffix of the computation:
+
+- "Every successful `handshake` must be followed by exactly one `bye` before context disposal."
+- "Every `takeMVar` must be matched by a `putMVar` *on every code path*, including async-exception paths."
+- "Every `transactionSave` must be followed by either another `transactionSave`, `transactionUndo`, or the closing of `runSqlConn`."
+- "Every `setMessage` must be discharged by exactly one `getMessage` in the next request handler."
+- "Every issued CSRF token must be validated against the matching cookie on the next unsafe-method request."
+
+These are linear-temporal-logic obligations on the *remainder* of the program. Pre-conditions can require an obligation to exist; post-conditions can record that one was satisfied. Neither can carry the obligation forward across an arbitrary number of unrelated `>>=`'s and force it to be discharged eventually. The indexed-monad framing (Atkey 2009) is the minimal mathematical structure that *does* support this: each computation's type carries an explicit post-state, and bind composes them so the post-state of step *n* becomes the pre-state of step *n+1*, accumulating obligations until a step's pre-state can include "obligation X has been discharged."
+
+## Recommendations
+
+**Stage 1 — Prove value on a narrow target.** Pick TLS or SQL transactions, both of which already have well-known correctness bugs that today's type system does not catch. Build a phantom-index wrapper:
+
+```haskell
+newtype Tls (pre :: ConnState) (post :: ConnState) m a = Tls (m a)
+handshake :: Tls 'Fresh 'Open IO ()
+sendData  :: ByteString -> Tls 'Open 'Open IO ()
+bye       :: Tls 'Open 'Closed IO ()
+```
+
+Use `QualifiedDo` (the same extension `linear-base`'s `RIO` uses) to recover do-notation. Measure how often programmers actually trip the obligation in practice.
+
+**Stage 2 — Generalize to an effect system.** Lift the same pattern into a Polysemy `Scoped` effect or an indexed `freer-indexed` carrier so it composes with logging, error handling, and `MonadIO`. The `sessiontypes` library (`Control.SessionTypes.STTerm`) already shows this is feasible for protocols; replicate the technique for resource and transaction obligations.
+
+**Stage 3 — Retrofit into existing libraries where the ROI justifies it.** Conduit pipeline finalization, Yesod flash messages, and Servant CSRF tokens are good candidates *only* after stages 1 and 2 have proven that the developer-ergonomics cost is acceptable. Conduit dropped per-yield finalizers in 1.3.0 because of reduced "prompt-finalization guarantees"; a future-condition reintroduction must be lighter.
+
+**Benchmarks for changing direction:**
+- If `QualifiedDo` + indexed monads still produce error messages that a typical Haskell developer cannot diagnose in under 5 minutes, abandon the type-level approach and double down on linting/property tests instead.
+- If linear types' multiplicity inference matures enough in GHC 9.10/9.12 to carry these obligations directly (it can already carry "exactly-once" obligations for `RIO`), prefer that route over indexed monads.
+- If GHC's `OPAQUE` and dependent types make their way in via `-XDependentTypes`, port to a Hoare-monad style (Brady-style `ATMState`) and drop the index machinery.
+
+## Caveats
+
+- The Haskell community has tried indexed monads for exactly these use cases for over a decade (sessiontypes 2017, freer-indexed, Wespiser's tutorials, Edwin Brady's *Type-Driven Development* examples ported to Haskell by Poberezkin). Uptake is low. The reasons are well-documented: `RebindableSyntax`/`QualifiedDo` is awkward, error messages are poor, and Haskell's `Monad` class is fixed at `m a -> (a -> m b) -> m b`, so indexed monads cannot reuse `mtl`. A future-condition system that does not address these ergonomic issues will share the same fate.
+- `ResourceT`'s author Michael Snoyman publicly tempers his recommendation in "ResourceT: A necessary evil" (FP Complete, October 2018): "ResourceT is a great tool, used to solve real problems when dealing with constrained resources and runtime exceptions. However, in the wild, it is often overused for situations where its full power isn't needed." That is evidence that *more* type-level machinery for routine resource lifetimes is not what the community currently asks for; protocol obligations (TLS, transactions, sessions) are the higher-value target.
+- GHC removed STM invariants (`always`/`alwaysSucceeds`) entirely in 8.6 because, per GHC Proposal #77, "the feature is complex, buggy, and not pulling its weight." A type-level future-condition system reintroducing them would have to demonstrate it does not repeat that failure.
+- Linear Haskell and indexed monads are *partial* solutions: linear types capture "consume exactly once" cleanly but struggle with branching obligations ("either commit or abort"); indexed monads capture branching state machines cleanly but struggle with concurrent/interleaved obligations. A general future-condition system is strictly more expressive than either, but no published Haskell library currently delivers it as a coherent whole.
+- All cited library APIs, version numbers, and quoted documentation reflect the state as of mid-2026 Hackage; minor API revisions since (e.g. `tls` 2.x's `Limit`/ECH additions, `persistent` 2.18) do not change the substantive argument.

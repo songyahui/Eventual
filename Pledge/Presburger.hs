@@ -28,11 +28,10 @@ import Data.SBV hiding (Unsatisfiable)
 
 -- ── Terms ─────────────────────────────────────────────────────────────────────
 
-data Term = Var String | Str String | Num Int | List [Term]
+data Term = Str String | Num Int | List [Term]
     deriving (Eq)
 
 instance Show Term where
-    show (Var s) = s
     show (Str s) = "\"" ++ s ++ "\""
     show (Num n) = show n
     show (List ts) = "[" ++ intercalate ", " (map show ts) ++ "]"

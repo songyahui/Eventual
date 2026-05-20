@@ -98,7 +98,7 @@
 Pre- and post-conditions are the standard vocabulary for modular program
 specification, yet they are silent about what happens \emph{between} calls.
 Properties such as ``every acquired lock must eventually be released,''
-``a file handle must not be used after it is closed,'' or ``a submitted
+``a taken \lstinline{MVar} must eventually be put back,'' or ``a submitted
 task must complete with probability at least~$p$'' span multiple operations
 and resist expression in any single pre/post pair.
 We present \emph{Pledge}, a Haskell library that fills this gap by
@@ -111,7 +111,7 @@ $\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad,
 alongside pre- and post-conditions. The dependence on the return value $a$
 is essential: it allows an obligation to name the specific resource
 handle that an operation produces, requiring, for instance, that a
-\emph{particular} returned address be eventually freed.
+\emph{particular} \lstinline{MVar} that was taken must eventually be put back.
 When operations are sequenced via monadic bind, the future condition of
 the first computation is partially discharged by the postcondition of
 its continuation through a \emph{subtraction} operator; the residual is
@@ -178,14 +178,14 @@ boundary: they \emph{span} a sequence of operations, with arbitrary
 computation in between.
 
 Consider a few representative scenarios.
-A call to \lstinline{malloc} is not erroneous in isolation, but it creates
-an \emph{obligation}: the returned address must eventually be freed,
-exactly once, with no intervening double-free.
+A call to \lstinline{takeMVar} is not erroneous in isolation, but it creates
+an \emph{obligation}: the taken \lstinline{MVar} must eventually be put back,
+exactly once, with no intervening double-put.
 A \lstinline{beginTx} similarly obliges the program to eventually reach
 either \lstinline{commit} or \lstinline{rollback}; no single postcondition
 on \lstinline{beginTx} can express this, because the balancing call lies
 in an unknown future context.
-Nor is the phenomenon confined to resource lifecycle.
+Nor is the phenomenon confined to concurrency protocols.
 A probabilistic scheduler may require that every submitted job completes
 with probability at least~$p$; a bounded counter must not overflow before
 being reset; a heap cell must remain exclusively owned between allocation
@@ -206,7 +206,7 @@ and fully discharged only when the requisite sequence of operations has
 been completed.
 Should a computation terminate with an undischarged future condition, the
 residual annotation identifies precisely what remains outstanding,
-naming, for instance, which specific address was never freed, or which transaction
+naming, for instance, which specific \lstinline{MVar} was never put back, or which transaction
 was left open.
 
 We propose the \lstinline{Pledge} monad as a lightweight, compositional
@@ -221,9 +221,10 @@ that expresses what the remaining execution must satisfy \emph{as a
 function of the return value}.
 The dependence on the return value is essential: it allows an obligation
 to refer to the specific resource handle that an operation produces.
-For example, \lstinline{malloc} can declare that \emph{whichever} address
-it returns must eventually be freed: not a fixed address determined at
-specification time, but the one actually allocated at runtime.
+For example, \lstinline{takeMVar} can declare that \emph{whichever}
+\lstinline{MVar} handle it returns must eventually be put back: not a
+fixed handle determined at specification time, but the one actually taken
+at runtime.
 When two computations are sequenced via monadic bind, the future condition
 of the first is \emph{partially discharged} by the postcondition of the
 continuation, using the \lstinline{subtraction} operator of the
@@ -244,7 +245,7 @@ instances:
         first-class constructor. Subtraction is implemented via
         Brzozowski derivatives; LTL$_f$ operators embed directly as RE
         terms without automaton construction. This instance handles
-        \lstinline{malloc}/\lstinline{free} pairing, transaction
+        \lstinline{takeMVar}/\lstinline{putMVar} pairing, transaction
         lifecycle, and lock discipline.
 
   \item \emph{(Arithmetic bounds, $\GRE$)}
@@ -329,12 +330,16 @@ at the level of the \lstinline{Composable} algebra.
 Events are the atomic units of observation; each carries a name and a list of typed arguments.
 
 \begin{lstlisting}
-data Term  = Var String | Str String | Num Int
+data Term  = Str String | Num Int | List [Term]
+
 data Event = Atom String [Term]   -- concrete event, e.g. Atom "send" [Num 1]
            | Wildcard             -- pattern matching any single event
+
+data RE = Bot | Epsilon | Single Event
+        | Seq RE RE | Or RE RE | And RE RE | Star RE | Not RE
 \end{lstlisting}
 
-The specification language is an \emph{extended} regular expression type
+The specification language is a regular expression type
 that adds complement as a first-class constructor:
 
 \[
@@ -347,10 +352,6 @@ pattern for any event, $\wedge$ is intersection (derived:
 $r_1\wedge r_2 \triangleq \neg(\neg r_1\vee\neg r_2)$), and
 $\neg r$ is the complement with respect to $\Sigma^*$.
 
-\begin{lstlisting}
-data RE = Bot | Epsilon | Single Event
-        | Seq RE RE | Or RE RE | And RE RE | Star RE | Not RE
-\end{lstlisting}
 
 Five derived forms are used throughout:
 
@@ -715,66 +716,66 @@ conflict rather than silently discarding one side.
 
 \subsection{Intuition via an Example}
 
-\lstinline{malloc} returns the allocated address as its return value;
-the future condition is data-dependent, referring to whatever address
-was actually returned via the lambda parameter \lstinline{r}.
-\lstinline{free} asserts that \lstinline{free(a)} must not recur
-until \lstinline{malloc(a)} is called again, preventing double-free while
-permitting re-allocation.
+\lstinline{takeMVar} returns the handle of the taken \lstinline{MVar} as
+its return value; the future condition is data-dependent, referring to
+whatever handle was actually returned via the lambda parameter \lstinline{r}.
+\lstinline{putMVar} asserts that \lstinline{putMVar(v)} must not recur
+until \lstinline{takeMVar(v)} is called again, preventing double-put while
+permitting re-acquisition.
 
 \begin{lstlisting}
-type Addr = Int
+type MVar = Int
 
-malloc :: Addr -> Pledge RE Addr
-malloc a = Pledge
-  { ret = a, pre = universe
-  , post   = Single (Atom "malloc" [Num a])
-  , future = \r -> finally (Atom "free" [Num r]) }
+takeMVar :: MVar -> Pledge RE MVar
+takeMVar v = Pledge
+  { ret = v, pre = universe
+  , post   = Single (Atom "takeMVar" [Num v])
+  , future = \r -> finally (Atom "putMVar" [Num r]) }
 
-free :: Addr -> Pledge RE ()
-free a = Pledge
+putMVar :: MVar -> Pledge RE ()
+putMVar v = Pledge
   { ret = ()
-  , pre    = previously (Atom "malloc" [Num a])
-  , post   = Single (Atom "free" [Num a])
-  , future = \_ -> noUntil (Atom "free" [Num a]) (Atom "malloc" [Num a]) }
+  , pre    = Single (Atom "takeMVar" [Num v])
+  , post   = Single (Atom "putMVar" [Num v])
+  , future = \_ -> noUntil (Atom "putMVar" [Num v]) (Atom "takeMVar" [Num v]) }
 \end{lstlisting}
 
-\noindent\textbf{Good program: \lstinline{addr <- malloc 1; free addr}.}
-After \lstinline{malloc 1} ($\ret = 1$):
+\noindent\textbf{Good program: \lstinline{v <- takeMVar 1; putMVar v}.}
+After \lstinline{takeMVar 1} ($\ret = 1$):
 \[
-  \post = \mathtt{malloc}(1),\quad
-  \fut  = \finally{\mathtt{free}(1)},\quad
+  \post = \mathtt{takeMVar}(1),\quad
+  \fut  = \finally{\mathtt{putMVar}(1)},\quad
   \pre  = \univ
 \]
-Binding \lstinline{free 1} (with $\pre = \mathtt{malloc}(1)$, $\post =
-\mathtt{free}(1)$):
+Binding \lstinline{putMVar 1} (with $\pre = \mathtt{takeMVar}(1)$, $\post =
+\mathtt{putMVar}(1)$):
 
 \textit{Precondition:}
-$\post(\mathtt{malloc}(1)) \setminus \pre(\mathtt{free}(1))
-= \mathtt{malloc}(1) \setminus \mathtt{malloc}(1) = \varepsilon$.
+$\post(\mathtt{takeMVar}(1)) \setminus \pre(\mathtt{putMVar}(1))
+= \mathtt{takeMVar}(1) \setminus \mathtt{takeMVar}(1) = \varepsilon$.
 So $\pre = \univ \wedge \varepsilon = \varepsilon$.\ \checkmark
 
 \textit{Future:}
-$\mathtt{free}(1) \setminus \finally{\mathtt{free}(1)} = \univ$.
-Intersect with $\fut(\mathtt{free}(1)) = \noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$:
-result $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.\ \checkmark
-(nullable: the program may end here; no double-free obligation is pending.)
+$\mathtt{putMVar}(1) \setminus \finally{\mathtt{putMVar}(1)} = \univ$.
+Intersect with $\fut(\mathtt{putMVar}(1)) = \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$:
+result $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.\ \checkmark
+(nullable: the program may end here; no double-put obligation is pending.)
 
-\noindent\textbf{Bad: \lstinline{free 1} alone.}
+\noindent\textbf{Bad: \lstinline{putMVar 1} alone.}
 \lstinline{pure ()} has $\post = \varepsilon$.
-$\mathtt{malloc}(1) \setminus \varepsilon = \varnothing$.
+$\mathtt{takeMVar}(1) \setminus \varepsilon = \varnothing$.
 So $\pre = \varnothing$.\ \texttimes
 
-\noindent\textbf{Bad: \lstinline{missingFree} (\lstinline{malloc 1 >> malloc 2 >> free 1}).}
-The future of \lstinline{malloc 2} is $\finally{\mathtt{free}(2)}$,
-which is not discharged by \lstinline{free 1}, so the residual future
-still contains $\finally{\mathtt{free}(2)}$, naming the missing free precisely.
+\noindent\textbf{Bad: \lstinline{missingPut} (\lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1}).}
+The future of \lstinline{takeMVar 2} is $\finally{\mathtt{putMVar}(2)}$,
+which is not discharged by \lstinline{putMVar 1}, so the residual future
+still contains $\finally{\mathtt{putMVar}(2)}$, naming the blocked \lstinline{MVar} precisely.
 
-\noindent\textbf{Bad: \lstinline{doubleFreeImmediate} (\lstinline{addr <- malloc 1; free addr; free addr}).}
-After the first \lstinline{free 1}, the future is
-$\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$.
-The second \lstinline{free 1} posts $\mathtt{free}(1)$; consuming
-$\mathtt{free}(1)$ in $\noUntil{\mathtt{free}(1)}{\mathtt{malloc}(1)}$
+\noindent\textbf{Bad: \lstinline{doublePutImmediate} (\lstinline{v <- takeMVar 1; putMVar v; putMVar v}).}
+After the first \lstinline{putMVar 1}, the future is
+$\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.
+The second \lstinline{putMVar 1} posts $\mathtt{putMVar}(1)$; consuming
+$\mathtt{putMVar}(1)$ in $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$
 yields $\varnothing$, so the combined future is $\varnothing$.\ \texttimes
 
 %% =========================================================================
@@ -1296,67 +1297,69 @@ normalised annotations of the result.
 A \lstinline{future} of $\univ$ (or \lstinline{wNullable = sone} for $\WRE$)
 and a \lstinline{pre} of $\univ$ together certify temporal correctness.
 
-\subsection{Memory Management}
+\subsection{MVar Lifecycle}
 
-\lstinline{malloc} returns the allocated address; its data-dependent
-future condition uses the lambda parameter \lstinline{r} so the
-obligation always tracks the \emph{returned} address, not a
-call-site constant.
-\lstinline{free} carries $\noUntil{\mathtt{free}(a)}{\mathtt{malloc}(a)}$
-as its future, forbidding a second \lstinline{free(a)} unless
-\lstinline{malloc(a)} resets the guard first.
+\lstinline{takeMVar} returns the handle of the taken \lstinline{MVar}; its
+data-dependent future condition uses the lambda parameter \lstinline{r} so
+the obligation always tracks the \emph{returned} handle, not a call-site
+constant.
+\lstinline{putMVar} carries $\noUntil{\mathtt{putMVar}(v)}{\mathtt{takeMVar}(v)}$
+as its future, forbidding a second \lstinline{putMVar(v)} unless
+\lstinline{takeMVar(v)} resets the guard first.
 
 \begin{lstlisting}
-malloc :: Addr -> Pledge RE Addr
-malloc a = Pledge
-  { ret = a, pre = universe
-  , post   = Single (Atom "malloc" [Num a])
-  , future = \r -> finally (Atom "free" [Num r]) }
+type MVar = Int
 
-free :: Addr -> Pledge RE ()
-free a = Pledge
+takeMVar :: MVar -> Pledge RE MVar
+takeMVar v = Pledge
+  { ret = v, pre = universe
+  , post   = Single (Atom "takeMVar" [Num v])
+  , future = \r -> finally (Atom "putMVar" [Num r]) }
+
+putMVar :: MVar -> Pledge RE ()
+putMVar v = Pledge
   { ret = ()
-  , pre    = previously (Atom "malloc" [Num a])
-  , post   = Single (Atom "free" [Num a])
-  , future = \_ -> noUntil (Atom "free" [Num a]) (Atom "malloc" [Num a]) }
+  , pre    = Single (Atom "takeMVar" [Num v])
+  , post   = Single (Atom "putMVar" [Num v])
+  , future = \_ -> noUntil (Atom "putMVar" [Num v]) (Atom "takeMVar" [Num v]) }
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: data-dependent  -  obligation discharged on the returned address
-mallocFreeByReturnedAddr n = do { addr <- malloc n; free addr }
+-- Good: data-dependent  -  obligation discharged on the returned handle
+takeAndPut n = do { v <- takeMVar n; putMVar v }
 
--- Good: re-allocate the same address after freeing  -  noUntil is reset by malloc
-mallocFreeReallocFree = do { a <- malloc 1; free a; a <- malloc 1; free a }
+-- Good: re-acquire same MVar after releasing  -  noUntil is reset by takeMVar
+takePutTakePut = do { v <- takeMVar 1; putMVar v; v <- takeMVar 1; putMVar v }
 
--- Bad future: free(2) obligation remains
-missingFree = do { a1 <- malloc 1; free a1; _ <- malloc 2; return () }
+-- Bad future: putMVar(2) obligation remains (MVar 2 never returned)
+missingPut = do { v1 <- takeMVar 1; putMVar v1; _ <- takeMVar 2; return () }
 
--- Bad pre: malloc(1) precondition not met
-freeWithoutMalloc = free 1
+-- Bad pre: takeMVar(1) precondition not met
+putWithoutTake = putMVar 1
 
--- Bad future: double-free immediately collapses future to Bot
-doubleFreeImmediate = do { addr <- malloc 1; free addr; free addr }
+-- Bad future: double-put immediately collapses future to Bot
+doublePutImmediate = do { v <- takeMVar 1; putMVar v; putMVar v }
 
--- Bad future: double-free with intervening work, still collapses to Bot
-doubleFreeWithWork = do
-  { a1 <- malloc 1; a2 <- malloc 2; free a1; free a2; free a1 }
+-- Bad future: double-put with intervening work, still collapses to Bot
+doublePutWithWork = do
+  { v1 <- takeMVar 1; v2 <- takeMVar 2; putMVar v1; putMVar v2; putMVar v1 }
 \end{lstlisting}
 
 The three examples below return non-unit values, showing that future
 conditions are tracked regardless of the return type.
 
 \begin{lstlisting}
--- Good: ret = Addr; future = finally(free(1))  -  obligation visible in residual
-allocReturnAddr :: Pledge RE Addr
-allocReturnAddr = malloc 1
+-- Good: ret = MVar; future = finally(putMVar(1))  -  obligation visible in residual
+takeReturnHandle :: Pledge RE MVar
+takeReturnHandle = takeMVar 1
 
--- Bad future: ret = (Addr, Addr); future = finally(free(1)) /\ finally(free(2))
-allocTwoReturnPair :: Pledge RE (Addr, Addr)
-allocTwoReturnPair = do { a1 <- malloc 1; a2 <- malloc 2; return (a1, a2) }
+-- Bad future: ret = (MVar,MVar); future = finally(putMVar(1)) /\ finally(putMVar(2))
+takeTwoReturnPair :: Pledge RE (MVar, MVar)
+takeTwoReturnPair = do { v1 <- takeMVar 1; v2 <- takeMVar 2; return (v1, v2) }
 
--- Good: ret = Addr; future = noUntil(free(1), malloc(1))  -  no pending finally
-allocFreeReturnAddr :: Pledge RE Addr
-allocFreeReturnAddr = do { a <- malloc 1; free a; return a }
+-- Good: ret = MVar; future = noUntil(putMVar(1),takeMVar(1))  -  no pending finally
+takePutReturnHandle :: Pledge RE MVar
+takePutReturnHandle = do { v <- takeMVar 1; putMVar v; return v }
 \end{lstlisting}
 
 \subsection{Mutex / Lock Lifecycle}
@@ -1844,11 +1847,11 @@ The two are written in parallel and linked only at the top level:
 \begin{lstlisting}
 -- Specification (pure, statically checked)
 spec :: Pledge RE ()
-spec = do { addr <- malloc 1; free addr }
+spec = do { v <- takeMVar 1; putMVar v }
 
 -- Implementation (real IO via effectful)
 impl :: (IOE :> es) => Eff es ()
-impl = do { addr <- liftIO mallocReal; liftIO (freeReal addr) }
+impl = do { v <- liftIO takeMVarReal; liftIO (putMVarReal v) }
 
 -- Entry point: check spec, then run impl
 main :: IO ()

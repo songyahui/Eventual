@@ -17,6 +17,7 @@
 \usepackage{mathtools}
 \usepackage{booktabs}
 \usepackage{microtype}
+\usepackage{enumitem}
 
 %% --- Fix headheight for fancyhdr -----------------------------------------
 \setlength{\headheight}{18.67603pt}
@@ -193,29 +194,29 @@ before the context is discarded.
 A post-condition on \lstinline{handshake} records success, but cannot enforce
 that \lstinline{bye} will be called, because the discharge point lies in an
 unknown future context.
-\lstinline{bracket} sidesteps this by lexically scoping the context, but
-cannot express richer message-exchange obligations or handle contexts
-passed across function boundaries.
+The \lstinline{bracket} combinator sidesteps this by lexically scoping
+the context, but cannot express richer message-exchange obligations or
+handle contexts passed across function boundaries.
 
 \emph{MVar discipline.}
-\lstinline{takeMVar} removes a value, leaving the variable empty; the caller
-must restore it with \lstinline{putMVar} on every exit path including
-async-exception paths.
+The \lstinline{takeMVar} operation removes a value, leaving the variable
+empty; the caller must restore it with \lstinline{putMVar} on every exit
+path including async-exception paths.
 A post-condition records the empty state but cannot require that a future
 \lstinline{putMVar} on the \emph{same} variable will occur.
 
 \emph{Database savepoints.}
-\lstinline{transactionSave} opens a fresh transaction that must itself be
-committed or rolled back; pre/post-conditions on the call cannot carry
-this obligation forward.
+The \lstinline{transactionSave} function opens a fresh transaction that
+must itself be committed or rolled back; pre/post-conditions on the call
+cannot carry this obligation forward.
 
 In each case the obstacle is identical: the postcondition cannot name
 what comes next because the continuation is unknown at specification time.
 
 \paragraph{Existing remedies and their limits.}
-\lstinline{bracket} lexically scopes cleanup but cannot propagate obligations
-beyond the lexical scope.
-\lstinline{ResourceT}~\cite{snoyman2011resourcet} and
+The \lstinline{bracket} function lexically scopes cleanup but cannot
+propagate obligations beyond the lexical scope.
+Both \lstinline{ResourceT}~\cite{snoyman2011resourcet} and
 \lstinline{Acquire}/\lstinline{Managed} thread cleanup actions through
 every bind but model only the cleanup half of an obligation, discharging
 it uniformly at scope exit rather than by application-specific operations.
@@ -254,7 +255,7 @@ subtraction~($\setminus$), and their respective identities
 \lstinline{empty} and \lstinline{universe}. It admits four independent
 instances:
 
-\begin{itemize}
+\begin{itemize}[wide, labelindent=10pt]
   \item \emph{(Trace protocol, $\RE$)}
         Extended regular expressions over events, with complement as a
         first-class constructor. Subtraction is implemented via
@@ -588,11 +589,11 @@ class Composable a where
 \noindent
 The five operations form exactly the interface required by the bind
 formula.
-\lstinline{concatenation} sequences effects; \lstinline{conjunction} combines
-simultaneous constraints; \lstinline{subtraction} computes the residual
-obligation (the Brzozowski quotient for the RE instance).
-\lstinline{empty} and \lstinline{universe} are the respective identity elements
-and appear in \lstinline{pure}.
+Here \lstinline{concatenation} sequences effects; \lstinline{conjunction}
+combines simultaneous constraints; \lstinline{subtraction} computes the
+residual obligation (the Brzozowski quotient for the RE instance).
+The identities \lstinline{empty} and \lstinline{universe} appear in
+\lstinline{pure}.
 
 \subsection{The \texttt{Pledge} Type}
 \label{sec:future-cond}
@@ -617,7 +618,7 @@ evalFuture e = future e (ret e)
 
 \subsection{Monad Instances}
 
-\lstinline{pure} introduces a value with no effect and no obligation:
+The \lstinline{pure} function introduces a value with no effect and no obligation:
 
 \begin{lstlisting}
 pure x = Pledge { ret = x, pre = universe, post = empty, future = \_ -> universe }
@@ -680,11 +681,12 @@ intersection rather than silently discarding one side.
 
 \subsection{Intuition via an Example}
 
-\lstinline{takeMVar} returns the handle of the taken \lstinline{MVar} as
-its return value; the future condition is data-dependent, referring to
-whatever handle was actually returned.
-\lstinline{putMVar} asserts that \lstinline{putMVar(v)} must not recur
-until \lstinline{takeMVar(v)} is called again, preventing double-put.
+The \lstinline{takeMVar} operation returns the handle of the taken
+\lstinline{MVar} as its return value; the future condition is
+data-dependent, referring to whatever handle was actually returned.
+For \lstinline{putMVar}, the future asserts that \lstinline{putMVar(v)}
+must not recur until \lstinline{takeMVar(v)} is called again, preventing
+double-put.
 
 \begin{lstlisting}
 type MVar = Int
@@ -725,7 +727,7 @@ result $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.\ \checkmark
 (nullable: the program may end here; no double-put obligation is pending.)
 
 \noindent\textbf{Bad: \lstinline{putMVar 1} alone.}
-\lstinline{pure ()} has $\post = \varepsilon$.
+Here \lstinline{pure ()} has $\post = \varepsilon$.
 $\mathtt{takeMVar}(1) \setminus \varepsilon = \varnothing$.
 So $\pre = \varnothing$.\ \texttimes
 
@@ -775,8 +777,9 @@ The general clause collects the alphabet from \emph{both} operands
 before calling \lstinline{firstWith}, ensuring events appearing only in
 $r_2$ are still considered under complement via Equation~\eqref{eq:first-not}.
 
-\lstinline{normalize} is defined outside the instance and applies the
-following RE-specific laws, which exploit the complement constructor:
+The \lstinline{normalize} function is defined outside the instance and
+applies the following RE-specific laws, which exploit the complement
+constructor:
 
 \begin{center}
 \begin{tabular}{ll}
@@ -857,11 +860,11 @@ The RE component uses the same \lstinline{reSubtraction} and
 
 Composing multiple \lstinline{GuardedRE} values accumulates a tree of
 \lstinline{PAnd} nodes.
-\lstinline{normalizePPred} flattens this tree, removes duplicates,
-substitutes equalities (e.g.\ $h[a]=k \Rightarrow$ replace $\mathtt{ValAt}\;a$
-by $k$ throughout), evaluates literal comparisons, and replaces
-$\lnot\mathbf{true}$ with the canonical $\mathbf{false}$ constructor
-\lstinline{PFalse}:
+The \lstinline{normalizePPred} function flattens this tree, removes
+duplicates, substitutes equalities (e.g.\ $h[a]=k \Rightarrow$ replace
+$\mathtt{ValAt}\;a$ by $k$ throughout), evaluates literal comparisons,
+and replaces $\lnot\mathbf{true}$ with the canonical $\mathbf{false}$
+constructor \lstinline{PFalse}:
 
 \begin{lstlisting}
 data PPred
@@ -1022,8 +1025,8 @@ wNullable _             = szero
 \end{lstlisting}
 
 \noindent
-\lstinline{wDerivative} and \lstinline{wSubtraction} follow the same
-structure as their Boolean counterparts, with semiring operations
+The functions \lstinline{wDerivative} and \lstinline{wSubtraction} follow
+the same structure as their Boolean counterparts, with semiring operations
 substituted for Boolean ones.
 The \lstinline{Composable (WRE w)} instance (enabled by
 \lstinline{FlexibleInstances}) maps \lstinline{concatenation} to
@@ -1047,7 +1050,7 @@ wGlobally weight e = WStar (WSingle weight e)
 
 In a probabilistic setting, each \lstinline{free(a)} has an associated
 probability of being called.
-\lstinline{malloc} carries a future condition asserting that
+Each \lstinline{malloc} call carries a future condition asserting that
 \lstinline{free(a)} must be called with probability at least $p$:
 
 \begin{lstlisting}
@@ -1181,8 +1184,8 @@ data PPred
 \noindent
 Derived connectives ($\mathtt{pFalse}$, $\mathtt{pOr}$) are smart
 constructors built via De Morgan laws.
-\lstinline{Pure p} holds of any heap for which \lstinline{evalPPred h p}
-is true; it enforces no ownership of cells.
+The predicate \lstinline{Pure p} holds of any heap for which
+\lstinline{evalPPred h p} is true; it enforces no ownership of cells.
 The smart constructor \lstinline{pureSL} realises the standard SL box
 notation: \lstinline{pureSL PTrue = Emp} and
 \lstinline{pureSL p = Conj (Pure p) Emp} for non-trivial $p$.
@@ -1212,7 +1215,7 @@ or normalisation.
 
 \subsection{Normalisation}
 
-\lstinline{normalizeSL} applies the standard SL algebraic identities:
+The \lstinline{normalizeSL} function applies the standard SL algebraic identities:
 
 \begin{center}
 \begin{tabular}{ll}
@@ -1297,19 +1300,20 @@ partialClose = do
 \end{lstlisting}
 
 \noindent
-\lstinline{missingBye} retains $\finally{\mathtt{bye}(1)}$ as its residual
-future, naming the unclosed context precisely.
-\lstinline{partialClose} retains $\finally{\mathtt{bye}(2)}$: the future
-condition is data-dependent, so the residual identifies context~2
-specifically, not a generic ``some context was not closed.''
+The program \lstinline{missingBye} retains $\finally{\mathtt{bye}(1)}$ as
+its residual future, naming the unclosed context precisely.
+Meanwhile, \lstinline{partialClose} retains $\finally{\mathtt{bye}(2)}$:
+the future condition is data-dependent, so the residual identifies
+context~2 specifically, not a generic ``some context was not closed.''
 
 \subsection{MVar Lifecycle}
 
-\lstinline{takeMVar} returns the taken handle; its
+The \lstinline{takeMVar} operation returns the taken handle; its
 data-dependent future condition uses the lambda \lstinline{r} so
 the obligation tracks the \emph{returned} handle.
-\lstinline{putMVar} carries $\noUntil{\mathtt{putMVar}(v)}{\mathtt{takeMVar}(v)}$
-as its future, forbidding a second \lstinline{putMVar(v)} until
+The \lstinline{putMVar} operation carries as its future obligation
+$\noUntil{\mathtt{putMVar}(v)}{\mathtt{takeMVar}(v)}$,
+forbidding a second \lstinline{putMVar(v)} until
 \lstinline{takeMVar(v)} resets the guard.
 
 \begin{lstlisting}
@@ -1386,9 +1390,10 @@ releaseWithoutAcquire = release 1
 
 \subsection{Database Transactions}
 
-\lstinline{beginTx} carries a \emph{disjunctive} future condition
-requiring that the transaction is eventually either committed or rolled back;
-\lstinline{commit} and \lstinline{rollback} each discharge this obligation:
+The \lstinline{beginTx} operation carries a \emph{disjunctive} future
+condition requiring that the transaction is eventually either committed
+or rolled back; \lstinline{commit} and \lstinline{rollback} each
+discharge this obligation:
 
 \begin{lstlisting}
 beginTx :: Pledge RE ()
@@ -1521,7 +1526,7 @@ For \lstinline{missingComplete}, the residual future still contains
 \lstinline{wFinally (Tropical 0) (complete 2)}, and the overall weight
 is $+\infty$, flagging job~2 as unfinished.
 
-The probability-semiring memory example follows analogously: a
+The probability-semiring memory example follows analogously: a call
 \lstinline{malloc a p} with $p = 0.9$ leaves a residual weight of
 $0.9$ if \lstinline{free a} is never called, dropping to $0$ when it is.
 
@@ -1595,7 +1600,7 @@ spatial predicates would be either trivial or unsatisfiable (see
 \noindent
 \textbf{Bad: overdraft.}
 After \lstinline{deposit 0 0 100}, the account holds 100.
-\lstinline{withdraw 0 100 150} carries
+The call \lstinline{withdraw 0 100 150} carries
 $\pre = \mathtt{Conj}\;(\mathtt{Pure}\;(h[0] \geq 150))\;(\mathtt{Cell}\;0\;100)$.
 Since $100 < 150$, the pure guard is not satisfiable, and the residual
 \lstinline{pre} of the composed program retains this unsatisfiable constraint.
@@ -1778,11 +1783,12 @@ with the standard \lstinline{Monad} class, \lstinline{do}-notation, and
 the \lstinline{mtl} stack.
 
 \paragraph{Resource management in Haskell.}
-\lstinline{bracket} lexically scopes cleanup but cannot propagate obligations
-beyond the lexical scope.
-\lstinline{ResourceT}~\cite{snoyman2011resourcet} threads a finaliser queue
-through every bind, discharging cleanup when the block exits.
-\lstinline{Acquire} and \lstinline{Managed} generalise this to an
+The \lstinline{bracket} combinator lexically scopes cleanup but cannot
+propagate obligations beyond the lexical scope.
+The \lstinline{ResourceT}~\cite{snoyman2011resourcet} library threads a
+finaliser queue through every bind, discharging cleanup when the block
+exits.
+Both \lstinline{Acquire} and \lstinline{Managed} generalise this to an
 applicative/monadic interface.
 All three handle the \emph{cleanup} half of a resource obligation but
 cannot express \emph{protocol} or \emph{quantitative} obligations,
@@ -1876,8 +1882,9 @@ main = do
 Static checking is entirely pure; no changes to the effect stack are required.
 
 \paragraph{Closed-world alphabet assumption.}
-\lstinline{firstWith} uses $\Sigma_0 = \mathit{atoms}(r_1)\cup\mathit{atoms}(r_2)$
-as its working alphabet.
+The \lstinline{firstWith} function uses
+$\Sigma_0 = \mathit{atoms}(r_1)\cup\mathit{atoms}(r_2)$ as its working
+alphabet.
 This is sound under the \emph{closed-world assumption} that every relevant event
 is mentioned in the two operands.
 A fully open-world implementation would accept an explicit $\Sigma$ declaration,
@@ -1897,8 +1904,8 @@ SL predicates with Presburger guards discharged by Z3 or CVC5, reporting
 concrete counterexample traces or unsatisfiable heaps.
 
 \paragraph{Parallel composition.}
-\lstinline{Pledge} is inherently sequential; concurrent programs require a
-parallel combinator $e_1 \parallel e_2$.
+The \lstinline{Pledge} monad is inherently sequential; concurrent programs
+require a parallel combinator $e_1 \parallel e_2$.
 In the RE instance this corresponds to the shuffle product $r_1 \shuffle r_2$;
 the SL instance admits a parallel connective via the concurrent separation
 logic frame rule~\cite{o2007resources}.

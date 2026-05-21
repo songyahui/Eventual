@@ -273,8 +273,7 @@ instances:
 
   \item \emph{(Arithmetic bounds, $\GRE$)}
         Each RE is paired with a Presburger arithmetic predicate over
-        program variables, evaluated by an SMT solver (Z3 via SBV) at
-        membership-check time. A single annotation simultaneously
+        program variables, checked by an SMT solver (Z3 via SBV). A single annotation simultaneously
         enforces a protocol ordering \emph{and} a numeric bound,
         catching, for example, counter overflow before any execution
         takes place.
@@ -1776,7 +1775,7 @@ a monadic interface, derivative-based propagation, and four concrete
 Atkey~\cite{atkey2009} introduces parameterised monads $T(S_1, S_2, A)$
 for Hoare-logic-style pre/post state tracking.
 Katsumata~\cite{katsumata2014} generalises this to graded monads over a
-monoid; Orchard and Wu~\cite{orchard2014} show effect systems and session
+monoid; Orchard and Wu~\cite{orchard2016} show effect systems and session
 types are instances.
 Pledge is related but orthogonal: rather than indexing by effect \emph{type}
 at the type level, we carry an explicit obligation as

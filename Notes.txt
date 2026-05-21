@@ -131,3 +131,142 @@ Use `QualifiedDo` (the same extension `linear-base`'s `RIO` uses) to recover do-
 - GHC removed STM invariants (`always`/`alwaysSucceeds`) entirely in 8.6 because, per GHC Proposal #77, "the feature is complex, buggy, and not pulling its weight." A type-level future-condition system reintroducing them would have to demonstrate it does not repeat that failure.
 - Linear Haskell and indexed monads are *partial* solutions: linear types capture "consume exactly once" cleanly but struggle with branching obligations ("either commit or abort"); indexed monads capture branching state machines cleanly but struggle with concurrent/interleaved obligations. A general future-condition system is strictly more expressive than either, but no published Haskell library currently delivers it as a coherent whole.
 - All cited library APIs, version numbers, and quoted documentation reflect the state as of mid-2026 Hackage; minor API revisions since (e.g. `tls` 2.x's `Limit`/ECH additions, `persistent` 2.18) do not change the substantive argument.
+
+
+# BibTeX Bibliography Verification Report
+
+**TL;DR**
+- Six entries contain substantive errors that must be fixed: `orchard2014` (wrong second author, wrong year, wrong pages, wrong DOI), `katsumata2014` (page range off by one), `bernardy2018linear` (wrong entry type and venue), and `o2007resources`, `owens2009`, and `pretnar2015` (all incorrectly use `@inproceedings` for what are journal articles).
+- One entry, `snoyman2011resourcet`, appears to be fabricated — no such paper exists in the Haskell Symposium 2011 proceedings, the DOI does not resolve, and Michael Snoyman's DBLP record lists no Haskell Symposium paper at all.
+- The remaining 19 entries are essentially correct, with only minor stylistic issues (title casing, missing subtitles, slightly misleading citation keys, or year-of-record ambiguity for in-press 2026 LNCS volumes).
+
+## Key Findings
+
+The bibliography is approximately 73% correct and 27% requires changes. The most consequential errors are in entries that conflate two different papers (`orchard2014` mixes Orchard–Wu's 2014 work with Orchard–Yoshida's 2016 POPL paper), entries that pre-date the PACMPL transition (`bernardy2018linear`), and routine `@inproceedings`-vs-`@article` confusions where journals like *Theoretical Computer Science*, *Journal of Functional Programming*, and *Electronic Notes in Theoretical Computer Science* have been miscoded as conference proceedings. One entry — `snoyman2011resourcet` — fails every plausibility check and should be removed.
+
+## Details — Entry by Entry
+
+### 1. `vazou2014` — CORRECT
+Verified against ACM DL (DOI 10.1145/2628136.2628161), Microsoft Research, and DBLP. Authors, title, venue (ICFP '14), pages 269–282, year 2014 all match. `@inproceedings` is appropriate.
+
+### 2. `findler2002` — CORRECT
+Verified against ACM DL and DBLP. ICFP '02, pages 48–59, DOI 10.1145/581478.581484, both authors correctly spelled. `@inproceedings` is appropriate.
+
+### 3. `claessen2000` — CORRECT
+Verified against ACM DL. ICFP '00, pages 268–279, DOI 10.1145/351240.351266 all match. `@inproceedings` is appropriate.
+
+### 4. `swierstra2019` — CORRECT
+Verified against ACM DL (DOI 10.1145/3341707) and DBLP. Authors "Wouter Swierstra and Tim Baanen", PACMPL vol. 3, issue ICFP, article 103, 26 pages, year 2019 all match the official record. (Tim Baanen also publishes as "Anne Baanen"; both names refer to the same person, but the ICFP 2019 article uses "Tim Baanen", which the entry correctly reflects.) `@article` is appropriate.
+
+### 5. `o2007resources` — WRONG ENTRY TYPE
+This is a journal article in *Theoretical Computer Science*, vol. 375, issue 1–3, pages 271–307, 2007, DOI 10.1016/j.tcs.2006.12.035 (Wikidata Q29544774 and ScienceDirect both confirm). The current entry incorrectly uses `@inproceedings` with `booktitle = {Theoretical Computer Science}`.
+**Fix:** change `@inproceedings` → `@article` and `booktitle` → `journal`. All other fields (volume, pages, year, DOI) are correct.
+
+### 6. `brzozowski1964` — CORRECT
+Verified against ACM DL. JACM vol. 11, no. 4, pages 481–494, October 1964, DOI 10.1145/321239.321249. `@article` is appropriate.
+
+### 7. `owens2009` — WRONG ENTRY TYPE
+This is a journal article in *Journal of Functional Programming*, vol. 19, issue 2, pages 173–190, March 2009, DOI 10.1017/S0956796808007090 (Cambridge Core and ACM DL both confirm). The current entry incorrectly uses `@inproceedings` with `booktitle = {Journal of Functional Programming}`.
+**Fix:** change `@inproceedings` → `@article` and `booktitle` → `journal`. All other fields are correct.
+
+### 8. `might2011` — CORRECT
+Verified against ACM DL. ICFP '11, pages 189–195, DOI 10.1145/2034773.2034801. Authors and title correct. `@inproceedings` appropriate.
+
+### 9. `pretnar2015` — WRONG ENTRY TYPE; SUBTITLE MISSING
+This is published in *Electronic Notes in Theoretical Computer Science* (ENTCS) vol. 319, pages 19–35, 2015, DOI 10.1016/j.entcs.2015.12.003. The current entry uses `@inproceedings` with `booktitle = {Electronic Notes in Theoretical Computer Science}` — but ENTCS is a journal, not a book series. Also, the official title in DBLP, ScienceDirect, Crossref, Wikidata, and Semantic Scholar includes the subtitle ". Invited tutorial paper".
+**Fix:** change `@inproceedings` → `@article`, change `booktitle` → `journal`, and append ". Invited tutorial paper" to the title (or note in a comment that the full title is shortened).
+
+### 10. `orchard2014` — MULTIPLE SERIOUS ERRORS
+This entry is incorrect in nearly every field. The paper "Effects as Sessions, Sessions as Effects" was published at **POPL 2016**, by **Dominic Orchard and Nobuko Yoshida** (not Nicolas Wu), pages **568–581** (not 568–580), DOI **10.1145/2837614.2837634** (not 10.1145/2535838.2535846 — that DOI is in fact the POPL 2014 proceedings DOI of Katsumata's paper; see entry 11). DBLP entry: `conf/popl/OrchardY16`.
+**Fixes required:**
+- `author`: `Dominic Orchard and Nobuko Yoshida` (replace "Nicolas Wu")
+- `year`: `2016` (not 2014)
+- `booktitle`: 43rd ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages (POPL '16)
+- `pages`: `568--581` (not 568--580)
+- `doi`: `10.1145/2837614.2837634`
+- Citation key `orchard2014` is misleading; consider renaming to `orchard2016`.
+
+### 11. `katsumata2014` — PAGE NUMBER OFF BY ONE
+DBLP's Shin-ya Katsumata bibliography page (dblp.org/pid/00/5408.html) records "POPL 2014: 633-646", and BibSLEIGH (bibtex.github.io/POPL-2014-Katsumata.html) gives `pages = "633--646"`. Both confirm the correct end page is **646**, not 645. The DOI 10.1145/2578855.2535846 is the SIGPLAN Notices reprint DOI, consistent with the journal field "ACM SIGPLAN Notices, vol. 49, no. 1" — that is correct (the POPL 2014 proceedings DOI is 10.1145/2535838.2535846; both DOIs resolve to the same paper).
+**Fix:** change `pages = {633--645}` to `pages = {633--646}`. `@article` is appropriate for the SIGPLAN Notices citation.
+
+### 12. `honda1993` — CORRECT
+Verified against Springer and DBLP. CONCUR '93, LNCS 715, pages 509–523, DOI 10.1007/3-540-57208-2_35. `@inproceedings` appropriate.
+
+### 13. `gay2010` — CORRECT (but key is misleading)
+The actual publication year is 2005 (*Acta Informatica*, vol. 42, no. 2–3, pages 191–225, DOI 10.1007/s00236-005-0177-z) — the `year` field correctly says 2005, but the citation key `gay2010` is misleading. Consider renaming to `gay2005`. All other fields, including `@article`, are correct.
+
+### 14. `leucker2009` — CORRECT
+Verified against ScienceDirect and DBLP. J. Log. Algebr. Program. 78(5):293–303, 2009, DOI 10.1016/j.jlap.2008.08.004. `@article` appropriate.
+
+### 15. `strom1986` — LIKELY CORRECT, DOI WORTH VERIFYING
+IEEE TSE vol. SE-12, no. 1, pages 157–171, January 1986 (DBLP and IBM Research confirm). The bibliography lists `volume = {12}`; IEEE technically uses `SE-12`, but citing as volume 12 is widely accepted. A CMU note states the paper was historically "unavailable in IEEE's electronic library", so the DOI 10.1109/TSE.1986.6312929 is a back-assigned identifier — worth spot-checking that it still resolves to this exact paper in IEEE Xplore. All other fields are correct. `@article` appropriate.
+
+### 16. `bierhoff2007` — CORRECT
+Verified against ACM DL, Bierhoff's CMU publications page, and the OOPSLA '07 PDF. OOPSLA '07, pages 301–320, DOI 10.1145/1297027.1297050. `@inproceedings` appropriate.
+
+### 17. `song2024provenfix` — CORRECT
+Verified against ACM DL. *Proceedings of the ACM on Software Engineering* (PACMSE) vol. 1, issue FSE, article 11, year 2024, DOI 10.1145/3643737. The article occupies pages 226–248 (23 pages); the entry uses `articleno=11` and `numpages=23`, which is a valid PACMSE-style citation. `@article` appropriate.
+
+### 18. `degiacomo2013` — CORRECT
+Verified against DBLP (`conf/ijcai/GiacomoV13`) and IJCAI. IJCAI 2013, pages 854–860. DBLP explicitly notes the publication does not have a DOI, so the entry correctly omits the DOI field. `@inproceedings` appropriate.
+
+### 19. `mathlib4` — ACCEPTABLE
+Community-maintained software resource; `@misc` is appropriate, and the URL resolves to the canonical Mathlib4 documentation. Adding an `urldate` is advisable since this is a living resource.
+
+### 20. `song2025futurecond` — MOSTLY CORRECT; YEAR AMBIGUOUS
+Authors (Yahui Song, Darius Foo, Wei-Ngan Chin), title, LNCS volume 16100, pages 90–112, DOI 10.1007/978-3-032-07106-4_5 all match Springer's record. However, Springer's official bibliographic record assigns **publication year 2026** to the LNCS volume (SAS 2025 was held in October 2025; the proceedings volume was published in early 2026). Either year is defensible; flag that downstream citation processors that fetch from Crossref may overwrite the year to 2026. `@inproceedings` appropriate.
+
+### 21. `atkey2009` — CORRECT
+Verified against Cambridge Core (*J. Funct. Program.* 19(3–4):335–376, July 2009, DOI 10.1017/S095679680900728X). Stylistic note: Cambridge renders the title with lowercase "notions of computation"; either rendering works in BibTeX since braces protect casing. `@article` appropriate.
+
+### 22. `snoyman2011resourcet` — ENTRY APPEARS TO BE FABRICATED
+This entry could not be verified against any authoritative source. The DBLP table of contents for Haskell Symposium 2011 (dblp.org/db/conf/haskell/haskell2011.html) lists exactly 11 papers across four sessions (Monads, pp. 1–22; Libraries, pp. 23–58; Parallelism, pp. 59–94; Embedded languages, pp. 95–129) — none by Michael Snoyman. Snoyman's full DBLP bibliography (dblp.org/pid/85/9921.html) contains only two items: the O'Reilly book "Developing Web Applications with Haskell and Yesod" (2012, ISBN 978-1-449-31697-6) and "Warp: A Haskell Web Server" (IEEE Internet Comput. 15(3):81–85, 2011). No Haskell Symposium entry exists. The cited DOI 10.1145/2096148.2096161 does not resolve; DOIs of the form 10.1145/2096148.xxxxxxx are the SIGPLAN Notices reprint identifiers for Haskell '11 (issue vol. 46 no. 12, December 2011), and no item with the suffix `.2096161` matches any paper in that issue.
+**Recommendation:** Remove this entry, or replace it with a `@misc` citation to the Hackage `conduit` package page or one of Snoyman's blog tutorials documenting `ResourceT`.
+
+### 23. `linearbase2021` — ACCEPTABLE
+GitHub repository by Tweag. `@misc` appropriate, URL is canonical. Not formally published; this is the standard way to cite an open-source library.
+
+### 24. `sessiontypes2017` — ACCEPTABLE
+Hackage package by Ferdinand van Walree. `@misc` appropriate, and the Hackage URL is the canonical citation point.
+
+### 25. `bernardy2018linear` — WRONG ENTRY TYPE / VENUE
+DBLP's PACMPL Volume 2 page (dblp.org/db/journals/pacmpl/pacmpl2.html) records: "Jean-Philippe Bernardy, Mathieu Boespflug, Ryan R. Newton, Simon Peyton Jones, Arnaud Spiwack: Linear Haskell: practical linearity in a higher-order polymorphic language. 5:1-5:29", confirming Article 5 and 29 pages. The DBLP key is `journals/pacmpl/BernardyBNJS18`. Although the paper was presented at POPL 2018, since the PACMPL transition (POPL joined PACMPL with Volume 2 in January 2018) POPL papers are formally published in *Proceedings of the ACM on Programming Languages*, not in a POPL proceedings volume.
+**Fix:** change `@inproceedings` → `@article` and replace the venue with `journal = {Proceedings of the ACM on Programming Languages}`, `volume = {2}`, `number = {POPL}`, `articleno = {5}`, `numpages = {29}`. Pages `5:1--5:29` and DOI 10.1145/3158093 are correct.
+
+### 26. `brady2013idris` — CORRECT
+Verified against Cambridge Core and DBLP. *J. Funct. Program.* 23(5):552–593, September 2013, DOI 10.1017/S095679681300018X. Stylistic note: Cambridge renders the subtitle with lowercase "implementation" ("Design and implementation"); either casing works in BibTeX with braces. `@article` appropriate.
+
+## Summary Table of Required Fixes
+
+| Key | Severity | Issue | Required Action |
+|---|---|---|---|
+| `orchard2014` | **Critical** | Wrong second author, year, pages, DOI | Replace "Nicolas Wu" with "Nobuko Yoshida"; year → 2016; pages → 568–581; DOI → 10.1145/2837614.2837634; rename key to `orchard2016` |
+| `snoyman2011resourcet` | **Critical** | Paper does not exist; DOI does not resolve | Remove, or replace with a `@misc` citation to the Hackage `conduit` package |
+| `bernardy2018linear` | High | Wrong entry type and venue | `@inproceedings` → `@article` in PACMPL vol. 2, no. POPL, Article 5 |
+| `o2007resources` | High | Wrong entry type | `@inproceedings` → `@article`; `booktitle` → `journal` |
+| `owens2009` | High | Wrong entry type | `@inproceedings` → `@article`; `booktitle` → `journal` |
+| `pretnar2015` | High | Wrong entry type; missing subtitle | `@inproceedings` → `@article`; `booktitle` → `journal`; append ". Invited tutorial paper" |
+| `katsumata2014` | Low | Page range off by one | `633--645` → `633--646` |
+| `gay2010` | Low | Misleading citation key | Consider renaming to `gay2005` |
+| `song2025futurecond` | Low | Year debatable | Consider `year=2026` per Springer's LNCS record |
+| `strom1986` | Info | DOI is back-assigned | Spot-check that 10.1109/TSE.1986.6312929 resolves correctly |
+
+## Recommendations
+
+1. **Apply the four critical/high-severity fixes immediately** — they change the meaning, not just the formatting, of the citations (especially `orchard2014`, which currently credits the wrong author for the wrong paper at the wrong venue with the wrong DOI).
+2. **Delete or replace `snoyman2011resourcet`** before sending the bibliography anywhere — a citation to a non-existent paper is a far more serious credibility issue than a typo. If you need to cite the `conduit`/`ResourceT` work, cite the Hackage package or a documented blog post as `@misc`.
+3. **Run an automated DOI check** (e.g., `bibtex-tidy --check-doi`, `biber --validate-datamodel`, or a simple Crossref roundtrip) once these fixes are in place — most of the type/venue errors above would have been caught by automated DOI resolution.
+4. **Adopt a PACMPL-aware citation style.** ICFP and OOPSLA papers have been PACMPL journal articles since Volume 1 (September/October 2017), POPL papers since Volume 2 (January 2018), and PLDI papers only since Volume 7, Number PLDI (June 2023) per SIGPLAN's PACMPL listing (sigplan.org/PACMPL/) and the PACMPL TOC (ftp.math.utah.edu/pub/tex/bib/toc/pacmpl.html). Configure your reference manager to fetch from DBLP rather than from conference web pages, which sometimes still describe these as proceedings.
+5. **Benchmark for next pass:** if a future bibliography contains more than two `@inproceedings` entries with a `booktitle` field equal to the name of a known journal (TCS, JFP, ENTCS, JACM, TOPLAS, PACMPL, etc.), reject the bibliography and re-import from DBLP rather than spot-fixing.
+
+## Caveats
+- The DOI for `strom1986` was not directly resolved during this verification; it appears to be a back-assigned IEEE Xplore identifier (the paper was for years unavailable in IEEE's electronic library, per a CMU note) and should be spot-checked before final submission.
+- The `mathlib4`, `linearbase2021`, and `sessiontypes2017` entries cite living software resources whose content and URLs can change without notice; adding an `urldate`/"accessed-on" date is advisable.
+- The `song2025futurecond` year discrepancy (2025 vs. 2026) depends on whether you cite by conference year or by Springer's printed publication year; both conventions are common, but be consistent across your bibliography.
+- "Tim Baanen" (the published name on the ICFP 2019 paper) and "Anne Baanen" are the same person; the entry is fine as written, but be aware that DBLP and the author's own homepage now use "Anne Baanen", which may cause name-merge confusion in citation databases.
+
+
+
+1. citations
+2. remove duplications

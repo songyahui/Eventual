@@ -13,5 +13,5 @@ $(MAIN).pdf: $(MAIN).tex references.bib
 	$(LATEX) $(MAIN)
 
 clean:
-	rm -f *.aux *.bbl *.blg *.log *.out *.toc *.fls *.fdb_latexmk \
+	rm -f *.pdf *.aux *.bbl *.blg *.log *.out *.toc *.fls *.fdb_latexmk \
 	      *.synctex.gz *.bcf *.run.xml

@@ -268,5 +268,13 @@ Verified against Cambridge Core and DBLP. *J. Funct. Program.* 23(5):552–593, 
 
 
 
-1. citations
 2. remove duplications
+3. why is future consition always abandon the argument
+4. previously in putMVar
+5. 5.4 is not needed
+6. Sentence do not starting from a \listing
+7. Examples of WRE
+8. PPred duplications
+9. No applicative examples
+10. \lstinline{==>}
+11. feel like Pledge is dynamic checking, instead of static checking

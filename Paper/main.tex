@@ -107,9 +107,6 @@ asynchronous exceptions; a \lstinline{beginTx} must eventually reach
 with probability at least~$p$.
 No single pre/post pair can express these properties, because the
 balancing operation lies in an unknown future context.
-Existing remedies --- \lstinline{bracket}, \lstinline{ResourceT},
-\lstinline{Acquire} --- enforce \emph{cleanup} but cannot express
-\emph{protocol} obligations or quantitative commitments.
 
 We present \emph{Pledge}, a Haskell library that fills this gap by
 augmenting the classical contract model with \emph{future conditions}:
@@ -118,17 +115,16 @@ until they are fully discharged.
 Future conditions are carried as a data-dependent field
 $\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad
 alongside pre- and post-conditions.
-The dependence on the return value is essential: it allows an obligation
-to name the specific resource handle that an operation produces ---
-requiring, for instance, that the \emph{particular} context returned
-by \lstinline{tlsHandshake} must eventually have \lstinline{bye} called
-on it.
+Value-dependence is essential: it lets an obligation name the particular
+resource handle the operation returns --- requiring, for instance, that
+the \emph{specific} context produced by \lstinline{tlsHandshake} must
+eventually have \lstinline{bye} called on it.
 When operations are sequenced via monadic bind, the future condition of
 the first computation is partially discharged by the postcondition of
 its continuation through a \emph{subtraction} operator; the residual is
 then conjoined with the continuation's own future condition.
-The user annotates individual operations only; propagation and discharge
-are handled automatically by the monad.
+Annotations are per-operation; the monad handles all propagation and
+discharge automatically.
 
 The design is parameterised over a \lstinline{Composable} algebra
 requiring concatenation~($\diamond$), conjunction~($\wedge$), and
@@ -141,9 +137,10 @@ arithmetic bounds~($\GRE$, discharged by an SMT solver); quantitative
 obligations via semiring-weighted regular expressions~($\WRE$, capturing
 probabilistic and min-cost scenarios); and heap-ownership obligations via
 separation logic~($\SL$, with magic wand as subtraction).
-All four instances share a single monadic bind formula, demonstrating
-that \emph{Pledge} subsumes trace-based, arithmetic, quantitative, and
-heap-ownership obligations within one algebraic interface.
+All four instances share a single monadic bind formula, showing that
+diverse obligation domains --- trace-based, arithmetic, quantitative,
+and heap-ownership --- are uniformly expressible within one algebraic
+interface.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
@@ -234,27 +231,22 @@ a single domain per design.
 We propose the \lstinline{Pledge} monad as a lightweight, compositional
 mechanism for specifying such obligations, requiring no language
 extensions beyond standard Haskell type classes.
-A value of type \lstinline{Pledge eff a} represents a computation that
-returns a value of type~$a$ and carries three annotations:
+A value of type \lstinline{Pledge eff a} carries three annotations:
 a precondition $\mathtt{pre} :: \mathit{eff}$,
 a postcondition $\mathtt{post} :: \mathit{eff}$,
 and a data-dependent future condition
-$\mathtt{future} :: a \to \mathit{eff}$
-that expresses what the remaining execution must satisfy \emph{as a
-function of the return value}.
-The dependence on the return value is essential: it allows an obligation
-to refer to the specific resource handle that an operation produces.
-For example, \lstinline{tlsHandshake} can declare that \emph{whichever}
-\lstinline{Context} it returns must eventually have \lstinline{bye}
-called on it: not a context fixed at specification time, but the one
-actually negotiated at runtime.
-When two computations are sequenced via monadic bind, the future condition
-of the first is \emph{partially discharged} by the postcondition of the
-continuation, using the \lstinline{subtraction} operator of the
-\lstinline{Composable} algebra; the residual is then conjoined with the
+$\mathtt{future} :: a \to \mathit{eff}$.
+Because \lstinline{future} ranges over the return value, an obligation
+can name the actual resource handle produced at runtime rather than one
+fixed at specification time: \lstinline{tlsHandshake} can declare that
+\emph{whichever} \lstinline{Context} it returns must eventually receive
+\lstinline{bye}.
+Monadic bind partially discharges the first computation's future
+condition against the continuation's postcondition via
+\lstinline{subtraction}; the residual is conjoined with the
 continuation's own future condition.
-The user annotates individual operations only; propagation is handled
-automatically by the monad.
+The user annotates individual operations only; the monad propagates
+obligations automatically.
 
 The \lstinline{Composable} typeclass abstracts the specification algebra
 into five operations: concatenation~($\diamond$), conjunction~($\wedge$),
@@ -294,23 +286,20 @@ instances:
         post names the unreleased ownership precisely.
 \end{itemize}
 
-All four instances share a single monadic bind formula, demonstrating
-that trace-based, arithmetic, quantitative, and heap-ownership
-obligations are not merely analogous; they are structurally identical
-at the level of the \lstinline{Composable} algebra.
+That all four share a single monadic bind formula is not a coincidence:
+trace-based, arithmetic, quantitative, and heap-ownership obligations
+are structurally identical at the level of the \lstinline{Composable}
+algebra.
 
 \paragraph{Contributions.}
 \begin{enumerate}
   \item We define the \lstinline{Pledge} monad (\S\ref{sec:effectful}),
         parameterised over a \lstinline{Composable} algebra, with
         $\mathtt{pre} :: \mathit{eff}$,
-        $\mathtt{post} :: \mathit{eff}$, and
-        $\mathtt{future} :: a \to \mathit{eff}$ fields.
-        The \lstinline{future} field is \emph{data-dependent}: it is a
-        function of the return value, so obligations can refer to the
-        resource handle an operation produces.
-        We verify that the monad laws hold for the
-        $(\ret, \post, \fut)$ triple (\S\ref{sec:monad-laws}).
+        $\mathtt{post} :: \mathit{eff}$, and a data-dependent
+        $\mathtt{future} :: a \to \mathit{eff}$ field, and verify that
+        the monad laws hold for the $(\ret, \post, \fut)$ triple
+        (\S\ref{sec:monad-laws}).
 
   \item We instantiate the algebra to extended regular expressions over
         events with complement, using Brzozowski derivatives to implement
@@ -631,8 +620,7 @@ evalFuture e = future e (ret e)
 \lstinline{pure} introduces a value with no effect and no obligation:
 
 \begin{lstlisting}
-pure x = Pledge
-  { ret = x, pre = universe, post = empty, future = \_ -> universe }
+pure x = Pledge { ret = x, pre = universe, post = empty, future = \_ -> universe }
 \end{lstlisting}
 
 The bind operator sequences two computations; write $e_2 = f(\ret(e))$.
@@ -1763,9 +1751,15 @@ monad, propagating pre/post annotations through monadic bind analogously to
 Pledge complements these by adding a \emph{temporal} dimension through the
 future condition, without requiring type-system extensions.
 
-\paragraph{Future conditions.}
-Song et al.\ propose future conditions as a first-class extension to
-pre/post-condition contracts~\cite{song2025futurecond}, formalising the
+\paragraph{Future conditions and temporal verification.}
+ProveNFix~\cite{song2024provenfix} encodes temporal properties as regular
+expressions to guide automated program repair. 
+Pledge is complementary in orientation:
+rather than repairing programs after the fact, it carries temporal
+obligations as first-class annotations so that violations are identified
+statically, prior to any execution.
+\citet{song2025futurecond} propose future conditions as a first-class extension to
+pre/post-condition contracts, formalising the
 notion that an operation may discharge temporal obligations onto its
 continuation. Pledge realises this idea as a Haskell library, contributing
 a monadic interface, derivative-based propagation, and four concrete
@@ -1782,14 +1776,6 @@ at the type level, we carry an explicit obligation as
 \lstinline{future :: a -> eff} at the value level, preserving compatibility
 with the standard \lstinline{Monad} class, \lstinline{do}-notation, and
 the \lstinline{mtl} stack.
-
-\paragraph{Temporal property verification and repair.}
-ProveNFix~\cite{song2024provenfix} encodes temporal properties as regular
-expressions to guide automated program repair, verifying that synthesised
-patches satisfy the specification. Pledge is complementary in orientation:
-rather than repairing programs after the fact, it carries temporal
-obligations as first-class annotations so that violations are identified
-statically, prior to any execution.
 
 \paragraph{Resource management in Haskell.}
 \lstinline{bracket} lexically scopes cleanup but cannot propagate obligations

@@ -268,6 +268,27 @@ instances:
         post names the unreleased ownership precisely.
 \end{itemize}
 
+\paragraph{Central insight.}
+The unifying mechanism is \emph{Brzozowski-derivative subtraction as
+obligation propagation}.
+When a computation $e$ is sequenced with a continuation $f$, the
+continuation's postcondition $\post(e_2)$ is subtracted from $e$'s
+pending future obligation $\fut(e)$ using the derivative:
+for each event $a$ that $\post(e_2)$ can begin with,
+$\partial_a(\post(e_2)) \setminus \partial_a(\fut(e))$ advances both
+sides in lock-step, consuming the obligation event by event.
+The residual is what remains unmet.
+The insight is that this derivative-based subtraction, originally
+introduced for regular-language parsing, doubles as a compositional
+discharge mechanism for temporal obligations in a monadic setting.
+The four \lstinline{Composable} instances are four realisations of the
+same pattern: RE subtraction via derivatives; $\GRE$ subtraction via
+derivatives with a Presburger conjunction; $\WRE$ subtraction with
+semiring weights; and SL subtraction via the magic wand.
+All four share a single bind formula, and the diagnostic residual is
+always the same: anything not equal to \lstinline{universe} names an
+unmet obligation precisely.
+
 \paragraph{Contributions.}
 \begin{enumerate}
   \item We define the \lstinline{Pledge} monad (\S\ref{sec:effectful}),
@@ -842,6 +863,18 @@ The \lstinline{normalize} function is defined outside the instance and
 applies the RE-specific laws listed in Table~\ref{tab:normalize-laws},
 which exploit the complement constructor.
 
+\paragraph{Termination.}
+The recursive \lstinline{subtraction} call terminates because
+\lstinline{normalize} reduces every RE to a canonical representative and,
+for any regular expression $r$, the set of distinct normalised derivatives
+$\{\,\lceil\partial_{w}(r)\rceil \mid w \in \Sigma^*\,\}$ is \emph{finite}
+--- a classical result due to Brzozowski~\cite{brzozowski1964}, refined to
+include complement by Owens et al.~\cite{owens2009}.
+Each recursive call to \lstinline{subtraction} is made with the
+normalised derivative of the \emph{previous} operands, so the recursion
+explores a path in this finite set and must eventually reach a base case
+($\varepsilon$ or $\univ$) or a previously visited pair.
+
 \begin{table}[ht]
 \caption{Normalisation laws applied by \lstinline{normalize}.
          All rules are applied recursively bottom-up.}
@@ -1130,6 +1163,21 @@ retains \lstinline{wFinally (Tropical 0) (complete i)} in the
 residual, and the overall weight is $+\infty$ (i.e.\ \lstinline{szero}),
 flagging the missing completion.
 
+\paragraph{Absence of weighted complement.}
+The \lstinline{WRE} type does not include a \lstinline{WNot} constructor.
+This is a deliberate restriction: complement over a semiring weight does
+not have a canonical definition, because Boolean negation ($0 \leftrightarrow 1$)
+does not generalise uniformly to an arbitrary semiring
+(e.g.\ what is the ``negation'' of a probability $0.7$, or of a tropical
+cost $5$?).
+As a consequence, the LTL$_f$ embedding from Section~\ref{sec:ltl}
+does not transfer to the \lstinline{WRE} instance:
+operators that rely on complement --- \lstinline{G}, \lstinline{U},
+and \lstinline{never} --- are unavailable.
+The operators \lstinline{wFinally} and \lstinline{wGlobally} above are
+defined directly via \lstinline{WStar} and \lstinline{WSeq} without
+complement, and cover the common quantitative patterns.
+
 %% =========================================================================
 \section{The SL Instance}
 \label{sec:sl-instance}
@@ -1252,8 +1300,29 @@ $P \wand \top = \top$                                  & \lstinline{Wand} \\
 \end{tabular}
 \end{center}
 
-\noindent
-All rules apply recursively bottom-up.
+
+\paragraph{Symbolic recording, not semantic discharge.}
+It is important to distinguish what the \lstinline{SL} instance does from
+what it does not do.
+The five normalisation rules above reduce \emph{syntactically} trivial
+wands (e.g.\ $\mathbf{emp} \wand Q = Q$), but the general
+\lstinline{Wand p q} case is recorded \emph{symbolically}: no heap model
+is consulted, and no solver is invoked.
+A residual such as $\mathtt{Wand}\;(\mathtt{Cell}\;0\;42)\;(\mathtt{Cell}\;0\;99)$
+is retained as a data structure even though it is semantically
+unsatisfiable ($0 \mapsto 42$ and $0 \mapsto 99$ cannot simultaneously
+hold).
+The \lstinline{SL} instance therefore \emph{records} obligations and
+propagates them correctly through bind; it does not \emph{check} whether
+the accumulated residual is satisfiable or entailed.
+Connecting residual \lstinline{SL} predicates to an external solver
+(e.g.\ Z3 via the \lstinline{sbv} library, or a dedicated SL decision
+procedure such as Smallfoot) is identified in Section~\ref{sec:discussion}
+as the natural next engineering step.
+All claims of ``violation detection'' for the SL instance in the
+examples below should be read as ``the residual annotation is
+non-trivially non-\lstinline{universe}'', which a programmer or tool can
+then inspect further.
 
 %% =========================================================================
 \section{Examples}
@@ -1749,13 +1818,30 @@ and applying associativity of $\wedge$, both reduce to the same expression:
   \;\wedge\; \widehat{\fut}(g\,r_2). \;\checkmark
 \]
 
-\paragraph{Precondition.}
+\paragraph{Precondition and the monad-law status of \lstinline{pre}.}
 The \lstinline{pre} field satisfies the Hoare-rule property
 (Equation~\eqref{eq:pre-bind}) rather than strict monad-law equality.
 The residual $\post(e) \setminus \pre(e_2)$ captures which part of
 $e_2$'s precondition $e$'s postcondition has not discharged: full
 coverage gives the standard Hoare sequencing rule; absent coverage
 collapses to $\varnothing$, flagging the violation immediately.
+
+It is worth being precise about what this means for the \lstinline{Monad}
+instance.
+The triple $(\ret, \post, \widehat{\fut})$ satisfies the three monad laws
+exactly, as proved above.
+The \lstinline{pre} field is an \emph{independent annotation}: it is not
+part of the monad's return value or sequencing behaviour, but rather a
+separate summary accumulated alongside it, analogous to a writer-monad log.
+Consequently, \lstinline{Pledge} is a lawful \lstinline{Monad} when
+equality is taken to mean equality of $(\ret, \post, \widehat{\fut})$;
+the \lstinline{pre} field participates in a separate \emph{contract
+checking} layer that deliberately deviates from left-identity when a
+precondition violation is detected.
+In practice, a programmer inspects \lstinline{pre} and
+\lstinline{evalFuture} after constructing the specification term,
+and both fields equal \lstinline{universe} if and only if the
+composed program is contract-correct.
 
 %% =========================================================================
 \section{Related Work}
@@ -1932,13 +2018,6 @@ prevents the violation from occurring.
 Pairing Pledge specifications with runtime enforcement via \lstinline{bracket}
 or \lstinline{mask} (so that obligations are both expressed and enforced)
 remains future work.
-
-\paragraph{Solver-backed discharge of residual conditions.}
-Residual annotations are currently surfaced as symbolic expressions.
-A natural extension would connect them to an automatic solver:
-RE residuals checked by NFA/DFA construction or a BDD library;
-SL predicates with Presburger guards discharged by Z3 or CVC5, reporting
-concrete counterexample traces or unsatisfiable heaps.
 
 \paragraph{Parallel composition.}
 The \lstinline{Pledge} monad is inherently sequential; concurrent programs

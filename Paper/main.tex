@@ -396,8 +396,7 @@ allow complement to be propagated and simplified \emph{purely
 algebraically}, without building a DFA.
 The normaliser additionally applies $\neg\neg r = r$,
 $\neg\varnothing = \univ$, and $\neg\univ = \varnothing$.
-
-In Haskell:
+We define the nullable and derivative functions in Haskell as follows:
 
 \begin{lstlisting}
 nullable :: RE -> Bool
@@ -426,8 +425,7 @@ a supplied finite alphabet $\Sigma_0$) that can begin a word in $L(r)$,
 driving the subtraction algorithm.
 The complement case requires particular care.
 Naively writing \lstinline{first (Not r) = first r} is \emph{unsound}:
-$L(\neg r)$ can begin with events \emph{not} in $\mathit{first}(r)$,
-so the naive rule explores the wrong direction.
+$L(\neg r)$ can begin with events \emph{not} in $\mathit{first}(r)$. 
 The correct characterisation is:
 
 \begin{equation}
@@ -439,12 +437,17 @@ The correct characterisation is:
   \label{eq:first-not}
 \end{equation}
 
-That is, $e$ can open a word in $L(\neg r)$ iff after consuming $e$,
-the residual $\partial_e(r)$ does \emph{not} cover the whole future;
-there exists some continuation that stays outside $L(r)$.
-The alphabet $\Sigma_0$ is collected from an RE via \lstinline{atoms},
-which recursively gathers all concrete (\lstinline{Atom}) events,
-excluding \lstinline{Wildcard}.
+That is, $e$ can open a word in $L(\neg r)$ if and only if, after
+consuming $e$, the residual $\partial_e(r)$ does \emph{not} cover the
+entire language: there exists some continuation that remains outside
+$L(r)$.
+The condition $\lceil\partial_e(r)\rceil \neq \univ$ checks exactly this.
+If the normalised derivative equals the universal language $\Sigma^*$,
+then every continuation after $e$ belongs to $L(r)$; consequently, no
+continuation after $e$ belongs to $L(\neg r)$, and $e$ cannot open any
+word in that language.
+
+
 
 \begin{lstlisting}
 atoms :: RE -> [Event]
@@ -464,34 +467,25 @@ firstWith _    (Single e)        = [e]
 firstWith alph (Seq r1 r2)
     | nullable r1                = firstWith alph r1 `union` firstWith alph r2
     | otherwise                  = firstWith alph r1
-firstWith alph (Or  r1 r2)      = firstWith alph r1 `union` firstWith alph r2
-firstWith alph (And r1 r2)      = [e | e <- firstWith alph r1,
+firstWith alph (Or  r1 r2)       = firstWith alph r1 `union` firstWith alph r2
+firstWith alph (And r1 r2)       = [e | e <- firstWith alph r1,
                                         e `elem` firstWith alph r2]
-firstWith alph (Star r)         = firstWith alph r
-firstWith alph (Not r)          = [e | e <- alph,
+firstWith alph (Star r)          = firstWith alph r
+firstWith alph (Not r)           = [e | e <- alph,
                                         not (isTotal (normalize (derivative e r)))]
   where isTotal (Not Bot) = True; isTotal _ = False
 \end{lstlisting}
 
-\noindent
+\vspace{3mm}
+The alphabet $\Sigma_0$ is collected from an RE via \lstinline{atoms},
+which recursively gathers all concrete (\lstinline{Atom}) events,
+excluding \lstinline{Wildcard}.
 The function \lstinline{first r = firstWith (atoms r) r} is a convenient
 wrapper for standalone use; inside \lstinline{subtraction} both operands
 contribute to the alphabet (see \S\ref{sec:re-instance}).
 
-\paragraph{Illustrative cases.}
-Table~\ref{tab:firstwith-not} gives representative evaluations of
-\lstinline{firstWith} with \lstinline{Not}.
-The first four rows confirm that complement does not exclude any alphabet event
-when the derivative is non-total.
-The double-negation row shows correct restoration of the original first set:
-$\partial_b(\neg a) = \Sigma^*$ is total, so $b$ is filtered out.
-In $\neg(a \cdot \Sigma^*)$, $\partial_a(a \cdot \Sigma^*)$ normalises to $\Sigma^*$,
-excluding $a$; only $b$ survives.
-Similarly, $\neg(a\cdot\Sigma^* \vee b\cdot\Sigma^*)$ excludes both $a$ and $b$,
-leaving only $c$, while the De Morgan row verifies that
-$\neg(\neg a \wedge \neg b) = a \vee b$ yields $\{a,b\}$.
 
-\begin{table}[ht]
+\begin{table}[!b]
 \caption{Selected \lstinline{firstWith} evaluations with \lstinline{Not}.
          $\Sigma_0$ is the explicitly supplied alphabet.
          Rows marked $\dagger$ produce a \emph{strict} subset of $\Sigma_0$.}
@@ -511,6 +505,30 @@ $\neg a \wedge \neg b$  & $\{a,b,c\}$ & $\{a,b\}$  & De Morgan: $=\neg(a\vee b)$
 \bottomrule
 \end{tabular}
 \end{table}
+
+
+\paragraph{Illustrative cases.}
+Two small examples fix the intuition for Equation~\eqref{eq:first-not}.
+When $r = a\cdot\Sigma^*$ and $\Sigma_0 = \{a,b\}$, the naive rule
+would return $\{a\}$, but $L(\neg r)$ consists of words beginning with
+events other than $a$: $\partial_a(a\cdot\Sigma^*)$ normalises to $\univ$,
+excluding $a$, while $\partial_b(a\cdot\Sigma^*) = \varnothing \neq \univ$
+includes $b$, giving the correct $\{b\}$.
+When $r = \varepsilon$ and $\Sigma_0 = \{a,b\}$, the naive rule returns
+$\varnothing$ (since $\mathit{first}(\varepsilon) = \varnothing$), but
+$\neg\varepsilon$ accepts all non-empty traces: $\partial_a(\varepsilon) =
+\varnothing \neq \univ$ includes $a$, and likewise $b$, giving $\{a,b\}$.
+Table~\ref{tab:firstwith-not} extends these to seven further patterns.
+The first four rows confirm that complement does not exclude any alphabet
+event when the derivative is non-total.
+The double-negation row shows correct restoration of the original first set:
+$\partial_b(\neg a) = \Sigma^*$ is total, so $b$ is filtered out.
+In $\neg(a \cdot \Sigma^*)$, $\partial_a(a \cdot \Sigma^*)$ normalises to $\Sigma^*$,
+excluding $a$; only $b$ survives.
+Similarly, $\neg(a\cdot\Sigma^* \vee b\cdot\Sigma^*)$ excludes both $a$ and $b$,
+leaving only $c$, while the De Morgan row verifies that
+$\neg(\neg a \wedge \neg b) = a \vee b$ yields $\{a,b\}$.
+
 
 \subsection{Embedding LTL\texorpdfstring{\textsubscript{f}}{f}}
 \label{sec:ltl}
@@ -565,15 +583,41 @@ class Composable a where
   conjunction   :: a -> a -> a   -- (/\), unit: universe
   empty         :: a             -- identity for <>  (varepsilon)
   universe      :: a             -- identity for /\  (neg-emptyset)
-  subtraction   :: a -> a -> a   -- (\\)
+  subtraction   :: a -> a -> a   -- (\)
 \end{lstlisting}
 
-\noindent
-\lstinline{concatenation} sequences effects; \lstinline{conjunction}
-combines simultaneous constraints; \lstinline{subtraction} computes the
-residual obligation (the Brzozowski quotient for the RE instance).
+
+The five operations form exactly the interface required by the bind formula.
+Here \lstinline{concatenation} sequences effects; \lstinline{conjunction}
+combines simultaneous constraints.
 The identities \lstinline{empty} and \lstinline{universe} appear in
-\lstinline{pure}.
+\lstinline{pure}. In particular, the operation \lstinline{subtraction r1 r2} computes the residual of the
+\emph{second} argument with respect to the first: it asks ``which part of
+the obligation $r_2$ is not yet discharged, given that a trace matching
+$r_1$ has been observed?''
+The first argument $r_1$ is the \emph{observed} trace (a postcondition);
+the second argument $r_2$ is the \emph{pending obligation} (a precondition
+or future condition to be discharged).
+Two base cases fix the endpoints: $\varepsilon \setminus r_2 = r_2$
+(nothing observed, the full obligation $r_2$ remains) and
+$\Sigma^* \setminus r_2 = \varepsilon$ (everything observed, the obligation
+is fully discharged).
+The general case advances both $r_1$ and $r_2$ in lockstep: for each
+event $e$ that $r_1$ can begin with, the residual after $e$ is
+$\partial_e(r_1) \setminus \partial_e(r_2)$, consuming one event from
+each side simultaneously.
+
+\emph{Quick example.}
+Let the postcondition $r_1 = \mathtt{putMVar}(v)$ (\lstinline{putMVar(v)}
+just occurred) and the obligation $r_2 = \finally{\mathtt{putMVar}(v)}$
+(\lstinline{putMVar(v)} must eventually occur).
+The event $\mathtt{putMVar}(v)$ in $r_1$ satisfies $\finally{\mathtt{putMVar}(v)}$,
+so the residual $r_1 \setminus r_2 = \univ$ and the obligation is fully
+discharged.
+Conversely, if $r_1 = \mathtt{send}(v)$ instead, then
+$\mathtt{send}(v) \setminus \finally{\mathtt{putMVar}(v)} =
+\finally{\mathtt{putMVar}(v)}$: a \lstinline{send} event makes no progress
+toward the \lstinline{putMVar} obligation, leaving it intact.
 
 \subsection{The \texttt{Pledge} Type}
 \label{sec:future-cond}

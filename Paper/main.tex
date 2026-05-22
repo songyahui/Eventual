@@ -71,6 +71,7 @@
 \newcommand{\ret}{\mathit{ret}}
 \newcommand{\anything}{\mathtt{anything}}
 \newcommand{\finally}[1]{\mathtt{finally}(#1)}
+\newcommand{\previously}[1]{\mathtt{previously}(#1)}
 \newcommand{\shuffle}{\mathbin{\sqcup\!\!\!\sqcup}}
 \newcommand{\never}[1]{\mathtt{never}(#1)}
 \newcommand{\noUntil}[2]{\mathtt{noUntil}(#1,\,#2)}
@@ -738,9 +739,10 @@ data-dependent future conditions.
 The \lstinline{takeMVar} operation returns the handle of the taken
 \lstinline{MVar} as its return value; the future condition is
 data-dependent, referring to whatever handle was actually returned.
-For \lstinline{putMVar}, the future asserts that \lstinline{putMVar(v)}
-must not recur until \lstinline{takeMVar(v)} is called again, preventing
-double-put.
+For \lstinline{putMVar}, the precondition requires that
+\lstinline{takeMVar(v)} has occurred previously in the trace, and the
+future asserts that \lstinline{putMVar(v)} must not recur until
+\lstinline{takeMVar(v)} is called again, preventing double-put.
 
 \begin{lstlisting}
 type MVar = Int
@@ -754,48 +756,72 @@ takeMVar v = Pledge
 putMVar :: MVar -> Pledge RE ()
 putMVar v = Pledge
   { ret = ()
-  , pre    = Single (Atom "takeMVar" [Num v])
+  , pre    = previously (Atom "takeMVar" [Num v])
   , post   = Single (Atom "putMVar" [Num v])
   , future = \_ -> noUntil (Atom "putMVar" [Num v]) (Atom "takeMVar" [Num v]) }
 \end{lstlisting}
 
-\noindent\textbf{Good program: \lstinline{v <- takeMVar 1; putMVar v}.}
-After \lstinline{takeMVar 1} ($\ret = 1$):
+\paragraph{Good program: \lstinline{v <- takeMVar 1; putMVar v}}
+
+After \lstinline{takeMVar 1} ($\ret = 1$) the annotations are:
 \[
-  \post = \mathtt{takeMVar}(1),\quad
-  \fut  = \finally{\mathtt{putMVar}(1)},\quad
-  \pre  = \univ
+  \post = \mathtt{takeMVar}(1), \qquad
+  \fut  = \finally{\mathtt{putMVar}(1)}, \qquad
+  \pre  = \univ.
 \]
-Binding \lstinline{putMVar 1} (with $\pre = \mathtt{takeMVar}(1)$, $\post =
-\mathtt{putMVar}(1)$):
+Binding \lstinline{putMVar 1}
+(whose $\pre = \previously{\mathtt{takeMVar}(1)}$,
+$\post = \mathtt{putMVar}(1)$):
+\begin{itemize}
+  \item \textit{Precondition.}
+    \[
+      \post(\mathtt{takeMVar}(1)) \setminus \pre(\mathtt{putMVar}(1))
+      = \mathtt{takeMVar}(1) \setminus \previously{\mathtt{takeMVar}(1)}
+      = \univ,
+    \]
+    so $\pre = \univ \wedge \univ = \univ$.\ \checkmark
 
-\textit{Precondition:}
-$\post(\mathtt{takeMVar}(1)) \setminus \pre(\mathtt{putMVar}(1))
-= \mathtt{takeMVar}(1) \setminus \mathtt{takeMVar}(1) = \varepsilon$.
-So $\pre = \univ \wedge \varepsilon = \varepsilon$.\ \checkmark
+  \item \textit{Future.}
+    $\mathtt{putMVar}(1) \setminus \finally{\mathtt{putMVar}(1)} = \univ$;
+    intersecting with
+    $\fut(\mathtt{putMVar}(1)) = \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$
+    gives $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.\ \checkmark
 
-\textit{Future:}
-$\mathtt{putMVar}(1) \setminus \finally{\mathtt{putMVar}(1)} = \univ$.
-Intersect with $\fut(\mathtt{putMVar}(1)) = \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$:
-result $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.\ \checkmark
-(nullable: the program may end here; no double-put obligation is pending.)
+  \item[] (Nullable: the program may end here; no double-put obligation is pending.)
+\end{itemize}
 
-\noindent\textbf{Bad: \lstinline{putMVar 1} alone.}
-Here \lstinline{pure ()} has $\post = \varepsilon$.
-$\mathtt{takeMVar}(1) \setminus \varepsilon = \varnothing$.
-So $\pre = \varnothing$.\ \texttimes
+\paragraph{Bad program: \lstinline{putMVar 1} alone}
 
-\noindent\textbf{Bad: \lstinline{missingPut} (\lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1}).}
+\lstinline{pure ()} has $\post = \varepsilon$, so
+\[
+  \varepsilon \setminus \previously{\mathtt{takeMVar}(1)}
+  = \previously{\mathtt{takeMVar}(1)},
+\]
+which is not nullable (the empty trace contains no \lstinline{takeMVar} event).
+Hence
+\[
+  \pre = \univ \wedge \previously{\mathtt{takeMVar}(1)}
+       = \previously{\mathtt{takeMVar}(1)} \neq \univ.\ \texttimes
+\]
+
+\paragraph{Bad program: \lstinline{missingPut}
+  (\lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1})}
+
 The future of \lstinline{takeMVar 2} is $\finally{\mathtt{putMVar}(2)}$,
-which is not discharged by \lstinline{putMVar 1}, so the residual future
-still contains $\finally{\mathtt{putMVar}(2)}$, naming the blocked \lstinline{MVar} precisely.
+which is not discharged by \lstinline{putMVar 1}.
+The residual future retains $\finally{\mathtt{putMVar}(2)}$, naming the
+blocked \lstinline{MVar} precisely.\ \texttimes
 
-\noindent\textbf{Bad: \lstinline{doublePutImmediate} (\lstinline{v <- takeMVar 1; putMVar v; putMVar v}).}
+\paragraph{Bad program: \lstinline{doublePutImmediate}
+  (\lstinline{v <- takeMVar 1; putMVar v; putMVar v})}
+
 After the first \lstinline{putMVar 1}, the future is
-$\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.
-The second \lstinline{putMVar 1} posts $\mathtt{putMVar}(1)$; consuming
-$\mathtt{putMVar}(1)$ in $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$
-yields $\varnothing$, so the combined future is $\varnothing$.\ \texttimes
+\[
+  \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}.
+\]
+The second \lstinline{putMVar 1} contributes $\post = \mathtt{putMVar}(1)$;
+subtracting $\mathtt{putMVar}(1)$ from this formula yields $\varnothing$,
+so the combined future collapses to $\varnothing$.\ \texttimes
 
 %% =========================================================================
 \section{The RE Instance}
@@ -1432,6 +1458,7 @@ Table~\ref{tab:examples-re} summarises the three RE domains.
 \begin{table}[ht]
 \caption{RE instance: bad programs and residual annotations.}
 \label{tab:examples-re}
+\small
 \begin{tabular}{llll}
 \toprule
 Domain & Bad program & Residual \lstinline{future} & Residual \lstinline{pre} \\
@@ -1768,8 +1795,8 @@ a monadic interface, derivative-based propagation, and four concrete
 \lstinline{Composable} instances that the formal system leaves unaddressed.
 
 \paragraph{Parameterised and graded monads.}
-Atkey~\cite{atkey2009} introduces parameterised monads $T(S_1, S_2, A)$
-for Hoare-logic-style pre/post state tracking.
+Atkey~\cite{atkey2009} introduces parameterised monads, written
+$T(S_1, S_2, A)$, for Hoare-logic-style pre/post state tracking.
 Katsumata~\cite{katsumata2014} generalises this to graded monads over a
 monoid; Orchard and Wu~\cite{orchard2016} show effect systems and session
 types are instances.

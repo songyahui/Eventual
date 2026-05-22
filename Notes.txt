@@ -274,5 +274,4 @@ Verified against Cambridge Core and DBLP. *J. Funct. Program.* 23(5):552–593, 
 7. Examples of WRE
 8. PPred duplications
 9. No applicative examples
-10. \lstinline{==>}
 11. feel like Pledge is dynamic checking, instead of static checking

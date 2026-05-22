@@ -103,8 +103,7 @@ calls.
 In real Haskell code such obligations are ubiquitous: a successful TLS
 handshake must eventually be followed by \lstinline{bye} before the
 context is discarded; a taken \lstinline{MVar} must eventually be put
-back on \emph{every} code path, including those interrupted by
-asynchronous exceptions; a \lstinline{beginTx} must eventually reach
+back on \emph{every} code path; a \lstinline{beginTx} must eventually reach
 \lstinline{commit} or \lstinline{rollback}; a submitted job must complete
 with probability at least~$p$.
 No single pre/post pair can express these properties, because the
@@ -201,8 +200,7 @@ handle contexts passed across function boundaries.
 
 \emph{MVar discipline.}
 The \lstinline{takeMVar} operation removes a value, leaving the variable
-empty; the caller must restore it with \lstinline{putMVar} on every exit
-path including async-exception paths.
+empty; the caller must restore it with \lstinline{putMVar} on every exit path.
 A post-condition records the empty state but cannot require that a future
 \lstinline{putMVar} on the \emph{same} variable will occur.
 
@@ -801,8 +799,9 @@ which is not nullable (the empty trace contains no \lstinline{takeMVar} event).
 Hence
 \[
   \pre = \univ \wedge \previously{\mathtt{takeMVar}(1)}
-       = \previously{\mathtt{takeMVar}(1)} \neq \univ.\ \texttimes
+       = \previously{\mathtt{takeMVar}(1)},
 \]
+which is not $\univ$, so the precondition is violated.\ \texttimes
 
 \paragraph{Bad program: \lstinline{missingPut}
   (\lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1})}
@@ -819,9 +818,9 @@ After the first \lstinline{putMVar 1}, the future is
 \[
   \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}.
 \]
-The second \lstinline{putMVar 1} contributes $\post = \mathtt{putMVar}(1)$;
-subtracting $\mathtt{putMVar}(1)$ from this formula yields $\varnothing$,
-so the combined future collapses to $\varnothing$.\ \texttimes
+The second \lstinline{putMVar 1} has $\post = \mathtt{putMVar}(1)$;
+subtracting it from the formula above yields $\varnothing$,
+so the future collapses to $\varnothing$.\ \texttimes
 
 %% =========================================================================
 \section{The RE Instance}
@@ -1681,27 +1680,66 @@ Linked list  & read without ownership           & $\mathbf{emp}$ & $\mathtt{Cell
 \label{sec:monad-laws}
 %% =========================================================================
 
-Because \lstinline{future} has type \lstinline{a -> eff}, the monad laws
-are stated in terms of \lstinline{evalFuture}, defined as
+\paragraph{What are the monad laws?}
+Every monad must satisfy three equational laws that together guarantee
+sequential composition behaves predictably:
+\begin{itemize}
+  \item \textbf{Left identity}: \lstinline{pure x >>= f = f x}.
+        Wrapping a value in \lstinline{pure} and immediately binding it is
+        the same as applying \lstinline{f} directly; \lstinline{pure}
+        introduces no effect of its own.
+  \item \textbf{Right identity}: \lstinline{e >>= pure = e}.
+        Binding a computation to \lstinline{pure} is the same as the
+        computation itself; \lstinline{pure} consumes no observable state.
+  \item \textbf{Associativity}:
+        \lstinline|(e >>= f) >>= g = e >>= (\x -> f x >>= g)|.
+        Re-parenthesising a chain of binds does not change its meaning;
+        sequential composition is order-preserving but grouping-independent.
+\end{itemize}
+When these laws hold, programmers can freely refactor monadic chains
+--- extracting sub-expressions, fusing steps, or reordering
+\lstinline{do}-blocks --- without changing the observable semantics.
+
+\paragraph{Why verify Pledge?}
+\lstinline{Pledge} extends the standard monad with three extra fields:
+\lstinline{pre}, \lstinline{post}, and \lstinline{future}.
+The bind formula for each field (Equations~\ref{eq:future-bind}
+and~\ref{eq:pre-bind}) is non-trivial, involving subtraction and
+conjunction.
+Without verification, these fields could interact with \lstinline{>>=}
+in ways that violate the laws, making composed specifications sensitive to
+accidental parenthesisation.
+Confirming lawfulness ensures that a programmer who writes
+\lstinline{takeMVar v >>= putMVar} and one who writes the equivalent
+in two steps obtain identical \lstinline{pre}, \lstinline{post}, and
+\lstinline{future} annotations.
+
+\paragraph{What the laws check and the setup.}
+Because \lstinline{future} has type \lstinline{a -> eff}, the laws are
+stated in terms of \lstinline{evalFuture}, defined as
 \lstinline{future e (ret e)}: the future condition evaluated at the
 computation's own return value.
 We write $\widehat{\fut}(e)$ for $\mathit{evalFuture}(e)$ for brevity.
 The laws hold for the triple $(\ret, \post, \widehat{\fut})$ under the
-assumption that \lstinline{Composable} forms a monoid under
-\lstinline{<>} with unit \lstinline{empty}, and that
-\lstinline{universe} is the unit for \lstinline{(/\\)}.
+assumption that \lstinline{Composable} forms a monoid under \lstinline{<>}
+with unit \lstinline{empty}, and that \lstinline{universe} is the unit for
+\lstinline{(/\\)}.
 The \lstinline{pre} field satisfies the Hoare-rule property
-(Equation~\ref{eq:pre-bind}) rather than strict monad-law equality;
-we discuss this in the final paragraph of this section.
+(Equation~\ref{eq:pre-bind}) rather than strict monad-law equality, because
+it accumulates \emph{residual} precondition obligations rather than tracking
+a symmetric state; we return to this at the end of the section.
 
 \paragraph{Left identity.} \lstinline{pure x >>= f = f x}.
+
+\lstinline{pure x} contributes no postcondition ($\post = \varepsilon$)
+and no future obligation ($\mathtt{future} = \lambda\,\_.\ \univ$), so
+binding it should leave \lstinline{f x} entirely unchanged.
 
 $\ret$: $\ret(f\,x)$. \checkmark \quad
 $\post$: $\varepsilon \mathbin{<>} \post(f\,x) = \post(f\,x)$. \checkmark
 
 For the future, let $fe = f(\ret(\mathtt{pure}\;x)) = f\,x$.
-$\mathtt{future}(\mathtt{pure}\;x) = \lambda\,\_.\ \univ$, so
-$\widehat{\fut}(\mathtt{pure}\;x) = \univ$.
+Since $\widehat{\fut}(\mathtt{pure}\;x) = \univ$:
 
 \begin{align*}
   \widehat{\fut}(\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f)
@@ -1713,22 +1751,23 @@ $\widehat{\fut}(\mathtt{pure}\;x) = \univ$.
      \;=\; \widehat{\fut}(f\,x). \;\checkmark
 \end{align*}
 
-The identity $r \setminus \univ = \varepsilon$ follows from the base case
-$\univ \setminus r = \varepsilon$ of \lstinline{reSubtraction}.
+The key step is $r \setminus \univ = \varepsilon$: subtracting the universal
+obligation discharges everything, leaving the empty residual $\varepsilon$.
+This follows from the base case $\univ \setminus r = \varepsilon$ of
+\lstinline{reSubtraction}.
 
 \paragraph{Right identity.} \lstinline{e >>= pure = e}.
+
+\lstinline{pure(ret e)} has $\post = \varepsilon$ and
+$\widehat{\fut} = \univ$, so it contributes nothing to the composed
+specification, and the result should equal $e$ exactly.
 
 $\ret$: $\ret(e)$. \checkmark \quad
 $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark
 
-Let $fe = \mathtt{pure}(\ret(e))$.
-Then $\post(fe) = \varepsilon$ and
-\[
-  \widehat{\fut}(fe)
-    = \mathtt{future}(fe)\bigl(\ret(fe)\bigr)
-    = (\lambda\,\_.\ \univ)\bigl(\ret(e)\bigr)
-    = \univ.
-\]
+Let $fe = \mathtt{pure}(\ret(e))$, so $\post(fe) = \varepsilon$ and
+$\widehat{\fut}(fe) = \univ$.
+Then:
 
 \begin{align*}
   \widehat{\fut}(e \mathbin{>\!\!>\!\!=} \mathtt{pure})
@@ -1738,29 +1777,51 @@ Then $\post(fe) = \varepsilon$ and
      \;=\; \widehat{\fut}(e). \;\checkmark
 \end{align*}
 
+The key step is $\varepsilon \setminus r = r$
+(base case of \lstinline{reSubtraction}: consuming an empty prefix leaves the
+obligation unchanged), and $r \wedge \univ = r$ (unit for $\wedge$).
+
 \paragraph{Associativity.}
-For $(e \mathbin{>\!\!>\!\!=} f) \mathbin{>\!\!>\!\!=} g = e \mathbin{>\!\!>\!\!=} (\lambda\,x.\ f\,x \mathbin{>\!\!>\!\!=} g)$,
-the $\ret$ and $\post$ components follow from associativity of
-\lstinline{<>}.
-For the future, let $r_1 = \ret(e)$, $r_2 = \ret(f\,r_1)$, $r_3 = \ret(g\,r_2)$.
-Both sides reduce to
+Re-parenthesising \lstinline{(e >>= f) >>= g} as
+\lstinline|e >>= (\x -> f x >>= g)| must not change the specification.
+
+$\ret$ and $\post$: both sides yield $\ret(g\,r_2)$ and
+$\post(e) \mathbin{<>} \post(f\,r_1) \mathbin{<>} \post(g\,r_2)$,
+following from associativity of \lstinline{<>}. \checkmark
+
+For the future, let $r_1 = \ret(e)$, $r_2 = \ret(f\,r_1)$.
+Unfolding the bind formula (Equation~\eqref{eq:future-bind}) on both sides
+and applying associativity of $\wedge$, both reduce to the same expression:
 \[
   \bigl(\post(g\,r_2) \setminus
         \bigl(\post(f\,r_1) \setminus \widehat{\fut}(e)\bigr)\bigr)
   \;\wedge\; \widehat{\fut}(f\,r_1)
-  \;\wedge\; \widehat{\fut}(g\,r_2)
+  \;\wedge\; \widehat{\fut}(g\,r_2). \;\checkmark
 \]
-by repeated application of Equation~\eqref{eq:future-bind} and
-associativity of $\wedge$.
+Intuitively, successive postconditions peel away layers of the accumulated
+future obligation from the inside out, and the order of peeling is determined
+by the order of events, not by parenthesisation.
 
 \paragraph{Precondition.}
-The \lstinline{pre} field propagates constraints via $\wedge$.
-When $\post(e)$ fully covers $\pre(e_2)$,
-Equation~\eqref{eq:pre-bind} gives $\pre(e \mathbin{>\!\!>\!\!=} f) = \pre(e) \wedge \varepsilon$,
-which reduces to $\varepsilon$ when $\pre(e) = \univ$ or $\varnothing$
-when $\pre(e)$ is non-nullable, flagging contradictions immediately.
-The residual $\post(e) \setminus \pre(e_2)$ records precisely
-which precondition obligations remain unmet.
+The \lstinline{pre} field does not satisfy the monad laws as equalities,
+and this is intentional.
+The standard monad laws require that both sides of each equation are
+\emph{identical}; \lstinline{pre} instead satisfies the Hoare-rule property
+(Equation~\eqref{eq:pre-bind}):
+\[
+  \pre(e \mathbin{>\!\!>\!\!=} f)
+  \;=\; \pre(e) \;\wedge\; \bigl(\post(e) \setminus \pre(e_2)\bigr).
+\]
+The residual $\post(e) \setminus \pre(e_2)$ captures exactly which part
+of $e_2$'s precondition $e$'s postcondition has not yet discharged.
+When $\post(e)$ fully covers $\pre(e_2)$, the residual is $\varepsilon$
+and the combined \lstinline{pre} collapses to $\pre(e)$ --- the standard
+Hoare sequencing rule.
+When coverage is absent, the residual is $\varnothing$, immediately
+flagging a precondition violation.
+This asymmetry is a feature: \lstinline{pre} accumulates
+\emph{unmet obligations} forward through the chain, precisely recording
+which precondition remains unsatisfied and why.
 
 %% =========================================================================
 \section{Related Work}
@@ -1931,6 +1992,20 @@ Because $\mathtt{future} :: a \to \mathit{eff}$ indexes the obligation by the
 return value, Pledge echoes the indexed/graded-monad literature where types are
 indexed by computational effects; here the index is a return value instead of
 an effect row.
+
+\paragraph{Specification versus runtime enforcement.}
+Pledge is a \emph{specification} tool: the \lstinline{pre}, \lstinline{post},
+and \lstinline{future} fields are pure Haskell values that describe what a
+computation \emph{should} do, not runtime guards that intercept execution.
+In particular, Pledge does not integrate with GHC's asynchronous-exception
+machinery.
+If an async exception fires mid-computation and the continuation never calls
+\lstinline{putMVar}, Pledge's \lstinline{future} condition correctly flags the
+\emph{specification} as carrying an unmet obligation --- but no runtime mechanism
+prevents the violation from occurring.
+Pairing Pledge specifications with runtime enforcement via \lstinline{bracket}
+or \lstinline{mask} --- so that the obligation is both expressed and
+guaranteed --- remains future work.
 
 \paragraph{Solver-backed discharge of residual conditions.}
 Residual annotations are currently surfaced as symbolic expressions.

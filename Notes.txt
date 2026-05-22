@@ -269,9 +269,13 @@ Verified against Cambridge Core and DBLP. *J. Funct. Program.* 23(5):552–593, 
 
 
 3. why is future consition always abandon the argument
-4. previously in putMVar
-5. 5.4 is not needed
 7. Examples of WRE
 8. PPred duplications
 9. No applicative examples
 11. feel like Pledge is dynamic checking, instead of static checking
+
+
+1. make it less AI-generated
+2. indexing the figures and 
+3. what is the usage of Monad Laws, write more clearer at the beginning of the section of
+what is trying to be proved. 

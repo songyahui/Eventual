@@ -654,6 +654,23 @@ residual with $e_2$'s own future obligation (evaluated at $e_2$'s return
 value).
 When the result normalises to $\univ$, all obligations are discharged.
 
+\paragraph{Why \lstinline{future = \\_ ->} in the bind result.}
+The implementation writes \lstinline{future = \\_ -> ...} in the result of
+\lstinline{>>=}, which may appear to discard the data-dependent argument
+and suggest that value-dependence is unnecessary.
+This is not the case.
+Data-dependence is \emph{essential} and is already exploited: the
+expression $\fut(e)(\ret(e))$ evaluates $e$'s future at $e$'s concrete
+return value, and $\fut(e_2)(\ret(e_2))$ evaluates $e_2$'s future at
+$e_2$'s concrete return value.
+After both evaluations the combined obligation is a fully-instantiated
+\lstinline{eff} value, so the resulting \lstinline{future} field of the
+composed \lstinline{Pledge} happens to be a constant function---it no
+longer needs to inspect the outer return value because the inner return
+values have already been consumed.
+The \lstinline{\_} simply reflects this: all value-dependent
+instantiation has already been performed inside the lambda body.
+
 \paragraph{Precondition.}
 
 \begin{equation}
@@ -678,6 +695,43 @@ $\pre(e) = \{a\}$ (non-nullable), the intersection $\{a\} \wedge \varepsilon = \
 flags the contradiction immediately.
 This behaviour is intentional: incompatible constraints collapse to the empty
 intersection rather than silently discarding one side.
+
+\subsection{The Applicative Instance}
+
+The \lstinline{Pledge} monad also satisfies the \lstinline{Applicative}
+class, which provides \lstinline{<*>} for combining a function-valued
+computation with an argument-valued computation \emph{without}
+data-dependency between them.
+Writing $e_f$ for the function computation and $e_x$ for the argument
+computation:
+
+\begin{lstlisting}
+ef <*> ex = Pledge
+  { ret    = ret ef (ret ex)
+  , pre    = pre ef /\ (post ef \\ pre ex)
+  , post   = post ef <> post ex
+  , future = \_ -> (post ex \\ future ef (ret ef)) /\ future ex (ret ex)
+  }
+\end{lstlisting}
+
+The structure mirrors \lstinline{>>=}: preconditions and postconditions
+compose in the same way, and the future condition is the conjunction of
+the two evaluated futures after subtracting the continuation's
+postcondition from the first computation's future.
+The key difference is that \lstinline{<*>} cannot make $e_x$
+\emph{depend} on the return value of $e_f$---the function inside
+$e_f$ and the argument inside $e_x$ are constructed independently.
+In contrast, \lstinline{>>=} passes $\ret(e)$ directly into $f$,
+enabling the data-dependent future condition exemplified by
+\lstinline{tlsHandshake} and \lstinline{takeMVar}.
+
+\paragraph{When to use \lstinline{<*>} vs \lstinline{>>=}.}
+Use \lstinline{<*>} when the right-hand computation is independent of
+the left-hand return value (e.g.\ two stateless checks composed
+together).
+Use \lstinline{>>=} (or \lstinline{do}-notation) whenever the
+continuation must inspect the return value, as is the case for all
+data-dependent future conditions.
 
 \subsection{Intuition via an Example}
 
@@ -883,30 +937,6 @@ The introduction of \lstinline{PFalse} prevents the solver from being
 invoked with expressions such as $(\lnot\mathbf{true}) \wedge \cdots$ that
 are syntactically unsatisfiable; these normalise immediately to
 \lstinline{PFalse} without any solver call.
-
-\subsection{Membership Checking}
-
-Checking whether a concrete $(heap, trace)$ satisfies a
-\lstinline{GuardedRE} involves two steps: fold \lstinline{deriveGuarded}
-over the trace (advancing only the RE side), then call
-\lstinline{nullableGuarded} which checks RE nullability \emph{and}
-invokes the SBV/Z3 backend on the instantiated Presburger predicate.
-
-\begin{lstlisting}
-deriveGuarded :: Event -> GuardedRE -> GuardedRE
-deriveGuarded e (GuardedRE p r) = GuardedRE p (normalize (derivative e r))
-
-nullableGuarded :: Map Addr Int -> GuardedRE -> IO Bool
-nullableGuarded heap (GuardedRE p r)
-    | not (nullable r) = return False
-    | otherwise = do
-        result <- checkPPred (instantiate heap p)
-        return $ case result of { Satisfied _ -> True; _ -> False }
-
-checkGuarded :: Map Addr Int -> [Event] -> GuardedRE -> IO Bool
-checkGuarded heap trace g =
-    nullableGuarded heap (foldl (flip deriveGuarded) g trace)
-\end{lstlisting}
 
 \subsection{Example: Bounded Counter}
 
@@ -1162,28 +1192,9 @@ combining a heap-independent condition with spatial ownership.
 
 \subsection{Presburger Arithmetic for Pure Constraints}
 
-Pure constraints are modelled by a small Presburger arithmetic language
-over heap values.
-Expressions are linear combinations of heap dereferences and literals;
-predicates are comparisons and propositional connectives.
-
-\begin{lstlisting}
-data PExpr
-    = Lit Int         -- integer literal
-    | ValAt Addr      -- h[a]: value at address a
-    | Add PExpr PExpr -- e1 + e2
-    | Mul Int PExpr   -- k * e  (scalar only, keeps linearity)
-
-data PPred
-    = PTrue
-    | PLt PExpr PExpr  | PLe PExpr PExpr  | PEq PExpr PExpr
-    | PGt PExpr PExpr  | PGe PExpr PExpr
-    | PNot PPred       | PAnd PPred PPred
-\end{lstlisting}
-
-\noindent
-Derived connectives ($\mathtt{pFalse}$, $\mathtt{pOr}$) are smart
-constructors built via De Morgan laws.
+Pure constraints reuse the same \lstinline{PPred} language introduced in
+Section~\ref{sec:guardedre-instance} (the \lstinline{PExpr}/\lstinline{PPred}
+types and \lstinline{normalizePPred}).
 The predicate \lstinline{Pure p} holds of any heap for which
 \lstinline{evalPPred h p} is true; it enforces no ownership of cells.
 The smart constructor \lstinline{pureSL} realises the standard SL box
@@ -1315,23 +1326,8 @@ The \lstinline{putMVar} operation carries as its future obligation
 $\noUntil{\mathtt{putMVar}(v)}{\mathtt{takeMVar}(v)}$,
 forbidding a second \lstinline{putMVar(v)} until
 \lstinline{takeMVar(v)} resets the guard.
-
-\begin{lstlisting}
-type MVar = Int
-
-takeMVar :: MVar -> Pledge RE MVar
-takeMVar v = Pledge
-  { ret = v, pre = universe
-  , post   = Single (Atom "takeMVar" [Num v])
-  , future = \r -> finally (Atom "putMVar" [Num r]) }
-
-putMVar :: MVar -> Pledge RE ()
-putMVar v = Pledge
-  { ret = ()
-  , pre    = Single (Atom "takeMVar" [Num v])
-  , post   = Single (Atom "putMVar" [Num v])
-  , future = \_ -> noUntil (Atom "putMVar" [Num v]) (Atom "takeMVar" [Num v]) }
-\end{lstlisting}
+(The full definitions of \lstinline{takeMVar} and \lstinline{putMVar}
+appear in Section~\ref{sec:future-cond}.)
 
 \begin{lstlisting}
 -- Good: data-dependent  -  obligation discharged on the returned handle
@@ -1748,8 +1744,9 @@ which precondition obligations remain unmet.
 refinement types verified by an SMT solver.
 Findler and Felleisen~\cite{findler2002} establish a runtime contract
 discipline for higher-order functions.
-QuickCheck~\cite{claessen2000} supports conditional properties via
-\lstinline{==>}.
+QuickCheck~\cite{claessen2000} supports conditional properties via the
+implication combinator \emph{==>}, which restricts a property to
+inputs satisfying a given precondition.
 Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
 monad, propagating pre/post annotations through monadic bind analogously to
 \lstinline{Pledge}.
@@ -1762,7 +1759,7 @@ expressions to guide automated program repair.
 Pledge is complementary in orientation:
 rather than repairing programs after the fact, it carries temporal
 obligations as first-class annotations so that violations are identified
-statically, prior to any execution.
+through annotation inspection, prior to any effectful execution.
 \citet{song2025futurecond} propose future conditions as a first-class extension to
 pre/post-condition contracts, formalising the
 notion that an operation may discharge temporal obligations onto its
@@ -1831,13 +1828,25 @@ Brady's \lstinline{ST} monad encoding in Idris~\cite{brady2013idris}
 demonstrates full compile-time enforcement in a dependently typed language.
 Pledge achieves comparable expressiveness at the library level using
 standard Haskell type classes, at the cost of moving checking to
-annotation-inspection rather than type-inference time.
+annotation-inspection time rather than type-inference time: violations
+surface as non-trivial residual annotations in \lstinline{pre} or
+\lstinline{future}, which the programmer can evaluate before executing
+effects rather than relying on the type checker to reject programs.
 
 \paragraph{Runtime monitoring.}
 Runtime verification~\cite{leucker2009} checks temporal properties after
-execution. Pledge takes a \emph{static} approach: future conditions are
-propagated before any execution, and the LTL$_f$ embedding eliminates
-automaton construction.
+execution by instrumenting or replaying a concrete run.
+Pledge takes a \emph{dynamic-checking} approach: future conditions are
+obligation values propagated through the \lstinline{Pledge} structure,
+and the resulting residuals can be inspected at any point in the program
+(e.g.\ as assertions in \lstinline{main}, as shown in
+Section~\ref{sec:discussion}).
+Crucially, no concrete execution is required to expose a violation; the
+obligation algebra surfaces contradictions as soon as the relevant
+annotations are composed---prior to any effectful run.
+Runtime monitoring instruments an \emph{actual} execution and reports
+violations only after the fact; Pledge propagates and checks obligations
+in the specification layer, independently of any running effects.
 
 \paragraph{Brzozowski derivatives.}
 Derivatives of regular expressions~\cite{brzozowski1964} have found
@@ -1871,7 +1880,7 @@ Lifting Pledge into an effect-handler framework
 specifications to compose alongside algebraic effect rows.
 A lightweight \emph{shadow} approach requires no deep integration:
 keep the \lstinline{Pledge RE} computation as a pure specification
-evaluated statically, while a separate \lstinline{Eff es} computation
+evaluated as obligation values before the run, while a separate \lstinline{Eff es} computation
 carries out the real effects, with assertions linking the two at the top level:
 \begin{lstlisting}
 main = do
@@ -1879,7 +1888,7 @@ main = do
   assert (normalize (evalFuture spec) == top) "future obligation unmet"
   runEff impl
 \end{lstlisting}
-Static checking is entirely pure; no changes to the effect stack are required.
+Annotation checking is entirely pure; no changes to the effect stack are required.
 
 \paragraph{Closed-world alphabet assumption.}
 The \lstinline{firstWith} function uses

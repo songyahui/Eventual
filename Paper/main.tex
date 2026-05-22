@@ -716,7 +716,7 @@ ef <*> ex = Pledge
   }
 \end{lstlisting}
 
-The structure mirrors \lstinline{>>=}: preconditions and postconditions
+The structure mirrors \lstinline{>>=}, i.e., preconditions and postconditions
 compose in the same way, and the future condition is the conjunction of
 the two evaluated futures after subtracting the continuation's
 postcondition from the first computation's future.
@@ -740,7 +740,8 @@ type MVar = Int
 
 takeMVar :: MVar -> Pledge RE MVar
 takeMVar v = Pledge
-  { ret = v, pre = universe
+  { ret = v
+  , pre = universe
   , post   = Single (Atom "takeMVar" [Num v])
   , future = \r -> finally (Atom "putMVar" [Num r]) }
 
@@ -752,68 +753,57 @@ putMVar v = Pledge
   , future = \_ -> noUntil (Atom "putMVar" [Num v]) (Atom "takeMVar" [Num v]) }
 \end{lstlisting}
 
-\paragraph{Good program: \lstinline{v <- takeMVar 1; putMVar v}}
-
+\subsubsection{A Good Program:~ \lstinline{v <- takeMVar 1; putMVar v}.}~\\
 After \lstinline{takeMVar 1} ($\ret = 1$) the annotations are:
 \[
-  \post = \mathtt{takeMVar}(1), \qquad
-  \fut  = \finally{\mathtt{putMVar}(1)}, \qquad
+  \post = \mathtt{takeMVar}(1),\qquad
+  \fut  = \finally{\mathtt{putMVar}(1)},\qquad
   \pre  = \univ.
 \]
-Binding \lstinline{putMVar 1}
-(whose $\pre = \previously{\mathtt{takeMVar}(1)}$,
-$\post = \mathtt{putMVar}(1)$):
-\begin{itemize}
-  \item \textit{Precondition.}
-    \[
-      \post(\mathtt{takeMVar}(1)) \setminus \pre(\mathtt{putMVar}(1))
-      = \mathtt{takeMVar}(1) \setminus \previously{\mathtt{takeMVar}(1)}
-      = \univ,
-    \]
+Binding \lstinline{putMVar 1} (with $\pre_2 = \previously{\mathtt{takeMVar}(1)}$,
+$\post_2 = \mathtt{putMVar}(1)$):
+
+\begin{description}[leftmargin=2.5em,labelindent=0pt]
+  \item[\textit{Precondition.}]
+    \[\mathtt{takeMVar}(1) \setminus \previously{\mathtt{takeMVar}(1)} = \univ,\]
     so $\pre = \univ \wedge \univ = \univ$.\ \checkmark
 
-  \item \textit{Future.}
-    $\mathtt{putMVar}(1) \setminus \finally{\mathtt{putMVar}(1)} = \univ$;
-    intersecting with
-    $\fut(\mathtt{putMVar}(1)) = \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$
+  \item[\textit{Future.}]
+    \[\mathtt{putMVar}(1) \setminus \finally{\mathtt{putMVar}(1)} = \univ;\]
+    conjoined with $\fut_2 = \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$ \\
     gives $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$.\ \checkmark
+\end{description}
 
-  \item[] (Nullable: the program may end here; no double-put obligation is pending.)
-\end{itemize}
 
-\paragraph{Bad program: \lstinline{putMVar 1} alone}
+Note that the residual $\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}$ is
+nullable, so the program may terminate here with all obligations met.
+The formula is a safety guard only: a second \lstinline{putMVar(1)} is
+forbidden until \lstinline{takeMVar(1)} resets it; no positive obligation
+requires another \lstinline{putMVar}.
 
-\lstinline{pure ()} has $\post = \varepsilon$, so
-\[
-  \varepsilon \setminus \previously{\mathtt{takeMVar}(1)}
-  = \previously{\mathtt{takeMVar}(1)},
-\]
-which is not nullable (the empty trace contains no \lstinline{takeMVar} event).
-Hence
-\[
-  \pre = \univ \wedge \previously{\mathtt{takeMVar}(1)}
-       = \previously{\mathtt{takeMVar}(1)},
-\]
-which is not $\univ$, so the precondition is violated.\ \texttimes
+\vspace{2mm}
+\subsubsection{A Bad Program:~  \lstinline{putMVar 1} alone.}~\\
+No preceding \lstinline{takeMVar} means $\post = \varepsilon$, so:
+\[\varepsilon \setminus \previously{\mathtt{takeMVar}(1)}
+  = \previously{\mathtt{takeMVar}(1)},\]
+which is not nullable. The combined precondition
+$\pre = \previously{\mathtt{takeMVar}(1)} \neq \univ$
+signals the violation.
 
-\paragraph{Bad program: \lstinline{missingPut}
-  (\lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1})}
+\vspace{2mm}
+\subsubsection{A Bad Program:~ \lstinline{takeMVar 1 >> takeMVar 2 >> putMVar 1}.}~\\
+Only the obligation for \lstinline{MVar}~1 is discharged.
+The future of \lstinline{takeMVar 2}, namely $\finally{\mathtt{putMVar}(2)}$,
+is untouched, so the residual retains $\finally{\mathtt{putMVar}(2)}$,
+naming the unreleased variable precisely.
 
-The future of \lstinline{takeMVar 2} is $\finally{\mathtt{putMVar}(2)}$,
-which is not discharged by \lstinline{putMVar 1}.
-The residual future retains $\finally{\mathtt{putMVar}(2)}$, naming the
-blocked \lstinline{MVar} precisely.\ \texttimes
-
-\paragraph{Bad program: \lstinline{doublePutImmediate}
-  (\lstinline{v <- takeMVar 1; putMVar v; putMVar v})}
-
-After the first \lstinline{putMVar 1}, the future is
-\[
-  \noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}.
-\]
-The second \lstinline{putMVar 1} has $\post = \mathtt{putMVar}(1)$;
-subtracting it from the formula above yields $\varnothing$,
-so the future collapses to $\varnothing$.\ \texttimes
+\vspace{2mm}
+\subsubsection{A Bad Program:~ \lstinline{v <- takeMVar 1; putMVar v; putMVar v}.}~\\
+After the first \lstinline{putMVar 1} the future is:
+\[\noUntil{\mathtt{putMVar}(1)}{\mathtt{takeMVar}(1)}.\]
+The second \lstinline{putMVar 1} has $\post_2 = \mathtt{putMVar}(1)$;
+subtracting from the \lstinline|noUntil| formula yields $\varnothing$,
+so the future collapses to $\varnothing$.
 
 %% =========================================================================
 \section{The RE Instance}
@@ -848,15 +838,17 @@ $\univ \setminus r = \varepsilon$ for any $r$.
 The general clause collects the alphabet from \emph{both} operands
 before calling \lstinline{firstWith}, ensuring events appearing only in
 $r_2$ are still considered under complement via Equation~\eqref{eq:first-not}.
-
 The \lstinline{normalize} function is defined outside the instance and
-applies the following RE-specific laws, which exploit the complement
-constructor:
+applies the RE-specific laws listed in Table~\ref{tab:normalize-laws},
+which exploit the complement constructor.
 
-\begin{center}
+\begin{table}[ht]
+\caption{Normalisation laws applied by \lstinline{normalize}.
+         All rules are applied recursively bottom-up.}
+\label{tab:normalize-laws}
 \begin{tabular}{ll}
 \toprule
-Law & Applied to \\
+Law & Constructor \\
 \midrule
 $\varepsilon \cdot r = r$, $r \cdot \varepsilon = r$ & \lstinline{Seq} \\
 $\varnothing \vee r = r$, $r \vee \univ = \univ$ & \lstinline{Or} \\
@@ -868,7 +860,7 @@ $\neg\varnothing = \univ$, $\neg\univ = \varnothing$ & \lstinline{Not} \\
 $\varnothing^* = \varepsilon$, $\varepsilon^* = \varepsilon$ & \lstinline{Star} \\
 \bottomrule
 \end{tabular}
-\end{center}
+\end{table}
 
 %% =========================================================================
 \section{The GuardedRE Instance}

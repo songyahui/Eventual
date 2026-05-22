@@ -319,10 +319,8 @@ Events are the atomic units of observation; each carries a name and a list of ty
 
 \begin{lstlisting}
 data Term  = Str String | Num Int | List [Term]
-
 data Event = Atom String [Term]   -- concrete event, e.g. Atom "send" [Num 1]
            | Wildcard             -- pattern matching any single event
-
 data RE = Bot | Epsilon | Single Event
         | Seq RE RE | Or RE RE | And RE RE | Star RE | Not RE
 \end{lstlisting}
@@ -333,12 +331,23 @@ that adds complement as a first-class constructor:
   r \;::=\; \varnothing \mid \varepsilon \mid e \mid r_1 \cdot r_2
           \mid r_1 \vee r_2 \mid r_1 \wedge r_2 \mid r^* \mid \neg r
 \]
-
-Here $e$ is a \lstinline{Single Event} that uses \lstinline{Wildcard} as a
-pattern for any event, $\wedge$ is intersection (derived:
-$r_1\wedge r_2 \triangleq \neg(\neg r_1\vee\neg r_2)$), and
-$\neg r$ is the complement with respect to $\Sigma^*$.
-We use the following five derived forms throughout:
+The constructors are standard.
+The empty language $\varnothing$ (\lstinline{Bot}) accepts no trace.
+The empty-trace language $\varepsilon$ (\lstinline{Epsilon}) accepts only
+the empty sequence.
+A single-event term $e$ (\lstinline{Single Event}) matches exactly one
+event; \lstinline{Wildcard} is a pattern that matches any single event.
+Concatenation $r_1 \cdot r_2$ (\lstinline{Seq}) accepts a trace if it
+splits into a prefix in $L(r_1)$ followed by a suffix in $L(r_2)$.
+Union $r_1 \vee r_2$ (\lstinline{Or}) accepts traces in either language.
+The Kleene star $r^*$ (\lstinline{Star}) accepts zero or more repetitions
+of traces from $L(r)$; $\Sigma^*$ is the set of all finite event sequences
+over the alphabet $\Sigma$ (the universal language).
+Intersection $r_1 \wedge r_2$ (\lstinline{And}) is derived as
+$\neg(\neg r_1\vee\neg r_2)$ via De Morgan.
+Complement $\neg r$ (\lstinline{Not}) is the set of all traces in $\Sigma^*$
+\emph{not} in $L(r)$.
+Moreover, we use the following five derived forms throughout:
 
 \begin{align*}
   \anything &\;\triangleq\; \neg\varnothing

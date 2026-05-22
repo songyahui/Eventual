@@ -109,39 +109,29 @@ with probability at least~$p$.
 No single pre/post pair can express these properties, because the
 balancing operation lies in an unknown future context.
 
-We present \emph{Pledge}, a Haskell library that fills this gap by
-augmenting the classical contract model with \emph{future conditions}:
-annotations that propagate obligations forward through a computation
-until they are fully discharged.
-Future conditions are carried as a data-dependent field
-$\mathtt{future} :: a \to \mathit{eff}$ in the \lstinline{Pledge} monad
-alongside pre- and post-conditions.
-Value-dependence is essential: it lets an obligation name the particular
-resource handle the operation returns --- requiring, for instance, that
-the \emph{specific} context produced by \lstinline{tlsHandshake} must
-eventually have \lstinline{bye} called on it.
-When operations are sequenced via monadic bind, the future condition of
-the first computation is partially discharged by the postcondition of
-its continuation through a \emph{subtraction} operator; the residual is
-then conjoined with the continuation's own future condition.
-Annotations are per-operation; the monad handles all propagation and
-discharge automatically.
+We present \emph{Pledge}, a Haskell library that augments the classical
+contract model with \emph{future conditions}: annotations that propagate
+obligations forward until they are discharged.
+The \lstinline{Pledge} monad carries a data-dependent field
+$\mathtt{future} :: a \to \mathit{eff}$, allowing obligations to name the
+specific resource handle an operation returns.
+Monadic bind partially discharges the first computation's future
+condition against the continuation's postcondition via
+\emph{subtraction}; the residual is conjoined with the continuation's
+own future condition.
 
-The design is parameterised over a \lstinline{Composable} algebra
-requiring concatenation~($\diamond$), conjunction~($\wedge$), and
-subtraction~($\setminus$), together with identity elements
-\lstinline{empty} and \lstinline{universe}.
+The design is parameterised over a \lstinline{Composable} algebra with
+concatenation~($\diamond$), conjunction~($\wedge$), subtraction~($\setminus$),
+and identities \lstinline{empty} and \lstinline{universe}.
 We present four instances: trace protocols via extended regular
 expressions~($\RE$, with Brzozowski-derivative subtraction and a direct
-embedding of LTL$_f$); trace protocols enriched with Presburger
-arithmetic bounds~($\GRE$, discharged by an SMT solver); quantitative
-obligations via semiring-weighted regular expressions~($\WRE$, capturing
-probabilistic and min-cost scenarios); and heap-ownership obligations via
-separation logic~($\SL$, with magic wand as subtraction).
-All four instances share a single monadic bind formula, showing that
-diverse obligation domains --- trace-based, arithmetic, quantitative,
-and heap-ownership --- are uniformly expressible within one algebraic
-interface.
+LTL$_f$ embedding); Presburger-guarded traces~($\GRE$, discharged by
+Z3); semiring-weighted obligations~($\WRE$, covering probabilistic and
+min-cost scenarios); and separation-logic heap predicates~($\SL$, with
+magic wand as subtraction).
+All four share a single bind formula, demonstrating that trace-based,
+arithmetic, quantitative, and heap-ownership obligations are uniformly
+expressible within one algebraic interface.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
@@ -183,12 +173,11 @@ A pre-condition constrains the state in which an operation may be invoked;
 a post-condition describes what holds immediately after it returns.
 Yet a great many correctness properties are not local to a single call
 boundary: they \emph{span} a sequence of operations, with arbitrary
-computation in between.
+computation in between. 
 
-\paragraph{The problem in real Haskell code.}
-Consider three scenarios from the Haskell ecosystem.
-
-\emph{TLS lifecycle.}
+Consider the following three scenarios 
+from the Haskell ecosystem: 
+i) \emph{TLS lifecycle.}
 A successful \lstinline{handshake} must eventually be followed by \lstinline{bye}
 before the context is discarded.
 A post-condition on \lstinline{handshake} records success, but cannot enforce
@@ -197,20 +186,15 @@ unknown future context.
 The \lstinline{bracket} combinator sidesteps this by lexically scoping
 the context, but cannot express richer message-exchange obligations or
 handle contexts passed across function boundaries.
-
-\emph{MVar discipline.}
+ii) \emph{MVar discipline.}
 The \lstinline{takeMVar} operation removes a value, leaving the variable
 empty; the caller must restore it with \lstinline{putMVar} on every exit path.
 A post-condition records the empty state but cannot require that a future
 \lstinline{putMVar} on the \emph{same} variable will occur.
-
-\emph{Database savepoints.}
+iii) \emph{Database savepoints.}
 The \lstinline{transactionSave} function opens a fresh transaction that
 must itself be committed or rolled back; pre/post-conditions on the call
 cannot carry this obligation forward.
-
-In each case the obstacle is identical: the postcondition cannot name
-what comes next because the continuation is unknown at specification time.
 
 \paragraph{Existing remedies and their limits.}
 The \lstinline{bracket} function lexically scopes cleanup but cannot
@@ -237,14 +221,12 @@ a postcondition $\mathtt{post} :: \mathit{eff}$,
 and a data-dependent future condition
 $\mathtt{future} :: a \to \mathit{eff}$.
 Because \lstinline{future} ranges over the return value, an obligation
-can name the actual resource handle produced at runtime rather than one
-fixed at specification time: \lstinline{tlsHandshake} can declare that
-\emph{whichever} \lstinline{Context} it returns must eventually receive
-\lstinline{bye}.
+can name the actual resource handle produced at runtime: \lstinline{tlsHandshake}
+can declare that \emph{whichever} \lstinline{Context} it returns must
+eventually receive \lstinline{bye}.
 Monadic bind partially discharges the first computation's future
-condition against the continuation's postcondition via
-\lstinline{subtraction}; the residual is conjoined with the
-continuation's own future condition.
+via \lstinline{subtraction} against the continuation's postcondition;
+the residual is conjoined with the continuation's own future condition.
 The user annotates individual operations only; the monad propagates
 obligations automatically.
 
@@ -285,11 +267,6 @@ instances:
         computation completes; a leaked \lstinline{Cell} in the residual
         post names the unreleased ownership precisely.
 \end{itemize}
-
-That all four share a single monadic bind formula is not a coincidence:
-trace-based, arithmetic, quantitative, and heap-ownership obligations
-are structurally identical at the level of the \lstinline{Composable}
-algebra.
 
 \paragraph{Contributions.}
 \begin{enumerate}
@@ -350,9 +327,8 @@ data RE = Bot | Epsilon | Single Event
         | Seq RE RE | Or RE RE | And RE RE | Star RE | Not RE
 \end{lstlisting}
 
-The specification language is a regular expression type
+The specification language is an extended regular expression type
 that adds complement as a first-class constructor:
-
 \[
   r \;::=\; \varnothing \mid \varepsilon \mid e \mid r_1 \cdot r_2
           \mid r_1 \vee r_2 \mid r_1 \wedge r_2 \mid r^* \mid \neg r
@@ -362,9 +338,7 @@ Here $e$ is a \lstinline{Single Event} that uses \lstinline{Wildcard} as a
 pattern for any event, $\wedge$ is intersection (derived:
 $r_1\wedge r_2 \triangleq \neg(\neg r_1\vee\neg r_2)$), and
 $\neg r$ is the complement with respect to $\Sigma^*$.
-
-
-Five derived forms are used throughout:
+We use the following five derived forms throughout:
 
 \begin{align*}
   \anything &\;\triangleq\; \neg\varnothing
@@ -586,9 +560,7 @@ class Composable a where
 \end{lstlisting}
 
 \noindent
-The five operations form exactly the interface required by the bind
-formula.
-Here \lstinline{concatenation} sequences effects; \lstinline{conjunction}
+\lstinline{concatenation} sequences effects; \lstinline{conjunction}
 combines simultaneous constraints; \lstinline{subtraction} computes the
 residual obligation (the Brzozowski quotient for the RE instance).
 The identities \lstinline{empty} and \lstinline{universe} appear in
@@ -653,23 +625,6 @@ residual with $e_2$'s own future obligation (evaluated at $e_2$'s return
 value).
 When the result normalises to $\univ$, all obligations are discharged.
 
-\paragraph{Why \lstinline{future = \\_ ->} in the bind result.}
-The implementation writes \lstinline{future = \\_ -> ...} in the result of
-\lstinline{>>=}, which may appear to discard the data-dependent argument
-and suggest that value-dependence is unnecessary.
-This is not the case.
-Data-dependence is \emph{essential} and is already exploited: the
-expression $\fut(e)(\ret(e))$ evaluates $e$'s future at $e$'s concrete
-return value, and $\fut(e_2)(\ret(e_2))$ evaluates $e_2$'s future at
-$e_2$'s concrete return value.
-After both evaluations the combined obligation is a fully-instantiated
-\lstinline{eff} value, so the resulting \lstinline{future} field of the
-composed \lstinline{Pledge} happens to be a constant function---it no
-longer needs to inspect the outer return value because the inner return
-values have already been consumed.
-The \lstinline{\_} simply reflects this: all value-dependent
-instantiation has already been performed inside the lambda body.
-
 \paragraph{Precondition.}
 
 \begin{equation}
@@ -682,18 +637,13 @@ instantiation has already been performed inside the lambda body.
 The term $\post(e) \setminus \pre(e_2)$ is the \emph{residual
 precondition}: the part of $e_2$'s precondition not already discharged
 by $e$'s postcondition.
-The combination uses $\wedge$ (intersection): both $\pre(e)$ and the
-residual must hold \emph{simultaneously} in the same input history.
+Both must hold simultaneously in the same input history.
 
-When $\post(e)$ does not cover $\pre(e_2)$ at all, the residual is
-$\varnothing$, flagging a precondition violation.
-When $\post(e)$ exactly satisfies $\pre(e_2)$, the residual is $\varepsilon$
-and the combined precondition becomes $\pre(e) \wedge \varepsilon$.
-If $\pre(e) = \univ$ (nullable), this reduces to $\varepsilon$; if
-$\pre(e) = \{a\}$ (non-nullable), the intersection $\{a\} \wedge \varepsilon = \varnothing$
-flags the contradiction immediately.
-This behaviour is intentional: incompatible constraints collapse to the empty
-intersection rather than silently discarding one side.
+When $\post(e)$ does not cover $\pre(e_2)$, the residual is $\varnothing$,
+flagging a violation.
+When it fully covers $\pre(e_2)$, the residual is $\varepsilon$ and the
+combined precondition reduces to $\pre(e)$ (the standard Hoare
+sequencing rule).
 
 \subsection{The Applicative Instance}
 
@@ -718,19 +668,9 @@ compose in the same way, and the future condition is the conjunction of
 the two evaluated futures after subtracting the continuation's
 postcondition from the first computation's future.
 The key difference is that \lstinline{<*>} cannot make $e_x$
-\emph{depend} on the return value of $e_f$---the function inside
-$e_f$ and the argument inside $e_x$ are constructed independently.
-In contrast, \lstinline{>>=} passes $\ret(e)$ directly into $f$,
-enabling the data-dependent future condition exemplified by
-\lstinline{tlsHandshake} and \lstinline{takeMVar}.
-
-\paragraph{When to use \lstinline{<*>} vs \lstinline{>>=}.}
-Use \lstinline{<*>} when the right-hand computation is independent of
-the left-hand return value (e.g.\ two stateless checks composed
-together).
-Use \lstinline{>>=} (or \lstinline{do}-notation) whenever the
-continuation must inspect the return value, as is the case for all
-data-dependent future conditions.
+\emph{depend} on the return value of $e_f$; \lstinline{>>=} passes
+$\ret(e)$ into $f$, enabling the data-dependent future conditions
+exemplified by \lstinline{tlsHandshake} and \lstinline{takeMVar}.
 
 \subsection{Intuition via an Example}
 
@@ -1680,7 +1620,6 @@ Linked list  & read without ownership           & $\mathbf{emp}$ & $\mathtt{Cell
 \label{sec:monad-laws}
 %% =========================================================================
 
-\paragraph{What are the monad laws?}
 Every monad must satisfy three equational laws that together guarantee
 sequential composition behaves predictably:
 \begin{itemize}
@@ -1697,43 +1636,22 @@ sequential composition behaves predictably:
         sequential composition is order-preserving but grouping-independent.
 \end{itemize}
 When these laws hold, programmers can freely refactor monadic chains
---- extracting sub-expressions, fusing steps, or reordering
-\lstinline{do}-blocks --- without changing the observable semantics.
+without changing the observable semantics: extracting sub-expressions,
+fusing steps, or reordering \lstinline{do}-blocks are all valid.
 
-\paragraph{Why verify Pledge?}
-\lstinline{Pledge} extends the standard monad with three extra fields:
-\lstinline{pre}, \lstinline{post}, and \lstinline{future}.
-The bind formula for each field (Equations~\ref{eq:future-bind}
-and~\ref{eq:pre-bind}) is non-trivial, involving subtraction and
-conjunction.
-Without verification, these fields could interact with \lstinline{>>=}
-in ways that violate the laws, making composed specifications sensitive to
-accidental parenthesisation.
-Confirming lawfulness ensures that a programmer who writes
-\lstinline{takeMVar v >>= putMVar} and one who writes the equivalent
-in two steps obtain identical \lstinline{pre}, \lstinline{post}, and
-\lstinline{future} annotations.
-
-\paragraph{What the laws check and the setup.}
+\paragraph{What the laws check.}
 Because \lstinline{future} has type \lstinline{a -> eff}, the laws are
-stated in terms of \lstinline{evalFuture}, defined as
-\lstinline{future e (ret e)}: the future condition evaluated at the
-computation's own return value.
-We write $\widehat{\fut}(e)$ for $\mathit{evalFuture}(e)$ for brevity.
-The laws hold for the triple $(\ret, \post, \widehat{\fut})$ under the
-assumption that \lstinline{Composable} forms a monoid under \lstinline{<>}
-with unit \lstinline{empty}, and that \lstinline{universe} is the unit for
-\lstinline{(/\\)}.
+stated in terms of \lstinline{evalFuture e = future e (ret e)}, written
+$\widehat{\fut}(e)$ for brevity.
+The laws hold for the triple $(\ret, \post, \widehat{\fut})$ assuming
+\lstinline{Composable} forms a monoid under \lstinline{<>} with unit
+\lstinline{empty}, and \lstinline{universe} is the unit for \lstinline{(/\\)}.
 The \lstinline{pre} field satisfies the Hoare-rule property
-(Equation~\ref{eq:pre-bind}) rather than strict monad-law equality, because
-it accumulates \emph{residual} precondition obligations rather than tracking
-a symmetric state; we return to this at the end of the section.
+(Equation~\ref{eq:pre-bind}) rather than strict monad-law equality,
+because it accumulates residual precondition obligations; we return to
+this at the end of the section.
 
 \paragraph{Left identity.} \lstinline{pure x >>= f = f x}.
-
-\lstinline{pure x} contributes no postcondition ($\post = \varepsilon$)
-and no future obligation ($\mathtt{future} = \lambda\,\_.\ \univ$), so
-binding it should leave \lstinline{f x} entirely unchanged.
 
 $\ret$: $\ret(f\,x)$. \checkmark \quad
 $\post$: $\varepsilon \mathbin{<>} \post(f\,x) = \post(f\,x)$. \checkmark
@@ -1751,16 +1669,7 @@ Since $\widehat{\fut}(\mathtt{pure}\;x) = \univ$:
      \;=\; \widehat{\fut}(f\,x). \;\checkmark
 \end{align*}
 
-The key step is $r \setminus \univ = \varepsilon$: subtracting the universal
-obligation discharges everything, leaving the empty residual $\varepsilon$.
-This follows from the base case $\univ \setminus r = \varepsilon$ of
-\lstinline{reSubtraction}.
-
 \paragraph{Right identity.} \lstinline{e >>= pure = e}.
-
-\lstinline{pure(ret e)} has $\post = \varepsilon$ and
-$\widehat{\fut} = \univ$, so it contributes nothing to the composed
-specification, and the result should equal $e$ exactly.
 
 $\ret$: $\ret(e)$. \checkmark \quad
 $\post$: $\post(e) \mathbin{<>} \varepsilon = \post(e)$. \checkmark
@@ -1776,10 +1685,6 @@ Then:
      \;=\; \widehat{\fut}(e) \wedge \univ
      \;=\; \widehat{\fut}(e). \;\checkmark
 \end{align*}
-
-The key step is $\varepsilon \setminus r = r$
-(base case of \lstinline{reSubtraction}: consuming an empty prefix leaves the
-obligation unchanged), and $r \wedge \univ = r$ (unit for $\wedge$).
 
 \paragraph{Associativity.}
 Re-parenthesising \lstinline{(e >>= f) >>= g} as
@@ -1798,30 +1703,14 @@ and applying associativity of $\wedge$, both reduce to the same expression:
   \;\wedge\; \widehat{\fut}(f\,r_1)
   \;\wedge\; \widehat{\fut}(g\,r_2). \;\checkmark
 \]
-Intuitively, successive postconditions peel away layers of the accumulated
-future obligation from the inside out, and the order of peeling is determined
-by the order of events, not by parenthesisation.
 
 \paragraph{Precondition.}
-The \lstinline{pre} field does not satisfy the monad laws as equalities,
-and this is intentional.
-The standard monad laws require that both sides of each equation are
-\emph{identical}; \lstinline{pre} instead satisfies the Hoare-rule property
-(Equation~\eqref{eq:pre-bind}):
-\[
-  \pre(e \mathbin{>\!\!>\!\!=} f)
-  \;=\; \pre(e) \;\wedge\; \bigl(\post(e) \setminus \pre(e_2)\bigr).
-\]
-The residual $\post(e) \setminus \pre(e_2)$ captures exactly which part
-of $e_2$'s precondition $e$'s postcondition has not yet discharged.
-When $\post(e)$ fully covers $\pre(e_2)$, the residual is $\varepsilon$
-and the combined \lstinline{pre} collapses to $\pre(e)$ --- the standard
-Hoare sequencing rule.
-When coverage is absent, the residual is $\varnothing$, immediately
-flagging a precondition violation.
-This asymmetry is a feature: \lstinline{pre} accumulates
-\emph{unmet obligations} forward through the chain, precisely recording
-which precondition remains unsatisfied and why.
+The \lstinline{pre} field satisfies the Hoare-rule property
+(Equation~\eqref{eq:pre-bind}) rather than strict monad-law equality.
+The residual $\post(e) \setminus \pre(e_2)$ captures which part of
+$e_2$'s precondition $e$'s postcondition has not discharged: full
+coverage gives the standard Hoare sequencing rule; absent coverage
+collapses to $\varnothing$, flagging the violation immediately.
 
 %% =========================================================================
 \section{Related Work}
@@ -1922,19 +1811,11 @@ surface as non-trivial residual annotations in \lstinline{pre} or
 effects rather than relying on the type checker to reject programs.
 
 \paragraph{Runtime monitoring.}
-Runtime verification~\cite{leucker2009} checks temporal properties after
-execution by instrumenting or replaying a concrete run.
-Pledge takes a \emph{dynamic-checking} approach: future conditions are
-obligation values propagated through the \lstinline{Pledge} structure,
-and the resulting residuals can be inspected at any point in the program
-(e.g.\ as assertions in \lstinline{main}, as shown in
-Section~\ref{sec:discussion}).
-Crucially, no concrete execution is required to expose a violation; the
-obligation algebra surfaces contradictions as soon as the relevant
-annotations are composed---prior to any effectful run.
-Runtime monitoring instruments an \emph{actual} execution and reports
-violations only after the fact; Pledge propagates and checks obligations
-in the specification layer, independently of any running effects.
+Runtime verification~\cite{leucker2009} checks temporal properties by
+instrumenting a concrete execution.
+Pledge propagates obligations in the specification layer: residuals
+surface as soon as annotations are composed, prior to any effectful run,
+without requiring a concrete execution.
 
 \paragraph{Brzozowski derivatives.}
 Derivatives of regular expressions~\cite{brzozowski1964} have found
@@ -2001,11 +1882,11 @@ In particular, Pledge does not integrate with GHC's asynchronous-exception
 machinery.
 If an async exception fires mid-computation and the continuation never calls
 \lstinline{putMVar}, Pledge's \lstinline{future} condition correctly flags the
-\emph{specification} as carrying an unmet obligation --- but no runtime mechanism
+\emph{specification} as carrying an unmet obligation, but no runtime mechanism
 prevents the violation from occurring.
 Pairing Pledge specifications with runtime enforcement via \lstinline{bracket}
-or \lstinline{mask} --- so that the obligation is both expressed and
-guaranteed --- remains future work.
+or \lstinline{mask} (so that obligations are both expressed and enforced)
+remains future work.
 
 \paragraph{Solver-backed discharge of residual conditions.}
 Residual annotations are currently surfaced as symbolic expressions.
@@ -2036,47 +1917,22 @@ usage.
 
 We have presented \emph{Pledge}, a Haskell library that augments effectful
 computations with \emph{future conditions}: annotations that constrain what
-the remainder of a program must accomplish. Four design decisions underpin
-the approach.
+the remainder of a program must accomplish.
 
-First, the \lstinline{Composable} typeclass abstracts the specification
-algebra into five operations: concatenation, conjunction, subtraction,
-and their respective identity elements. It admits four independent
-instances that all share the same monadic bind formula. This uniformity
-demonstrates that trace-based, arithmetic, quantitative, and
-heap-ownership obligations are not merely analogous, but structurally
-identical at the algebraic level.
+The central insight is that trace-based, arithmetic, quantitative, and
+heap-ownership obligations are structurally identical at the level of a
+five-operation \lstinline{Composable} algebra.
+All four instances ($\RE$, $\GRE$, $\WRE$, $\SL$) share a single monadic
+bind formula, and the diagnostic signal is uniform: a non-trivial residual
+in \lstinline{pre} or \lstinline{future} identifies exactly which obligation
+remains unmet and why.
 
-Second, the $\RE$ instance incorporates complement as a first-class
-constructor, exploiting the single law $\partial_a(\neg r) = \neg(\partial_a r)$
-to support globally assertions and a direct embedding of LTL$_f$,
-without any automaton construction.
-
-Third, the $\GRE$ instance pairs each RE with a Presburger arithmetic
-predicate, so that a single annotation simultaneously enforces a protocol
-ordering and a numeric bound; the \lstinline{normalizePPred} procedure
-eagerly introduces the canonical \lstinline{PFalse} constructor,
-identifying syntactically unsatisfiable constraints before any solver
-call is issued.
-
-Fourth, the $\WRE$ instance generalises Boolean membership to a semiring
-weight, unifying probabilistic future conditions under the probability
-semiring and min-cost scheduling obligations under the tropical semiring
-within a single framework. The $\SL$ instance further demonstrates the
-breadth of the \lstinline{Composable} interface by instantiating
-separating conjunction as sequential composition and magic wand as
-subtraction, with \lstinline{Pure PPred} inside \lstinline{Conj}
-making value-dependent preconditions such as ``balance $\geq$ amount''
-expressible as first-class heap predicates.
-
-The resulting system is lightweight (no language extensions
-beyond standard Haskell type classes), composable via a standard
-\lstinline{Monad} instance, and diagnostically precise across all four
-dimensions: a residual \lstinline{future} identifies unmet trace
-obligations; a \lstinline{PFalse} in \lstinline{pre} flags an arithmetic
-violation; a semiring weight of \lstinline{szero} signals an unfulfilled
-quantitative obligation; and a leaked \lstinline{Cell} in a residual
-\lstinline{post} exposes a heap-ownership error.
+Pledge requires no language extensions beyond standard type classes,
+composes via a standard \lstinline{Monad} instance, and integrates
+transparently with the \lstinline{mtl} stack.
+Immediate directions for future work include parallel composition (shuffle
+product in the RE instance; frame rule in the SL instance), solver-backed
+residual discharge, and integration with algebraic effect handlers.
 
 %% =========================================================================
 \bibliographystyle{ACM-Reference-Format}

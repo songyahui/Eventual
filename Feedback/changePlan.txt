@@ -1,0 +1,49 @@
+Looking at this, the paper got two "weak accept" reviews (A, C) and one "reject" (B), and the PC's final decision comment sides with the concerns in B — so that's effectively the review that tipped it into rejection, though the meta-comment pulls specific points from all three. Here's a revision plan organized by priority.
+
+## 1. Fix the framing in Section 1 (highest priority — this is why reviewer B got lost)
+
+Reviewer B says they couldn't follow what problem you're solving or what approach you take, despite being an expert in the area. Reviewer A independently flags that the pearl format itself is strained. This is a "the reader is lost from page 1" problem, not a technical one.
+
+- **Open with a concrete example**, not the abstract framing (both B and the PC comment ask for this).
+- Explicitly state early that this is a **runtime/specification tool**, not a verification or model-checking approach, and say why that choice makes sense here (B's point: temporal logic has been done in provers/model-checkers/types — say why you're doing it differently).
+- **Explicitly cite and differentiate from Song et al.'s two papers** ("Specifying and Verifying Future Conditions" and "ProveNFix") in Section 1. The PC flagged this as a required change, not optional — reviewers clearly think the paper is close enough to prior work that burying the connection reads as an omission.
+
+## 2. Address the `eff`/effects question — this is the paper's namesake and it's unanswered
+
+This is raised independently by A (Q2), B, and the PC comment, which means it's the single most damaging gap:
+
+- Explain concretely why `future :: a -> eff` is a function when every example applies it only to `ret`. If the function-ness exists to handle effectful return values (e.g., a file descriptor from an IO action), say so explicitly — and then explain why `post` doesn't need the same treatment. The PC comment poses this as a direct, answerable question; answer it in the paper.
+- If `>>=` never actually applies `post`/`future` to anything other than `ret`, consider whether the function type is doing real work or is vestigial generality. If it's load-bearing for a case you haven't shown, add that example. If it's not, simplify the type and say why.
+- Since the title is "Effectful Computations with Future Conditions," add a real discussion of how the pure `Pledge` specification composes with actual `IO`/`StateT`/`ReaderT` computations (A's Q2). Right now all constructors (`takeMVar`, `tlsHandshake`, `malloc`) are pure — show the bridge to real effectful code, even if only for one instance.
+
+## 3. Fix or scope down the monad-law story around `pre`
+
+All three reviews converge here (A Q3, B's minor comments, C's "weaknesses"):
+
+- Move the limitation — that `pre` breaks left-identity and is excluded from the laws — **to the beginning of the section**, not revealed midway. C explicitly says this should be stated plainly up front; the PC comment lists it as a required fix.
+- Directly justify *why* excluding `pre` from the equality used to check the laws is the right move, rather than just doing it (A's Q3). Consider presenting `pre` explicitly as a separate "contract-checking" layer alongside the lawful `(ret, post, future)` monad, as C suggests — this reframing might resolve the objection rather than just disclosing it earlier.
+- Answer A's Q4 directly in the text: show the derivation of `post(f x) \ ¬∅ = ε` from your Section 4 subtraction definition, since a reviewer at "knowledgeable" level couldn't reconstruct it.
+
+## 4. Justify soundness of subtraction for GRE and SL — currently just asserted
+
+B says they have "vague intuition" but the paper doesn't argue it; the PC comment made this a named requirement:
+
+- Add a soundness theorem or at least a soundness argument sketch: *residual normalizes to success ⇒ every terminating execution satisfies the obligation.* Even a proof for the RE instance alone (where you have a clean derivative semantics) plus a discussion of what breaks for GRE/SL would satisfy this much better than nothing.
+- Explain the magic-wand subtraction with an actual worked example that includes a nontrivial `future`, and state whether it's literally the adjoint `P * Q ⊢ R ↔ P ⊢ Q −∗ R` (B asks this directly — just answer it).
+
+## 5. Replace or supplement the trivial-`future` examples
+
+B and the PC comment both single this out: Sections 5.4, 8.5, 8.7–8.9 all use `universe`/`Top` as the future condition, which undercuts the entire thesis that pre/post isn't enough. Since this is your central selling point, at least one example per non-RE instance needs a genuinely nontrivial future obligation, or you should be upfront that GRE/WRE/SL are demonstrations of generality rather than practical instances (which is closer to what A's Q1 suspects is really going on — consider just saying this explicitly rather than letting reviewers guess).
+
+## 6. Smaller but easy fixes (all explicitly listed, cheap to fix, currently making the paper look unpolished)
+
+- Fix the `free 0 1` example in 8.6 that B finds semantically backwards (a program that frees an address is "bad" while one that frees nothing is "good" — either fix the example or explain the intuition).
+- Consistent `\` vs `\\` notation for subtraction.
+- Define `PExpr`, `ValAt`, "annotation-inspection time," and clarify `firstWith`/`firstWithin`.
+- Show `And` is derived or fix the prose claiming it's derived when the code doesn't.
+- Add missing related work: Dijkstra monads and other "specifications as monads" work (B's point) — this is a credibility gap for an expert reviewer.
+- Tighten length: A and C both suggest GRE or WRE could move to an appendix; consider trimming to keep it closer to pearl length if you resubmit as a pearl, or lean into full-paper length as A suggests.
+
+## Strategic call to make before you start rewriting
+
+A and C both hint that the paper might work better as either (a) a full paper rather than a pearl (A's explicit recommendation), or (b) a tighter pearl with only RE + SL and the rest in an appendix (C's question). Given B's reject was largely about **clarity and unanswered "why"** questions rather than the core idea being wrong — both A and C call the core idea "elegant" — I'd prioritize fixes #1–#3 above format/length, since a clearer version of this paper is likely to flip B's assessment on resubmission regardless of venue format.

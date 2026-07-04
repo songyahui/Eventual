@@ -42,8 +42,8 @@ infixl 5 \\
 data Pledge eff a = Pledge
     { ret    :: a
     , pre    :: eff
-    , post   :: eff
-    , future :: a -> eff   -- indexed by the return value
+    , post   :: a -> eff
+    , future :: a -> eff
     }
 
 -- Convenience: evaluate the future condition at the computation's own
@@ -55,24 +55,29 @@ instance Functor (Pledge eff) where
     -- fmap changes the return type from a to b, so future must become
     -- b -> eff.  We evaluate it at the known original return value and
     -- ignore the new b argument (the obligation is already determined).
-    fmap f e = e { ret = f (ret e), future = \_ -> future e (ret e) }
+    fmap f e = Pledge
+        { ret    = f (ret e)
+        , pre    = pre e
+        , post   = \_ -> post e (ret e)
+        , future = \_ -> future e (ret e)
+        }
 
 instance Composable eff => Applicative (Pledge eff) where
     pure x = Pledge
         { ret    = x
         , pre    = universe
-        , post   = empty
+        , post   = const empty
         , future = const universe
         }
     ef <*> ex = Pledge
         { ret    = ret ef (ret ex)
         -- Traditional precondition: pre of ef, plus whatever of pre ex
         -- is not already discharged by post ef.
-        , pre    = pre ef /\ (post ef \\ pre ex)
-        , post   = post ef <> post ex
+        , pre    = pre ef /\ (post ef (ret ef) \\ pre ex)
+        , post   = \_ -> post ef (ret ef) <> post ex (ret ex)
         -- future ef and future ex are each applied to their own return
         -- values before the obligation is propagated.
-        , future = \_ -> (post ex \\ future ef (ret ef)) /\ future ex (ret ex)
+        , future = \_ -> (post ex (ret ex) \\ future ef (ret ef)) /\ future ex (ret ex)
         }
 
 instance Composable eff => Monad (Pledge eff) where
@@ -82,8 +87,8 @@ instance Composable eff => Monad (Pledge eff) where
         -- Traditional precondition: pre of e, plus the residual of pre fe
         -- not covered by post e.  Mirrors the Hoare rule:
         --   {P} e {Q},  Q ⊢ P'  ⊢  {P} e >>= f {R}
-        , pre    = pre e /\ (post e \\ pre fe)
-        , post   = post e <> post fe
+        , pre    = pre e /\ (post e (ret e) \\ pre fe)
+        , post   = \_ -> post e (ret e) <> post fe (ret fe)
         -- future e is evaluated at e's return value; future fe at fe's.
-        , future = \_ -> (post fe \\ future e (ret e)) /\ future fe (ret fe)
+        , future = \_ -> (post fe (ret fe) \\ future e (ret e)) /\ future fe (ret fe)
         }

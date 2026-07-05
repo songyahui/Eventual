@@ -2,15 +2,13 @@
 module Pledge.Core
     ( -- * Composable class
       Composable(..)
-    , (<>)
+    , (·)
     , (/\)
     , (\\)
       -- * Pledge monad
     , Pledge(..)
     , evalFuture
     ) where
-
-import Prelude hiding ((<>))
 
 class Composable a where
     concatenation :: a -> a -> a
@@ -19,9 +17,9 @@ class Composable a where
     universe      :: a
     subtraction   :: a -> a -> a
 
-infixl 6 <>
-(<>) :: Composable a => a -> a -> a
-(<>) = concatenation
+infixl 6 ·
+(·) :: Composable a => a -> a -> a
+(·) = concatenation
 
 infixl 7 /\
 (/\) :: Composable a => a -> a -> a
@@ -29,7 +27,7 @@ infixl 7 /\
 
 infixl 5 \\
 (\\) :: Composable a => a -> a -> a
-(\\) = subtraction
+a \\ b = subtraction b a
 
 -- ── Pledge monad ─────────────────────────────────────────────────────────────
 
@@ -58,8 +56,8 @@ instance Functor (Pledge eff) where
     fmap f e = Pledge
         { ret    = f (ret e)
         , pre    = pre e
-        , post   = \_ -> post e (ret e)
-        , future = \_ -> future e (ret e)
+        , post   = const $ post e (ret e)
+        , future = const $ future e (ret e)
         }
 
 instance Composable eff => Applicative (Pledge eff) where
@@ -69,26 +67,165 @@ instance Composable eff => Applicative (Pledge eff) where
         , post   = const empty
         , future = const universe
         }
-    ef <*> ex = Pledge
-        { ret    = ret ef (ret ex)
-        -- Traditional precondition: pre of ef, plus whatever of pre ex
-        -- is not already discharged by post ef.
-        , pre    = pre ef /\ (post ef (ret ef) \\ pre ex)
-        , post   = \_ -> post ef (ret ef) <> post ex (ret ex)
-        -- future ef and future ex are each applied to their own return
-        -- values before the obligation is propagated.
-        , future = \_ -> (post ex (ret ex) \\ future ef (ret ef)) /\ future ex (ret ex)
+    -- When evaluating f <*> x, the effects of f are executed first, 
+    -- followed by the effects of x, processing left-to-right.
+    f <*> x =
+        let postX = post x $ ret x
+            postF = post f $ ret f
+            futureX = future x $ ret x
+            futureF = future f $ ret f
+        in
+        Pledge
+        { ret    = ret f $ ret x
+        -- Traditional precondition: pre of f, plus the residual of pre x
+        -- not covered by post f.  Mirrors the sequential Hoare rule:
+        --   {P} f {Q},  {P'} x {R}  ⊢  {P /\ (P' \\ Q)} f <*> x {R}
+        , pre    = pre f /\ (pre x \\ postF)
+        , post   = const $ postF · postX
+        -- Future obligation: what f still requires in the future after post x
+        -- covers some of it, conjoined with x's own future obligation.
+        --   future(f <*> x) = (futureF \\ postX) /\ futureX
+        , future = const $ (futureF \\ postX) /\ futureX
         }
 
 instance Composable eff => Monad (Pledge eff) where
     return = pure
-    e >>= f = let fe = f (ret e) in Pledge
+    e >>= f =
+        let fe = f (ret e)
+            postE = post e $ ret e
+            postFE = post fe $ ret fe
+            futureE = future e $ ret e
+            futureFE = future fe $ ret fe
+        in 
+        Pledge
         { ret    = ret fe
         -- Traditional precondition: pre of e, plus the residual of pre fe
-        -- not covered by post e.  Mirrors the Hoare rule:
-        --   {P} e {Q},  Q ⊢ P'  ⊢  {P} e >>= f {R}
-        , pre    = pre e /\ (post e (ret e) \\ pre fe)
-        , post   = \_ -> post e (ret e) <> post fe (ret fe)
-        -- future e is evaluated at e's return value; future fe at fe's.
-        , future = \_ -> (post fe (ret fe) \\ future e (ret e)) /\ future fe (ret fe)
+        -- not covered by post e.  Mirrors the sequential Hoare rule:
+        --   {P} e {Q},  {P'} fe {R}  ⊢  {P /\ (P' \\ Q)} e >>= f {R}
+        , pre    = pre e /\ (pre fe \\ postE)
+        , post   = const $ postE · postFE
+        -- Future obligation: what e still requires in the future after post fe
+        -- covers some of it, conjoined with fe's own future obligation.
+        --   future(e >>= f) = (futureE \\ postFE) /\ futureFE
+        , future = const $ (futureE \\ postFE) /\ futureFE
         }
+
+
+-- To be a lawful Monad, Pledge must satisfy the three monad laws.  The following
+-- table shows the pre, post, and future obligations of both sides of each law,
+-- and the conditions under which they are equal.  The laws of the Composable
+-- class are sufficient to guarantee equality of the ret and post fields, but
+-- additional laws are required for the pre and future fields.  These are listed
+-- below each table.
+-- Law 1: Left identity — return a >>= f = f a
+--
+--   return a has pre = universe, post = const empty, future = const universe. So:
+--
+--   ┌────────┬──────────────────────────┬────────────┬───────────────────────┐
+--   │ Field  │      return a >>= f      │    f a     │       Equal if…       │
+--   ├────────┼──────────────────────────┼────────────┼───────────────────────┤
+--   │ ret    │ ret (f a)                │ ret (f a)  │ ✓ always              │
+--   ├────────┼──────────────────────────┼────────────┼───────────────────────┤
+--   │ pre    │ universe /\ (pre (f a)   │ pre (f a)  │ x \\ empty = x and    │
+--   │        │ \\ empty)                │            │ universe /\ x = x     │
+--   ├────────┼──────────────────────────┼────────────┼───────────────────────┤
+--   │ post   │ const (empty · postFA)   │ const      │ empty is left         │
+--   │        │                          │ postFA     │ identity for ·        │
+--   ├────────┼──────────────────────────┼────────────┼───────────────────────┤
+--   │ future │ const ((universe \\      │ const      │ universe \\ x =       │
+--   │        │ postFA) /\ futureFA)     │ futureFA   │ universe              │
+--   └────────┴──────────────────────────┴────────────┴───────────────────────┘
+--
+-- So we need:
+--     - x \\ empty = x
+--     - universe /\ x = x
+--     - empty · x = x
+--     - universe \\ x = universe
+--
+-- Law 2: Right identity — m >>= return = m
+--
+--   return (ret m) has pre = universe, post = const empty, future = const
+--   universe. So:
+--
+--   ┌────────┬────────────────────────┬───────────┬───────────────────────────┐
+--   │ Field  │      m >>= return      │     m     │         Equal if…         │
+--   ├────────┼────────────────────────┼───────────┼───────────────────────────┤
+--   │ ret    │ ret m                  │ ret m     │ ✓ always                  │
+--   ├────────┼────────────────────────┼───────────┼───────────────────────────┤
+--   │ pre    │ pre m /\ (universe \\  │ pre m     │ universe \\ x = universe  │
+--   │        │ postM)                 │           │ (same issue as above)     │
+--   ├────────┼────────────────────────┼───────────┼───────────────────────────┤
+--   │ post   │ const (postM · empty)  │ const     │ empty is right identity   │
+--   │        │                        │ postM     │ for ·                     │
+--   ├────────┼────────────────────────┼───────────┼───────────────────────────┤
+--   │ future │ const ((futureM \\     │ const     │ x \\ empty = x and x /\   │
+--   │        │ empty) /\ universe)    │ futureM   │ universe = x              │
+--   └────────┴────────────────────────┴───────────┴───────────────────────────┘
+--
+-- So we need:
+--     - x \\ empty = x
+--     - universe /\ x = x
+--     - x · empty = x
+--     - universe \\ x = universe
+--
+-- Law 3: Associativity — (m >>= f) >>= g = m >>= (\x -> f x >>= g)
+--
+--   Working out both sides (with fm = f (ret m), gm
+--   = g (ret fm)):
+--
+--   post (both sides):
+--   - LHS: (postM · postFM) · postGM
+--   - RHS: postM · (postFM · postGM)
+--
+--   So we need · to be associative.
+--
+--   pre (both sides):
+--   - LHS: (pre m /\ (pre fm \\ postM)) /\ (pre gm \\ (postM · postFM))
+--   - RHS: pre m /\ ((pre fm /\ (pre gm \\ postFM)) \\ postM)
+--
+--   For equality, you need (pre gm \\ (postM · postFM)) = (pre gm \\ postFM) \\
+--   postM, i.e.:
+--
+--   x \\ (a · b)  =  (x \\ b) \\ a
+--
+--   This is a non-trivial distributivity law — subtraction must distribute over
+--   concatenation in this specific way. It holds in trace-based models
+--   (prefix-closed residuals) but is not guaranteed by the Composable class.
+--
+--   future (both sides):
+--   - LHS: (((futureM \\ postFM) /\ futureFM) \\ postGM) /\ futureGM
+--   - RHS: (futureM \\ ((futureFM \\ postGM) /\ futureGM)) /\ (futureFM \\ postGM)
+--    /\ futureGM
+--
+--   We need laws like:
+--
+--   (a /\ b) \\ c = (a \\ c) /\ (b \\ c)  (subtraction distributes over
+--   conjunction)
+--   a \\ (b /\ c) = (a \\ b) \/ (a \\ c)  (or some variant)
+
+-- So in summary, the following laws are required for Pledge to be a lawful Monad:
+-- | Algebraic structure underlying pledge specifications.
+--
+-- Operators: '·' (concatenation), '/\' (conjunction), '\\' (subtraction),
+-- with constants 'empty', 'universe'.
+--
+-- Laws for '·':
+--
+-- * Associativity:     @(a '·' b) '·' c = a '·' (b '·' c)@
+-- * Left  identity:    @'empty' '·' a = a@
+-- * Right identity:    @a '·' 'empty' = a@
+--
+-- Laws for '/\':
+--
+-- * Associativity:     @(a '/\' b) '/\' c = a '/\' (b '/\' c)@
+-- * Commutativity:     @a '/\' b = b '/\' a@
+-- * Identity:          @'universe' '/\' a = a@
+--
+-- Laws for '\\':
+--
+-- * Right zero:        @a '\\' 'empty' = a@
+-- * Universe residual: @'universe' '\\' a = 'universe'@
+-- * Sequential dist.:  @x '\\' (a '·' b) = (x '\\' b) '\\' a@
+-- * Conj. dist.:       @(a '/\' b) '\\' c = (a '\\' c) '/\' (b '\\' c)@
+--
+-- These laws are required for 'Pledge' to be a lawful 'Monad'.

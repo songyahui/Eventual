@@ -9,20 +9,20 @@ plus :: Int -> Int -> Pledge RE Int
 plus a b =
     let res = a + b in
     Pledge
-    { ret    = return res
-    , pre    = return universe
-    , post   = return $ Single (Atom "plus" (List [Num a, Num b]))
-    , future = return $ finally (Atom "div" (List [Num a, Num b]))
+    { ret    = res
+    , pre    = universe
+    , post   = Single (Atom "plus" (List [Num a, Num b]))
+    , future = finally (Atom "div" (List [Num a, Num b]))
     }
 
 div' :: Int -> Int -> Pledge RE Int
 div' a b =
     let res = a `Prelude.div` b in
     Pledge
-    { ret    = return res
-    , pre    = return $ previously (Atom "plus" (List [Num a, Num b]))
-    , post   = return $ Single (Atom "div" (List [Num a, Num b]))
-    , future = return universe
+    { ret    = res
+    , pre    = previously (Atom "plus" (List [Num a, Num b]))
+    , post   = Single (Atom "div" (List [Num a, Num b]))
+    , future = universe
     }
 
 main :: IO ()

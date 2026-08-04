@@ -37,10 +37,10 @@ a \\ b = subtraction b a
 -- so that the exact address returned drives the obligation.
 
 data Pledge eff a = Pledge
-    { ret    :: IO a
-    , pre    :: IO eff
-    , post   :: IO eff
-    , future :: IO eff
+    { ret    :: a
+    , pre    :: eff
+    , post   :: eff
+    , future :: eff
     }
 
 instance Functor (Pledge eff) where
@@ -48,7 +48,7 @@ instance Functor (Pledge eff) where
     -- b -> eff.  We evaluate it at the known original return value and
     -- ignore the new b argument (the obligation is already determined).
     fmap f e = Pledge
-        { ret    = f <$> ret e
+        { ret    = f $ ret e
         , pre    = pre e
         , post   = post e
         , future = future e
@@ -56,69 +56,40 @@ instance Functor (Pledge eff) where
 
 instance Composable eff => Applicative (Pledge eff) where
     pure x = Pledge
-        { ret    = pure x
-        , pre    = pure universe
-        , post   = pure empty
-        , future = pure universe
+        { ret    = x
+        , pre    = universe
+        , post   = empty
+        , future = universe
         }
     f <*> x = Pledge
-        { ret    = do
-            f' <- ret f
-            x' <- ret x
-            return $ f' x'
+        { ret    = ret f $ ret x
         -- Traditional precondition: pre of f, plus the residual of pre x
         -- not covered by post f.  Mirrors the sequential Hoare rule:
         --   {P} f {Q},  {P'} x {R}  ⊢  {P /\ (P' \\ Q)} f <*> x {R}
-        , pre    = do
-            pref <- pre f
-            prex <- pre x
-            x' <- ret x
-            postf <- future f
-            return $ pref /\ (prex \\ postf)
-        , post   = do
-            postx <- post x
-            postf <- post f
-            return $ postf · postx
+        , pre    = pre f /\ (pre x \\ post f)
+        , post   = post f · post x
         -- Future obligation: what f still requires in the future after post x
         -- covers some of it, conjoined with x's own future obligation.
         --   future(f <*> x) = (futureF \\ postX) /\ futureX
-        , future = do
-            futureF <- future f
-            futureX <- future x
-            postX <- post x
-            return $ (futureF \\ postX) /\ futureX
+        , future = (future f \\ post x) /\ future x
         }
+
 
 instance Composable eff => Monad (Pledge eff) where
     return = pure
     e >>= f =
+        let fe = f $ ret e in
         Pledge
-        { ret    = do
-            x <- ret e
-            ret $ f x
+        { ret    = ret fe
         -- Traditional precondition: pre of e, plus the residual of pre fe
         -- not covered by post e.  Mirrors the sequential Hoare rule:
         --   {P} e {Q},  {P'} fe {R}  ⊢  {P /\ (P' \\ Q)} e >>= f {R}
-        , pre    = do
-            x <- ret e
-            pref <- pre $ f x
-            pree <- pre e
-            postE <- post e
-            return $ pree /\ (pref \\ postE)
-        , post   = do
-            x <- ret e
-            postE <- post e
-            postFE <- post $ f x
-            return $ postE · postFE
+        , pre    = pre e /\ (pre fe \\ post e)
+        , post   = post e · post fe
         -- Future obligation: what e still requires in the future after post fe
         -- covers some of it, conjoined with fe's own future obligation.
         --   future(e >>= f) = (futureE \\ postFE) /\ futureFE
-        , future = do
-            x <- ret e
-            futureE <- future e
-            postFE <- post $ f x
-            futureFE <- future $ f x
-            return $ (futureE \\ postFE) /\ futureFE
+        , future = (future e \\ post fe) /\ future fe
         }
 
 -- To be a lawful Monad, Pledge must satisfy the three monad laws.  The following

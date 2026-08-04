@@ -21,9 +21,25 @@ module Pledge.RE
     , LTL(..)
     , toSingleStep
     , ltlToRe
+      -- * Tests
+    , langEq
+    , prop_concat_assoc
+    , prop_concat_left_id
+    , prop_concat_right_id
+    , prop_conj_assoc
+    , prop_conj_comm
+    , prop_conj_id
+    , prop_sub_right_zero
+    , prop_sub_universe
+    , prop_sub_seq_dist
+    , prop_sub_conj_dist
+    , runRELawTests
+    , printOfPledgeRE
     ) where
 
 import Prelude hiding ((<>))
+import Control.Monad (replicateM)
+import Test.QuickCheck
 import Data.List (union, nub)
 import Pledge.Core
 import Pledge.Presburger
@@ -321,3 +337,128 @@ normalize r = case r of
   where
     isTop (Not Bot) = True
     isTop _         = False
+
+-- ── Property-based tests ───────────────────────────────────────────────────────
+
+-- Fixed small alphabet used for language-equality testing and RE generation.
+testAlph :: [Event]
+testAlph = [Atom "a" (List []), Atom "b" (List []), Atom "c" (List [])]
+
+-- Language equality: check both REs on all words over testAlph up to length 3.
+-- RE derives structural Eq, so (Seq (Seq a b) c) /= (Seq a (Seq b c))
+-- even though they accept the same language; langEq gives the correct notion.
+langEq :: RE -> RE -> Bool
+langEq r1 r2 = all (\w -> run r1 w == run r2 w) testWords
+  where
+    testWords    = concatMap (`replicateM` testAlph) [0 .. 3]
+    run r []     = nullable r
+    run r (e:es) = run (normalize (derivative e r)) es
+
+instance Arbitrary RE where
+    arbitrary = sized genRE
+      where
+        genRE 0 = oneof [pure Bot, pure Epsilon, pure top, Single <$> elements testAlph]
+        genRE n = oneof
+            [ pure Bot
+            , pure Epsilon
+            , pure top
+            , Single <$> elements testAlph
+            , Seq  <$> genRE h <*> genRE h
+            , Or   <$> genRE h <*> genRE h
+            , And  <$> genRE h <*> genRE h
+            , Star <$> genRE (n - 1)
+            , Not  <$> genRE (n - 1)
+            ]
+          where h = n `div` 2
+    shrink Bot         = []
+    shrink Epsilon     = [Bot]
+    shrink (Single _)  = [Bot, Epsilon]
+    shrink (Not r)     = r : map Not  (shrink r)
+    shrink (Star r)    = [Epsilon, r] ++ map Star (shrink r)
+    shrink (Seq r1 r2) = [r1, r2] ++ [Seq r1' r2  | r1' <- shrink r1]
+                                   ++ [Seq r1  r2' | r2' <- shrink r2]
+    shrink (Or  r1 r2) = [r1, r2] ++ [Or  r1' r2  | r1' <- shrink r1]
+                                   ++ [Or  r1  r2' | r2' <- shrink r2]
+    shrink (And r1 r2) = [r1, r2] ++ [And r1' r2  | r1' <- shrink r1]
+                                   ++ [And r1  r2' | r2' <- shrink r2]
+
+-- (·) associativity:  (x · y) · z = x · (y · z)
+prop_concat_assoc :: RE -> RE -> RE -> Property
+prop_concat_assoc x y z =
+    counterexample
+        (  "LHS: " ++ show ((x · y) · z)
+        ++ "\nRHS: " ++ show (x · (y · z))
+        )
+        (langEq ((x · y) · z) (x · (y · z)))
+
+-- (·) left identity:  empty · x = x
+prop_concat_left_id :: RE -> Bool
+prop_concat_left_id x = langEq (empty · x) x
+
+-- (·) right identity: x · empty = x
+prop_concat_right_id :: RE -> Bool
+prop_concat_right_id x = langEq (x · empty) x
+
+-- (/\) associativity: (x /\ y) /\ z = x /\ (y /\ z)
+prop_conj_assoc :: RE -> RE -> RE -> Bool
+prop_conj_assoc x y z = langEq ((x /\ y) /\ z) (x /\ (y /\ z))
+
+-- (/\) commutativity: x /\ y = y /\ x
+prop_conj_comm :: RE -> RE -> Bool
+prop_conj_comm x y = langEq (x /\ y) (y /\ x)
+
+-- (/\) identity:      universe /\ x = x
+prop_conj_id :: RE -> Bool
+prop_conj_id x = langEq (universe /\ x) x
+
+-- (\\) right zero:        x \\ empty = x
+prop_sub_right_zero :: RE -> Bool
+prop_sub_right_zero x = langEq (x \\ empty) x
+
+-- (\\) universe residual: universe \\ x = universe
+prop_sub_universe :: RE -> Property
+prop_sub_universe x =
+    let u :: RE = universe
+    in
+    counterexample
+        (  "x:   " ++ show x
+        ++ "\nLHS: " ++ show (u \\ x)
+        ++ "\nRHS: " ++ show u
+        )
+        (langEq (u \\ x) u)
+
+-- (\\) sequential dist.:  x \\ (a · b) = (x \\ b) \\ a
+prop_sub_seq_dist :: RE -> RE -> RE -> Bool
+prop_sub_seq_dist x a b = langEq (x \\ (a · b)) ((x \\ b) \\ a)
+
+-- (\\) conjunction dist.: (a /\ b) \\ c = (a \\ c) /\ (b \\ c)
+prop_sub_conj_dist :: RE -> RE -> RE -> Bool
+prop_sub_conj_dist a b c = langEq ((a /\ b) \\ c) ((a \\ c) /\ (b \\ c))
+
+
+runRELawTests :: IO ()
+runRELawTests = do
+    putStrLn "\n── RE Composable law tests (QuickCheck) ─────────────────────"
+    putStrLn "-- (·) associativity"        >> quickCheck prop_concat_assoc
+    putStrLn "-- (·) left identity"        >> quickCheck prop_concat_left_id
+    putStrLn "-- (·) right identity"       >> quickCheck prop_concat_right_id
+    putStrLn "-- (/\\) associativity"      >> quickCheck prop_conj_assoc
+    putStrLn "-- (/\\) commutativity"      >> quickCheck prop_conj_comm
+    putStrLn "-- (/\\) identity"           >> quickCheck prop_conj_id
+    putStrLn "-- (\\\\) right zero"        >> quickCheck prop_sub_right_zero
+    putStrLn "-- (\\\\) universe residual" >> quickCheck prop_sub_universe
+    putStrLn "-- (\\\\) sequential dist."  >> quickCheck prop_sub_seq_dist
+    putStrLn "-- (\\\\) conjunction dist." >> quickCheck prop_sub_conj_dist
+
+printOfPledgeRE :: forall a. (Show a) => String -> Pledge RE a -> IO a
+printOfPledgeRE name prog = do
+    res <- ret prog
+    preC <- pre prog
+    postC <- post prog
+    futrueC <- future prog
+    putStrLn $ "=== " ++ name ++ " ==="
+    putStrLn $ "Pre:    " ++ show (normalize preC)
+    putStrLn $ "Post:   " ++ show (normalize postC)
+    putStrLn $ "Ret:    " ++ show res
+    putStrLn $ "Future: " ++ show (normalize futrueC)
+    return res

@@ -2,38 +2,43 @@
 module Examples.RE.Memory where
 import Prelude hiding ((<>))
 import Pledge
+import System.Random
 
 -- free requires that malloc was the immediately preceding post-event.
 -- For interleaved mallocs use `pre = universe` and rely on `future` instead.
 
-malloc :: Addr -> Pledge RE Addr
-malloc addr = Pledge
-    { ret    = addr
-    , pre    = universe
-    , post   = Single (Atom "malloc" (List [Num addr]))
-    , future = \a -> finally (Atom "free" (List [Num a]))
-    }
+malloc :: IO (Pledge RE Addr)
+malloc = do
+    let randomNum :: IO Int = randomRIO (1, 100)
+    addr <- randomNum
+    return $ Pledge
+        { ret    = return addr
+        , pre    = return universe
+        , post   = return $ Single (Atom "malloc" (List [Num addr]))
+        , future = return $ finally (Atom "free" (List [Num addr]))
+        }
 
 free :: Addr -> Pledge RE ()
 free addr = Pledge
-    { ret    = ()
-    , pre    = previously (Atom "malloc" (List [Num addr]))
-    , post   = Single (Atom "free" (List [Num addr]))
+    { ret    = return ()
+    , pre    = return $ previously (Atom "malloc" (List [Num addr]))
+    , post   = return $ Single (Atom "free" (List [Num addr]))
     -- noUntil free malloc: free(addr) must not occur again until malloc(addr)
     -- happens first.  This prevents double-free while allowing re-allocation:
     --   free → free          is forbidden  (double-free, no malloc in between)
     --   free → malloc → free is allowed    (re-allocation is valid)
-    , future = \_ -> noUntil (Atom "free" (List [Num addr]))
+    , future = return $ noUntil (Atom "free" (List [Num addr]))
                                (Atom "malloc" (List [Num addr]))
     }
 
 -- Good: malloc uses the returned address to parameterise the free obligation.
 -- Demonstrates data-dependent future: future = \a -> finally(free(a)).
-mallocFreeByReturnedAddr :: Addr -> Pledge RE ()
-mallocFreeByReturnedAddr n = do
-    addr <- malloc n
-    free addr
+mallocFreeByReturnedAddr :: IO (Pledge RE ())
+mallocFreeByReturnedAddr = do
+    paddr :: Pledge RE Addr <- malloc
+    return $ paddr >>= free
 
+{-
 -- Good: two sequential malloc/free pairs — each obligation is discharged in turn.
 mallocFreeSequential :: Pledge RE ()
 mallocFreeSequential = do
@@ -129,28 +134,24 @@ allocFreeReturnAddr = do
     free a
     return a
 
-printResult :: forall a. (Show a) => String -> Pledge RE a -> IO a
-printResult name prog = do
-    putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Pre:    " ++ show (normalize (pre prog))
-    putStrLn $ "Post:   " ++ show (normalize (post prog))
-    putStrLn $ "Ret:    " ++ show (ret prog)
-    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
-    return (ret prog)
+-}
 
 main :: IO ()
 main = do
-    printResult "mallocFreeByReturnedAddr" (mallocFreeByReturnedAddr 1)
-    printResult "mallocFreeSequential"     mallocFreeSequential
-    printResult "loopAllFreed 3"           (loopAllFreed 3)
-    printResult "missingFree"              missingFree
-    printResult "freeWithoutMalloc"        freeWithoutMalloc
-    printResult "wrongAddrFree"            wrongAddrFree
-    printResult "doubleFreeImmediate"      doubleFreeImmediate
-    printResult "doubleFreeWithWork"       doubleFreeWithWork
-    printResult "leakAndDoubleFree"        leakAndDoubleFree
-    printResult "mallocFreeReallocFree"    mallocFreeReallocFree
-    printResult "allocReturnAddr"          allocReturnAddr
-    printResult "allocTwoReturnPair"       allocTwoReturnPair
-    printResult "allocFreeReturnAddr"      allocFreeReturnAddr
+    prog1 <- mallocFreeByReturnedAddr
+    printOfPledgeRE "mallocFreeByReturnedAddr" prog1
+    {-
+    printOfPledgeRE "mallocFreeSequential"     mallocFreeSequential
+    printOfPledgeRE "loopAllFreed 3"           (loopAllFreed 3)
+    printOfPledgeRE "missingFree"              missingFree
+    printOfPledgeRE "freeWithoutMalloc"        freeWithoutMalloc
+    printOfPledgeRE "wrongAddrFree"            wrongAddrFree
+    printOfPledgeRE "doubleFreeImmediate"      doubleFreeImmediate
+    printOfPledgeRE "doubleFreeWithWork"       doubleFreeWithWork
+    printOfPledgeRE "leakAndDoubleFree"        leakAndDoubleFree
+    printOfPledgeRE "mallocFreeReallocFree"    mallocFreeReallocFree
+    printOfPledgeRE "allocReturnAddr"          allocReturnAddr
+    printOfPledgeRE "allocTwoReturnPair"       allocTwoReturnPair
+    printOfPledgeRE "allocFreeReturnAddr"      allocFreeReturnAddr
+    -}
     return ()

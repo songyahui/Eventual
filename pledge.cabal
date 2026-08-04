@@ -12,6 +12,8 @@ executable pledge-main
     , containers
     , effectful
     , effectful-core
+    , QuickCheck
+    , sbv
   other-modules:
       Pledge
       Examples.UnitTest

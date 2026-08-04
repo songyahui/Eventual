@@ -2,12 +2,22 @@
 module Examples.RE.FileHandle where
 import Prelude hiding ((<>))
 import Pledge
+import qualified System.IO as IO
+
+
+openFilePledge :: FilePath -> IO.IOMode -> IO (Pledge RE IO.Handle)
+openFilePledge fn mode = Pledge
+    { ret    = IO.openFile fn mode
+    , pre    = universe
+    , post   = \h -> Single (Atom "open" (List [Handler h]))
+    , future = \h -> finally (Atom "close" (List [Handler h]))
+    }
 
 openFile :: String -> Pledge RE ()
 openFile path = Pledge
     { ret    = ()
     , pre    = universe
-    , post   = Single (Atom "open" (List [Str path]))
+    , post   = const $ Single (Atom "open" (List [Str path]))
     , future = \_ -> finally (Atom "close" (List [Str path]))
     }
 
@@ -17,7 +27,7 @@ readFile' path = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
-    , post   = Single (Atom "read" (List [Str path]))
+    , post   = const $ Single (Atom "read" (List [Str path]))
     , future = const universe
     }
 
@@ -27,7 +37,7 @@ closeFile path = Pledge
     { ret    = ()
     , pre    = Or (Single (Atom "open" (List [Str path])))
                   (Single (Atom "read" (List [Str path])))
-    , post   = Single (Atom "close" (List [Str path]))
+    , post   = const $ Single (Atom "close" (List [Str path]))
     , future = const universe
     }
 
@@ -59,7 +69,7 @@ printResult :: String -> Pledge RE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
-    putStrLn $ "Post:   " ++ show (normalize (post   prog))
+    putStrLn $ "Post:   " ++ show (normalize (evalPost   prog))
     putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
     putStrLn ""
 

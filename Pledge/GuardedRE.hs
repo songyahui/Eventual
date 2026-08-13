@@ -28,21 +28,21 @@ import Pledge.RE
 --     heap  |= p           (Presburger side)
 --   ∧ trace ∈ L(r)         (trace side)
 
-data GuardedRE = GuardedRE PPred RE
+data GuardedRE a = GuardedRE PPred (RE a)
     deriving (Eq)
 
-instance Show GuardedRE where
+instance Show (GuardedRE a) where
     show (GuardedRE PTrue r) = show r
     show (GuardedRE p     r) = "[" ++ show p ++ "] ∧ " ++ show r
 
 -- ── Construction ──────────────────────────────────────────────────────────────
 
 -- Lift a plain RE (no heap constraint).
-fromRE :: RE -> GuardedRE
+fromRE :: RE a -> GuardedRE a
 fromRE = GuardedRE PTrue
 
 -- Lift a plain PPred (no trace constraint: accept any trace).
-fromPPred :: PPred -> GuardedRE
+fromPPred :: PPred -> GuardedRE a
 fromPPred p = GuardedRE p top
 
 -- ── Conjunction ───────────────────────────────────────────────────────────────

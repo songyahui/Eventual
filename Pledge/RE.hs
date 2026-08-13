@@ -46,18 +46,28 @@ import Pledge.Presburger
 
 -- ── Regular Expressions ───────────────────────────────────────────────────────
 
-data RE
+data RE t
     = Bot          -- ∅         empty language
     | Epsilon      -- ε         empty word
-    | Single Event -- a         single-event pattern
-    | Seq RE RE    -- r₁ · r₂   concatenation
-    | Or  RE RE    -- r₁ + r₂   union
-    | And RE RE    -- r₁ ∩ r₂   intersection  (= ¬(¬r₁ + ¬r₂))
-    | Star RE      -- r*        Kleene star
-    | Not RE       -- ¬r        complement
-    deriving (Eq)
+    | Single (Event t) -- a         single-event pattern
+    | Seq  (RE t) (RE t)    -- r₁ · r₂   concatenation
+    | Or   (RE t) (RE t)    -- r₁ + r₂   union
+    | And  (RE t) (RE t)    -- r₁ ∩ r₂   intersection  (= ¬(¬r₁ + ¬r₂))
+    | Star (RE t)      -- r*        Kleene star
+    | Not  (RE t)       -- ¬r        complement
 
-instance Show RE where
+instance (Eq t) => Eq (RE t) where
+    Bot == Bot = True
+    Epsilon == Epsilon = True
+    Single e1 == Single e2 = e1 == e2
+    Seq r1a r2a == Seq r1b r2b = r1a == r1b && r2a == r2b
+    Or r1a r2a == Or r1b r2b = r1a == r1b && r2a == r2b
+    And r1a r2a == And r1b r2b = r1a == r1b && r2a == r2b
+    Star r1 == Star r2 = r1 == r2
+    Not r1 == Not r2 = r1 == r2
+    _ == _ = False
+
+instance (Show t) => Show (RE t) where
     show Bot         = "∅"
     show Epsilon     = "ε"
     show (Single e)  = show e
@@ -81,33 +91,33 @@ instance Show RE where
 
 -- Shortcuts for common patterns:
 -- Σ* — universal language, complement of the empty language
-top :: RE
+top :: RE t
 top = Not Bot
 
 -- G ev  — ev must occur at every step:  ev*
-globally :: Event -> RE
+globally :: Event t -> RE t
 globally ev = Star (Single ev)
 
 -- F ev  — ev must occur at some step:  Σ* · ev · Σ*
-finally :: Event -> RE
+finally :: Event t -> RE t
 finally ev = Seq top (Seq (Single ev) top)
 
 -- ¬F ev — ev must never occur again:  ¬(Σ* · ev · Σ*)
-never :: Event -> RE
+never :: Event t -> RE t
 never ev = Not (finally ev)
 
 -- noUntil e g: e must not occur before g.  Formally: ¬((Σ\{g})* · e · Σ*)
 -- If g occurs first, e is unrestricted afterward.
-noUntil :: Event -> Event -> RE
+noUntil :: Event t -> Event t -> RE t
 noUntil e g = Not (Seq (Star (And (Single Wildcard) (Not (Single g)))) (Seq (Single e) top))
 
-previously :: Event -> RE
+previously :: Event t -> RE t
 previously ev = Seq top (Seq (Single ev) top)
 
 -- ── Nullability: ν(r) ─────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r)
 
-nullable :: RE -> Bool
+nullable :: RE t -> Bool
 nullable Bot          = False
 nullable Epsilon      = True
 nullable (Single _)   = False
@@ -121,7 +131,7 @@ nullable (Not r)      = not (nullable r)   -- ν(¬r) = ¬ν(r)
 -- Collect all concrete (non-Wildcard) events mentioned in an RE.
 -- This forms the effective alphabet for complement unfolding in firstWith.
 
-atoms :: RE -> [Event]
+atoms :: Eq t => RE t -> [Event t]
 atoms Bot               = []
 atoms Epsilon           = []
 atoms (Single Wildcard) = []
@@ -137,7 +147,7 @@ atoms (Not r)           = atoms r
 -- For Not r: e ∈ first(¬r)  iff  ∂_e(r) ≠ Σ*, i.e. some continuation after e
 -- stays outside L(r).  We check this for every event in the supplied alphabet.
 
-firstWith :: [Event] -> RE -> [Event]
+firstWith :: Eq t => [Event t] -> RE t -> [Event t]
 firstWith _    Bot               = []
 firstWith _    Epsilon           = []
 firstWith _    (Single e)        = [e]
@@ -154,13 +164,13 @@ firstWith alph (Not r)          = [e | e <- alph, not (isTotal (normalize (deriv
 
 -- first r: convenience wrapper that uses the events in r itself as the alphabet.
 -- subtraction passes the combined alphabet of both operands for completeness.
-first :: RE -> [Event]
+first :: Eq t => RE t -> [Event t]
 first r = firstWith (atoms r) r
 
 -- ── Brzozowski Derivative: ∂_e(r) ────────────────────────────────────────────
 -- Key law for complement: ∂_a(¬r) = ¬(∂_a(r))
 
-derivative :: Event -> RE -> RE
+derivative :: Eq t => Event t -> RE t -> RE t
 derivative _ Bot          = Bot
 derivative _ Epsilon      = Bot
 derivative e (Single p)   = if subsumesEvent e p then Epsilon else Bot
@@ -182,7 +192,7 @@ derivative e (Not r)      = Not (derivative e r)   -- ∂_a(¬r) = ¬(∂_a(r))
 --   • And and Not have no canonical Antimirov splitting; they fall back to
 --     the unique Brzozowski derivative wrapped in a singleton list.
 
-antiDeriv :: Event -> RE -> [RE]
+antiDeriv :: Eq t => Event t -> RE t -> [RE t]
 antiDeriv _ Bot           = []
 antiDeriv _ Epsilon       = []
 antiDeriv e (Single p)
@@ -206,7 +216,7 @@ antiDeriv e (Not r)       = [normalize (Not (derivative e r))]
 -- ∂_e^A(r2) of Antimirov residuals and recursively subtract ∂_e(r1) from
 -- each element, then take their union with Or.  The result language is the
 -- same as the Brzozowski version because ⋃ L(∂_e^A(r2)) = L(∂_e(r2)).
-reSubtraction :: RE -> RE -> RE
+reSubtraction :: Eq t => RE t -> RE t -> RE t
 reSubtraction Epsilon r2 = r2
 reSubtraction r1 r2 =
     let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
@@ -219,18 +229,18 @@ reSubtraction r1 r2 =
 
 -- ── LTL ───────────────────────────────────────────────────────────────────────
 
-data LTL
+data LTL t
     = LTLTrue
     | LTLFalse
-    | LTLAtom     Event
-    | LTLNot      LTL
-    | LTLAnd      LTL LTL
-    | LTLOr       LTL LTL
-    | LTLNext     LTL          -- X φ        (strong next)
-    | LTLUntil    LTL LTL      -- φ U ψ
-    | LTLFinally  LTL          -- F φ  ≜  ⊤ U φ   ≡  Σ* · ⟦φ⟧
-    | LTLGlobally LTL          -- G φ  ≜  ¬F¬φ    ≡  ¬(Σ* · ¬⟦φ⟧)
-    deriving (Eq, Show)
+    | LTLAtom     (Event t)
+    | LTLNot      (LTL t)
+    | LTLAnd      (LTL t) (LTL t)
+    | LTLOr       (LTL t) (LTL t)
+    | LTLNext     (LTL t)          -- X φ        (strong next)
+    | LTLUntil    (LTL t) (LTL t)      -- φ U ψ
+    | LTLFinally  (LTL t)          -- F φ  ≜  ⊤ U φ   ≡  Σ* · ⟦φ⟧
+    | LTLGlobally (LTL t)          -- G φ  ≜  ¬F¬φ    ≡  ¬(Σ* · ¬⟦φ⟧)
+
 
 -- ── Single-step projection ────────────────────────────────────────────────────
 -- toSingleStep l: the RE for a single event satisfying l at the current step.
@@ -252,7 +262,7 @@ data LTL
 
 -- Returns Nothing for temporal operators (LTLNext, LTLUntil, LTLFinally,
 -- LTLGlobally), which have no single-step projection.
-toSingleStep :: LTL -> Maybe RE
+toSingleStep :: LTL t -> Maybe (RE t)
 toSingleStep LTLTrue         = Just (Single Wildcard)               -- any single event
 toSingleStep LTLFalse        = Just Bot                             -- no event satisfies False
 toSingleStep (LTLAtom e)     = Just (Single e)                      -- exactly event e
@@ -262,11 +272,12 @@ toSingleStep (LTLAnd l1 l2)  = And <$> toSingleStep l1 <*> toSingleStep l2
 toSingleStep (LTLOr  l1 l2)  = Or  <$> toSingleStep l1 <*> toSingleStep l2
 toSingleStep _               = Nothing  -- temporal operators not representable as a single step
 
+
 -- Algebraic translation LTLf → RE (no automaton construction needed).
 -- Complement is handled by the Not constructor directly.
 -- LTLUntil returns Nothing when the left-hand side contains a temporal
 -- operator with no single-step projection.
-ltlToRe :: LTL -> Maybe RE
+ltlToRe :: LTL t -> Maybe (RE t)
 ltlToRe LTLTrue            = Just top                         -- ¬∅  = Σ*
 ltlToRe LTLFalse           = Just Bot                              -- ∅
 ltlToRe (LTLAtom e)        = Just (Single e)
@@ -282,7 +293,7 @@ ltlToRe (LTLGlobally l)    = Not . Seq top . Not                 -- ¬(Σ* · ¬
 
 -- ── Composable RE instance ────────────────────────────────────────────────────
 
-instance Composable RE where
+instance Eq t => Composable (RE t) where
     concatenation = Seq
     conjunction   = And
     empty         = Epsilon
@@ -290,7 +301,7 @@ instance Composable RE where
     subtraction   = reSubtraction
 
 -- Normalization: simplify using RE algebra + De Morgan laws for Not.
-normalize :: RE -> RE
+normalize :: Eq t => RE t -> RE t
 normalize r = case r of
     Seq r1 r2 -> case (normalize r1, normalize r2) of
         (Bot, _)      -> Bot
@@ -341,20 +352,20 @@ normalize r = case r of
 -- ── Property-based tests ───────────────────────────────────────────────────────
 
 -- Fixed small alphabet used for language-equality testing and RE generation.
-testAlph :: [Event]
+testAlph :: [Event Term]
 testAlph = [Atom "a" (List []), Atom "b" (List []), Atom "c" (List [])]
 
 -- Language equality: check both REs on all words over testAlph up to length 3.
 -- RE derives structural Eq, so (Seq (Seq a b) c) /= (Seq a (Seq b c))
 -- even though they accept the same language; langEq gives the correct notion.
-langEq :: RE -> RE -> Bool
+langEq :: RE Term -> RE Term -> Bool
 langEq r1 r2 = all (\w -> run r1 w == run r2 w) testWords
   where
     testWords    = concatMap (`replicateM` testAlph) [0 .. 3]
     run r []     = nullable r
     run r (e:es) = run (normalize (derivative e r)) es
 
-instance Arbitrary RE where
+instance Arbitrary (RE Term) where
     arbitrary = sized genRE
       where
         genRE 0 = oneof [pure Bot, pure Epsilon, pure top, Single <$> elements testAlph]
@@ -383,7 +394,7 @@ instance Arbitrary RE where
                                    ++ [And r1  r2' | r2' <- shrink r2]
 
 -- (·) associativity:  (x · y) · z = x · (y · z)
-prop_concat_assoc :: RE -> RE -> RE -> Property
+prop_concat_assoc :: RE Term -> RE Term -> RE Term -> Property
 prop_concat_assoc x y z =
     counterexample
         (  "LHS: " ++ show ((x · y) · z)
@@ -392,33 +403,33 @@ prop_concat_assoc x y z =
         (langEq ((x · y) · z) (x · (y · z)))
 
 -- (·) left identity:  empty · x = x
-prop_concat_left_id :: RE -> Bool
+prop_concat_left_id :: RE Term -> Bool
 prop_concat_left_id x = langEq (empty · x) x
 
 -- (·) right identity: x · empty = x
-prop_concat_right_id :: RE -> Bool
+prop_concat_right_id :: RE Term -> Bool
 prop_concat_right_id x = langEq (x · empty) x
 
 -- (/\) associativity: (x /\ y) /\ z = x /\ (y /\ z)
-prop_conj_assoc :: RE -> RE -> RE -> Bool
+prop_conj_assoc :: RE Term -> RE Term -> RE Term -> Bool
 prop_conj_assoc x y z = langEq ((x /\ y) /\ z) (x /\ (y /\ z))
 
 -- (/\) commutativity: x /\ y = y /\ x
-prop_conj_comm :: RE -> RE -> Bool
+prop_conj_comm :: RE Term -> RE Term -> Bool
 prop_conj_comm x y = langEq (x /\ y) (y /\ x)
 
 -- (/\) identity:      universe /\ x = x
-prop_conj_id :: RE -> Bool
+prop_conj_id :: RE Term -> Bool
 prop_conj_id x = langEq (universe /\ x) x
 
 -- (\\) right zero:        x \\ empty = x
-prop_sub_right_zero :: RE -> Bool
+prop_sub_right_zero :: RE Term -> Bool
 prop_sub_right_zero x = langEq (x \\ empty) x
 
 -- (\\) universe residual: universe \\ x = universe
-prop_sub_universe :: RE -> Property
+prop_sub_universe :: RE Term -> Property
 prop_sub_universe x =
-    let u :: RE = universe
+    let u :: RE Term = universe
     in
     counterexample
         (  "x:   " ++ show x
@@ -428,13 +439,12 @@ prop_sub_universe x =
         (langEq (u \\ x) u)
 
 -- (\\) sequential dist.:  x \\ (a · b) = (x \\ b) \\ a
-prop_sub_seq_dist :: RE -> RE -> RE -> Bool
+prop_sub_seq_dist :: RE Term -> RE Term -> RE Term -> Bool
 prop_sub_seq_dist x a b = langEq (x \\ (a · b)) ((x \\ b) \\ a)
 
 -- (\\) conjunction dist.: (a /\ b) \\ c = (a \\ c) /\ (b \\ c)
-prop_sub_conj_dist :: RE -> RE -> RE -> Bool
+prop_sub_conj_dist :: RE Term -> RE Term -> RE Term -> Bool
 prop_sub_conj_dist a b c = langEq ((a /\ b) \\ c) ((a \\ c) /\ (b \\ c))
-
 
 runRELawTests :: IO ()
 runRELawTests = do
@@ -450,7 +460,7 @@ runRELawTests = do
     putStrLn "-- (\\\\) sequential dist."  >> quickCheck prop_sub_seq_dist
     putStrLn "-- (\\\\) conjunction dist." >> quickCheck prop_sub_conj_dist
 
-printOfPledgeRE :: forall a. (Show a) => String -> Pledge RE a -> IO a
+printOfPledgeRE :: forall a t. (Show a, Show t, Eq t) => String -> Pledge (RE t) a -> IO a
 printOfPledgeRE name prog = do
     let res = ret prog
         preC = pre prog

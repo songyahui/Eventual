@@ -41,16 +41,16 @@ instance Show Term where
 
 -- An Event is either a concrete named call or a wildcard pattern (Σ).
 -- Wildcard is used only inside RE patterns (Single Wildcard ≡ Σ, any one step).
-data Event = Atom String Term    -- e.g. send(x)
+data Event t = Atom String t     -- e.g. send(x)
            | Wildcard            -- matches any single event
     deriving (Eq)
 
-instance Show Event where
+instance (Show t) => Show (Event t) where
     show (Atom name arg) = name ++ "(" ++ show arg ++ ")"
     show Wildcard         = "_"
 
 -- Does a concrete event occurrence match an event pattern in a Single?
-subsumesEvent :: Event -> Event -> Bool
+subsumesEvent :: Eq t => Event t -> Event t -> Bool
 subsumesEvent _            Wildcard      = True   -- any occurrence matches wildcard pattern
 subsumesEvent (Atom n1 a1) (Atom n2 a2) = n1 == n2 && a1 == a2
 subsumesEvent Wildcard     (Atom _ _)   = False   -- wildcard occurrence ≠ specific pattern

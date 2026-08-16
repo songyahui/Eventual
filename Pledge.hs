@@ -1,15 +1,19 @@
 module Pledge
     ( module Pledge.Core
+    , module Pledge.Event
     , module Pledge.Presburger
+    , module Pledge.Presburger.Solver
     , module Pledge.RE
-    -- , module Pledge.GuardedRE
+    , module Pledge.GuardedRE
     , module Pledge.Semiring
-    -- , module Pledge.WeightedRE
+    , module Pledge.WeightedRE
     , module Pledge.SL
     ) where
 
 import Pledge.Core
+import Pledge.Event
 import Pledge.Presburger
+import Pledge.Presburger.Solver
 import Pledge.RE
 import Pledge.GuardedRE
 import Pledge.Semiring

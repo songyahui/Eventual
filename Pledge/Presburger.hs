@@ -1,13 +1,6 @@
-{-# OPTIONS_GHC -i.. #-}
 module Pledge.Presburger
-    ( -- * Terms
-      Term(..)
-      -- * Events
-    , Event(..)
-    , subsumesEvent
-      -- * Shared type aliases
-    , Addr
-    , Val
+    ( -- * Re-exported from Pledge.Event
+      module Pledge.Event
       -- * Presburger expressions
     , PExpr(..)
     , pNeg
@@ -16,50 +9,10 @@ module Pledge.Presburger
       -- * Normalization
     , normalizePExpr
     , normalizePPred
-      -- * Solver result type
-    , SolverResult(..)
-    , checkPPred
     ) where
 
-import Control.Exception (try, SomeException)
-import Data.List (nub, intercalate)
-import qualified Data.Map.Strict as Map
-import Data.SBV hiding (Unsatisfiable)
-import qualified System.IO as IO
-
--- ── Terms ─────────────────────────────────────────────────────────────────────
-
-data Term = Str String | Num Int | List [Term]
-    deriving (Eq)
-
-instance Show Term where
-    show (Str s) = "\"" ++ s ++ "\""
-    show (Num n) = show n
-    show (List ts) = "[" ++ intercalate ", " (map show ts) ++ "]"
-
--- ── Events ────────────────────────────────────────────────────────────────────
-
--- An Event is either a concrete named call or a wildcard pattern (Σ).
--- Wildcard is used only inside RE patterns (Single Wildcard ≡ Σ, any one step).
-data Event t = Atom String t     -- e.g. send(x)
-           | Wildcard            -- matches any single event
-    deriving (Eq)
-
-instance (Show t) => Show (Event t) where
-    show (Atom name arg) = name ++ "(" ++ show arg ++ ")"
-    show Wildcard         = "_"
-
--- Does a concrete event occurrence match an event pattern in a Single?
-subsumesEvent :: Eq t => Event t -> Event t -> Bool
-subsumesEvent _            Wildcard      = True   -- any occurrence matches wildcard pattern
-subsumesEvent (Atom n1 a1) (Atom n2 a2) = n1 == n2 && a1 == a2
-subsumesEvent Wildcard     (Atom _ _)   = False   -- wildcard occurrence ≠ specific pattern
-
--- ── Shared type aliases ───────────────────────────────────────────────────────
--- Addr and Val are used by both RE examples and the SL instance.
-
-type Addr = Int
-type Val  = Int
+import Data.List (nub)
+import Pledge.Event
 
 -- ── Presburger Arithmetic ─────────────────────────────────────────────────────
 -- Linear arithmetic over heap values.  Variables are heap addresses; ValAt a
@@ -79,7 +32,7 @@ instance Show PExpr where
     show (Add e1 e2) = "(" ++ show e1 ++ " + " ++ show e2 ++ ")"
     show (Mul k e)   = show k ++ "*" ++ show e
 
--- Derived expression smart constructors
+-- | Negate a 'PExpr' by scalar multiplication with -1.
 pNeg :: PExpr -> PExpr
 pNeg = Mul (-1)
 
@@ -106,30 +59,29 @@ instance Show PPred where
     show (PNot p)     = "¬(" ++ show p ++ ")"
     show (PAnd p q)   = "(" ++ show p ++ " ∧ " ++ show q ++ ")"
 
-
 -- ── Normalization ─────────────────────────────────────────────────────────────
 
--- Simplify a PExpr using arithmetic identities.
+-- | Simplify a 'PExpr' using arithmetic identities.
 normalizePExpr :: PExpr -> PExpr
 normalizePExpr (Add e1 e2) = case (normalizePExpr e1, normalizePExpr e2) of
-    (Lit 0, e')       -> e'
-    (e',    Lit 0)    -> e'
-    (Lit a, Lit b)    -> Lit (a + b)
-    (e1',   e2')      -> Add e1' e2'
+    (Lit 0, e')    -> e'
+    (e',    Lit 0) -> e'
+    (Lit a, Lit b) -> Lit (a + b)
+    (e1',   e2')   -> Add e1' e2'
 normalizePExpr (Mul k e) = case normalizePExpr e of
-    _       | k == 0  -> Lit 0
-    e'      | k == 1  -> e'
-    Lit n             -> Lit (k * n)
-    e'                -> Mul k e'
+    _      | k == 0 -> Lit 0
+    e'     | k == 1 -> e'
+    Lit n           -> Lit (k * n)
+    e'              -> Mul k e'
 normalizePExpr e = e   -- Lit, ValAt: already normal
 
--- Simplify a PPred by:
---   • eliminating PTrue from PAnd (identity)
---   • short-circuiting on PNot PTrue (false absorbs everything)
---   • deduplicating conjuncts (idempotency)
---   • substituting equalities of the form h[a]=k into sibling conjuncts
---   • eliminating double negation
---   • evaluating comparisons between literals
+-- | Simplify a 'PPred' by:
+--   * eliminating @PTrue@ from @PAnd@ (identity)
+--   * short-circuiting on @PFalse@ (absorbing element)
+--   * deduplicating conjuncts (idempotency)
+--   * substituting equalities of the form @h[a]=k@ into sibling conjuncts
+--   * eliminating double negation
+--   * evaluating comparisons between literals
 normalizePPred :: PPred -> PPred
 normalizePPred p =
     let conjuncts = flattenAnd (normStep p)
@@ -144,16 +96,16 @@ normalizePPred p =
 -- One-level structural simplification (no flattening).
 normStep :: PPred -> PPred
 normStep (PAnd p q) = case (normStep p, normStep q) of
-    (PFalse, _)          -> PFalse       -- false absorbs
+    (PFalse, _)          -> PFalse
     (_, PFalse)          -> PFalse
     (PTrue, q')          -> q'
     (p',    PTrue)       -> p'
     (p',    q') | p'==q' -> p'
     (p',    q')          -> PAnd p' q'
 normStep (PNot p) = case normStep p of
-    PTrue   -> PFalse                    -- ¬true  = false
-    PFalse  -> PTrue                     -- ¬false = true
-    PNot p' -> p'                        -- ¬¬p    = p
+    PTrue   -> PFalse
+    PFalse  -> PTrue
+    PNot p' -> p'
     p'      -> PNot p'
 normStep (PLt  e1 e2) = evalCmp PLt  (<)  e1 e2
 normStep (PLe  e1 e2) = evalCmp PLe  (<=) e1 e2
@@ -163,7 +115,6 @@ normStep (PGe  e1 e2) = evalCmp PGe  (>=) e1 e2
 normStep p            = p
 
 -- Flatten a right/left-associated PAnd tree into a list of conjuncts.
--- PFalse is kept as-is so the caller can detect it and short-circuit.
 flattenAnd :: PPred -> [PPred]
 flattenAnd (PAnd p q) = flattenAnd p ++ flattenAnd q
 flattenAnd PTrue      = []
@@ -175,7 +126,7 @@ rebuildAnd []     = PTrue
 rebuildAnd [p]    = p
 rebuildAnd (p:ps) = PAnd p (rebuildAnd ps)
 
--- Substitute a list of (addr → literal) equalities into a PExpr.
+-- Substitute a list of (addr → literal) equalities into a PPred.
 substEqs :: [(Addr, Int)] -> PPred -> PPred
 substEqs eqs = goP
   where
@@ -193,89 +144,9 @@ substEqs eqs = goP
     goP (PAnd p q)   = normStep (PAnd (goP p) (goP q))
     goP p            = p
 
--- Helper: normalize subexpressions and fold literal comparisons to PTrue/PFalse.
+-- Normalize subexpressions and fold literal comparisons to PTrue/PFalse.
 evalCmp :: (PExpr -> PExpr -> PPred) -> (Int -> Int -> Bool) -> PExpr -> PExpr -> PPred
 evalCmp con op e1 e2 =
     case (normalizePExpr e1, normalizePExpr e2) of
         (Lit a, Lit b) -> if op a b then PTrue else PFalse
         (e1',  e2')    -> con e1' e2'
-
--- ── Result type ───────────────────────────────────────────────────────────────
-
--- A witness heap maps each address to its concrete integer value.
-data SolverResult
-    = Satisfied (Map.Map Addr Integer)  -- SAT: a concrete witness heap
-    | Unsatisfiable                     -- UNSAT: no heap satisfies the constraints
-    | SolverUnknown String              -- solver unavailable or timeout
-    deriving (Eq)
-
-instance Show SolverResult where
-    show (Satisfied h)
-        | Map.null h = "SAT  (no heap variables)"
-        | otherwise  = "SAT  heap = { "
-                    ++ intercalate ", " [ "h[" ++ show a ++ "] := " ++ show v
-                                       | (a, v) <- Map.toList h ]
-                    ++ " }"
-    show Unsatisfiable       = "UNSAT"
-    show (SolverUnknown msg) = "UNKNOWN (" ++ msg ++ ")"
-
--- ── Address collection ────────────────────────────────────────────────────────
-
-addrsInPExpr :: PExpr -> [Addr]
-addrsInPExpr (Lit _)     = []
-addrsInPExpr (ValAt a)   = [a]
-addrsInPExpr (Add e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPExpr (Mul _ e)   = addrsInPExpr e
-
-addrsInPPred :: PPred -> [Addr]
-addrsInPPred PTrue        = []
-addrsInPPred PFalse       = []
-addrsInPPred (PLt  e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPPred (PLe  e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPPred (PEq  e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPPred (PGt  e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPPred (PGe  e1 e2) = addrsInPExpr e1 ++ addrsInPExpr e2
-addrsInPPred (PNot p)     = addrsInPPred p
-addrsInPPred (PAnd p q)   = addrsInPPred p ++ addrsInPPred q
-
--- ── SBV translation ───────────────────────────────────────────────────────────
-
-pexprToSBV :: Map.Map Addr SInteger -> PExpr -> SInteger
-pexprToSBV _  (Lit n)     = fromIntegral n
-pexprToSBV hv (ValAt a)   = hv Map.! a
-pexprToSBV hv (Add e1 e2) = pexprToSBV hv e1 + pexprToSBV hv e2
-pexprToSBV hv (Mul k e)   = fromIntegral k * pexprToSBV hv e
-
-ppredToSBV :: Map.Map Addr SInteger -> PPred -> SBool
-ppredToSBV _  PTrue        = sTrue
-ppredToSBV _  PFalse       = sFalse
-ppredToSBV hv (PLt  e1 e2) = pexprToSBV hv e1 .< pexprToSBV hv e2
-ppredToSBV hv (PLe  e1 e2) = pexprToSBV hv e1 .<= pexprToSBV hv e2
-ppredToSBV hv (PEq  e1 e2) = pexprToSBV hv e1 .== pexprToSBV hv e2
-ppredToSBV hv (PGt  e1 e2) = pexprToSBV hv e1 .> pexprToSBV hv e2
-ppredToSBV hv (PGe  e1 e2) = pexprToSBV hv e1 .>= pexprToSBV hv e2
-ppredToSBV hv (PNot p)     = sNot (ppredToSBV hv p)
-ppredToSBV hv (PAnd p q)   = ppredToSBV hv p .&& ppredToSBV hv q
-
--- ── Core PPred solver ─────────────────────────────────────────────────────────
--- All ValAt references become unbounded integer variables.
-
-checkPPred :: PPred -> IO SolverResult
-checkPPred p = do
-    let addrs   = nub (addrsInPPred p)
-        varFor a = "h" ++ show a
-    eResult <- try $ sat $ do
-        vars <- mapM (sInteger . varFor) addrs
-        let hv = Map.fromList (zip addrs vars)
-        return (ppredToSBV hv p)
-    case eResult of
-        Left  (e :: SomeException) -> return (SolverUnknown (show e))
-        Right result ->
-            if modelExists result
-                then do
-                    let vals = [ (a, v)
-                               | a <- addrs
-                               , Just v <- [getModelValue (varFor a) result] ]
-                    return (Satisfied (Map.fromList vals))
-                else return Unsatisfiable
-

@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
 module Pledge.Semiring
     ( -- * Class
       Semiring(..)
@@ -31,8 +30,13 @@ instance Semiring Bool where
 
 -- ── Probability semiring ──────────────────────────────────────────────────────
 -- Weights represent the probability that an obligation will be met.
--- sadd clamps to [0,1] so values remain valid probabilities after repeated use.
 -- smul corresponds to independent sequential obligations.
+--
+-- Note: sadd uses saturating addition (clamped to 1.0) so values stay in
+-- [0,1].  This makes it a /saturating/ semiring, not a true algebraic
+-- semiring: the distributivity law  a ⊗ (b ⊕ c) = (a ⊗ b) ⊕ (a ⊗ c)
+-- can fail when b + c > 1.  Use 'Prob' only where approximate upper-bound
+-- reasoning is acceptable.
 
 newtype Prob = Prob { getProb :: Double }
     deriving (Eq, Ord)

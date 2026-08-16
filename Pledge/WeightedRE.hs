@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
-{-# LANGUAGE FlexibleInstances #-}
 module Pledge.WeightedRE
     ( -- * Weighted regular expressions
       WRE(..)

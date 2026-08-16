@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
 module Pledge.SL
     ( -- * Heap type
       Heap

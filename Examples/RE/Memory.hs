@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Memory where
 import Prelude hiding ((<>))
 import Pledge

@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.UnitTest.PresburgerTest where
 
 import Prelude hiding ((<>))
@@ -6,6 +5,7 @@ import Data.IORef
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Pledge.Presburger
+import Pledge.Presburger.Solver
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 

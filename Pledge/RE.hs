@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
 module Pledge.RE
     ( -- * Regular expressions
       RE(..)
@@ -73,7 +72,7 @@ instance (Show t) => Show (RE t) where
     show (Single e)  = show e
     -- top: ¬∅ = Σ*
     show (Not Bot)   = "Σ*"
-    -- finally/previously: Σ* · ev · Σ*  →  F(ev)
+    -- finally: Σ* · ev · Σ*  →  F(ev)
     show (Seq (Not Bot) (Seq (Single ev) (Not Bot))) =
         "F(" ++ show ev ++ ")"
     -- never: ¬F(ev)
@@ -111,8 +110,13 @@ never ev = Not (finally ev)
 noUntil :: Event t -> Event t -> RE t
 noUntil e g = Not (Seq (Star (And (Single Wildcard) (Not (Single g)))) (Seq (Single e) top))
 
+-- | @previously ev@ is the past-facing alias for 'finally'.
+-- Use it as a /pre/-condition to assert that @ev@ occurred somewhere in
+-- the preceding trace.  The underlying RE is @Σ* · ev · Σ*@, identical to
+-- @finally ev@: the name exists purely to signal intent at the call site —
+-- write @previously ev@ in @pre@ slots and @finally ev@ in @fut@ slots.
 previously :: Event t -> RE t
-previously ev = Seq top (Seq (Single ev) top)
+previously = finally
 
 -- ── Nullability: ν(r) ─────────────────────────────────────────────────────────
 -- ν(r) = True  iff  ε ∈ L(r)
@@ -460,15 +464,14 @@ runRELawTests = do
     putStrLn "-- (\\\\) sequential dist."  >> quickCheck prop_sub_seq_dist
     putStrLn "-- (\\\\) conjunction dist." >> quickCheck prop_sub_conj_dist
 
+-- | Run a 'Pledge' action once, print the four components, and return the
+-- result.  Uses 'inspect' so the underlying @IO@ action executes exactly once.
 printOfPledgeRE :: forall t a. (Show a, Show t, Eq t) => String -> Pledge IO (RE t) a -> IO a
 printOfPledgeRE name prog = do
-    ret <- getRet prog
-    preC <- getPre prog
-    postC <- getPost prog
-    futureC <- getFut prog
+    PledgeResult ret preC postC futC <- inspect prog
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Ret:    " ++ show ret
     putStrLn $ "Pre:    " ++ show (normalize preC)
     putStrLn $ "Post:   " ++ show (normalize postC)
-    putStrLn $ "Future: " ++ show (normalize futureC)
+    putStrLn $ "Future: " ++ show (normalize futC)
     return ret

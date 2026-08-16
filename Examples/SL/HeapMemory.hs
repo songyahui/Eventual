@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.SL.HeapMemory where
 import Prelude hiding ((<>))
 import Pledge

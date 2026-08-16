@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.WeightedRE.TaskScheduler where
 
 import Prelude hiding ((<>))

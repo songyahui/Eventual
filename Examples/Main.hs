@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
 import qualified Examples.UnitTest.PledgeTest as PledgeTest
 import qualified Examples.UnitTest.PresburgerTest as PresburgerTest
 import qualified Examples.RE.Memory          as REMemory

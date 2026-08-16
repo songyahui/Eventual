@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
-{-# LANGUAGE FlexibleInstances #-}
 module Pledge.Core
     ( -- * Composable class
       Composable(..)
@@ -8,6 +6,11 @@ module Pledge.Core
     , (\\)
       -- * Pledge monad
     , Pledge(..)
+    , liftPledge
+      -- * Safe inspection (run once)
+    , PledgeResult(..)
+    , inspect
+      -- * Component accessors (pure \/ effect-free @m@ only)
     , getRet
     , getPre
     , getPost
@@ -52,15 +55,45 @@ newtype Pledge m eff a = Pledge { runPledge :: m (a, eff, eff, eff) }
 --                                                ^   ^    ^    ^
 --                                               ret pre  post future
 
+-- | Embed a plain @m@ action into 'Pledge' with trivial temporal conditions:
+-- precondition @universe@ (trivially satisfied), postcondition @empty@
+-- (emits nothing), future condition @universe@ (no future obligation).
+liftPledge :: (Composable eff, Applicative m) => m a -> Pledge m eff a
+liftPledge ma = Pledge $ fmap (, universe, empty, universe) ma
+
+-- | All four components of a completed 'Pledge' action, collected in one run.
+data PledgeResult eff a = PledgeResult
+    { pledgeReturn :: a    -- ^ the return value
+    , pledgePre    :: eff  -- ^ precondition (what must have held before)
+    , pledgePost   :: eff  -- ^ postcondition (what this action emitted)
+    , pledgeFut    :: eff  -- ^ future condition (what must still hold after)
+    }
+
+-- | Run a 'Pledge' action exactly once and collect all four components.
+-- Prefer this over 'getRet' \/ 'getPre' \/ 'getPost' \/ 'getFut' whenever
+-- @m@ has observable side effects (e.g. 'IO'), because each of those
+-- helpers calls 'runPledge' separately.
+inspect :: Functor m => Pledge m eff a -> m (PledgeResult eff a)
+inspect (Pledge ma) =
+    fmap (\(a, pre, post, fut) -> PledgeResult a pre post fut) ma
+
+-- | Extract the return value.
+-- /Warning/: calls 'runPledge' independently — use 'inspect' when @m@ is 'IO'.
 getRet :: Functor m => Pledge m eff a -> m a
 getRet = fmap (\(ret, _, _, _) -> ret) . runPledge
 
+-- | Extract the precondition.
+-- /Warning/: calls 'runPledge' independently — use 'inspect' when @m@ is 'IO'.
 getPre :: Functor m => Pledge m eff a -> m eff
 getPre = fmap (\(_, pre, _, _) -> pre) . runPledge
 
+-- | Extract the postcondition.
+-- /Warning/: calls 'runPledge' independently — use 'inspect' when @m@ is 'IO'.
 getPost :: Functor m => Pledge m eff a -> m eff
 getPost = fmap (\(_, _, post, _) -> post) . runPledge
 
+-- | Extract the future condition.
+-- /Warning/: calls 'runPledge' independently — use 'inspect' when @m@ is 'IO'.
 getFut :: Functor m => Pledge m eff a -> m eff
 getFut = fmap (\(_, _, _, fut) -> fut) . runPledge
 

@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.RE.Mutex where
 import Prelude hiding ((<>))
 import Pledge

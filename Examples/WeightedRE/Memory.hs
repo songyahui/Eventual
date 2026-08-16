@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 module Examples.WeightedRE.Memory where
 
 import Prelude hiding ((<>))

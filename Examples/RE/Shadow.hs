@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -i../.. #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}

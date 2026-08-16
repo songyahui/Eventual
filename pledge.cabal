@@ -1,22 +1,56 @@
 cabal-version: 3.0
 name:          pledge
 version:       0.1.0.0
+synopsis:      Enforce and check temporal properties of monadic programs
+description:
+    Pledge is a Haskell library that lets programmers attach temporal
+    specifications (preconditions, postconditions, future obligations) to
+    monadic actions using a composable algebra of regular expressions,
+    separation logic, and weighted automata.
+license:       MIT
+author:        Yahui Song
+maintainer:    Yahui Song
+category:      Verification, Control, Concurrency
+extra-doc-files: README.md
+
+-- ── Library ───────────────────────────────────────────────────────────────────
+
+library
+  hs-source-dirs:   .
+  default-language: GHC2021
+  exposed-modules:
+      Pledge
+      Pledge.Core
+      Pledge.Event
+      Pledge.Presburger
+      Pledge.Presburger.Solver
+      Pledge.RE
+      Pledge.GuardedRE
+      Pledge.Semiring
+      Pledge.WeightedRE
+      Pledge.SL
+  build-depends:
+      base
+    , containers
+    , QuickCheck
+    , sbv
+
+-- ── Executables ───────────────────────────────────────────────────────────────
 
 executable pledge-main
   hs-source-dirs:   .
   main-is:          Examples/Main.hs
   default-language: GHC2021
-  ghc-options:      -Wno-missing-home-modules
   build-depends:
       base
     , containers
+    , pledge
     , effectful
     , effectful-core
     , QuickCheck
     , sbv
     , random
   other-modules:
-      Pledge
       Examples.UnitTest.PledgeTest
       Examples.UnitTest.PresburgerTest
       Examples.RE.Memory
@@ -40,11 +74,10 @@ executable pledge-solver-test
   hs-source-dirs:   .
   main-is:          Examples/SL/SolverTest.hs
   default-language: GHC2021
-  ghc-options:      -Wno-missing-home-modules
   build-depends:
       base
     , containers
+    , pledge
     , sbv
   other-modules:
-      Pledge
       Solver

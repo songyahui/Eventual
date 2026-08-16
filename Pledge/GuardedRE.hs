@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -i.. #-}
-{-# LANGUAGE FlexibleInstances #-}
 module Pledge.GuardedRE
     ( -- * Type
       GuardedRE(..)
@@ -18,6 +16,7 @@ module Pledge.GuardedRE
 import qualified Data.Map.Strict as Map
 import Pledge.Core
 import Pledge.Presburger
+import Pledge.Presburger.Solver
 import Pledge.RE
 
 -- ── Type ──────────────────────────────────────────────────────────────────────

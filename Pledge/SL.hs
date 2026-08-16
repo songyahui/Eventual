@@ -11,24 +11,29 @@ import qualified Data.Map.Strict as Map
 import Pledge.Core
 import Pledge.Presburger
 
--- ── Separation Logic ──────────────────────────────────────────────────────────
--- Symbolic separation-logic predicates over integer-addressed heaps.
--- Parallels the RE instance: Star/Emp play the role of Seq/Epsilon,
--- Conj/Top play the role of And/(Not Bot), and Wand plays the role of
--- the Brzozowski quotient.
-
+-- | A concrete heap: a finite map from addresses to integer values.
 type Heap = Map.Map Addr Val
 
+-- | Symbolic separation-logic predicates over integer-addressed heaps.
+--
+-- 'SL' is the 'Composable' instance for heap-ownership reasoning.
+-- The algebra mirrors the RE algebra:
+--
+-- * 'SepStar' / 'Emp'  ↔  'Seq' / 'Epsilon'  (separating conjunction / identity)
+-- * 'Conj' / 'Top'     ↔  'And' / Σ*          (ordinary conjunction / identity)
+-- * 'Wand'             ↔  Brzozowski quotient  (magic-wand residual)
 data SL
-    = Emp              -- empty heap                  (identity for Sep)
-    | Top              -- any heap (universe)         (identity for Conj)
-    | Pure PPred       -- pure predicate over heap values
-    | Cell Addr Val    -- singleton: address l holds value v
-    | SepStar SL SL    -- P * Q   separating conjunction
-    | Conj SL SL       -- P ∧ Q   ordinary conjunction
-    | Wand SL SL       -- P -* Q  magic wand (residual)
+    = Emp              -- ^ empty heap (identity for 'SepStar')
+    | Top              -- ^ any heap, unconstrained (identity for 'Conj')
+    | Pure PPred       -- ^ a pure arithmetic predicate over heap values
+    | Cell Addr Val    -- ^ singleton cell: address @a@ holds value @v@
+    | SepStar SL SL    -- ^ separating conjunction @P * Q@
+    | Conj   SL SL     -- ^ ordinary conjunction @P ∧ Q@
+    | Wand   SL SL     -- ^ magic wand @P -* Q@: if given @P@, produces @Q@
     deriving (Eq, Show)
 
+-- | Simplify an 'SL' predicate using structural identities:
+-- @'Emp' * Q = Q@, @⊤ ∧ Q = Q@, @P ∧ P = P@, @'Emp' -* Q = Q@, @P -* ⊤ = ⊤@.
 normalizeSL :: SL -> SL
 normalizeSL s = case s of
 

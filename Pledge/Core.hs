@@ -17,15 +17,47 @@ module Pledge.Core
     , getFut
     ) where
 
+-- | Abstract algebra shared by all temporal-specification types.
+--
+-- An instance of @Composable@ must satisfy eight laws (see source comments
+-- on the 'Pledge' monad instance for the full list):
+--
+-- * @'concatenation'@ is associative with unit @'empty'@.
+-- * @'conjunction'@ is associative and commutative with unit @'universe'@.
+-- * @'subtraction' p q@ computes the left-quotient of @q@ by @p@:
+--   the residual obligation in @q@ not already discharged by @p@.
 class Composable a where
+    -- | Sequential composition.  Corresponds to RE concatenation, separating
+    -- conjunction @*@ in SL, and @⊗@ in weighted REs.
     concatenation :: a -> a -> a
+    -- | Simultaneous constraint.  Corresponds to RE intersection, ordinary
+    -- conjunction @∧@ in SL, and pointwise @⊗@ in weighted REs.
     conjunction   :: a -> a -> a
+    -- | Identity for 'concatenation'.  Corresponds to @ε@ (empty word) in RE,
+    -- @emp@ in SL, and @WEps sone@ in weighted REs.
     empty         :: a
+    -- | Identity for 'conjunction'.  Corresponds to @Σ*@ in RE, @⊤@ in SL,
+    -- and @WStar (WSingle sone Wildcard)@ in weighted REs.
     universe      :: a
+    -- | Left-quotient / residual: @subtraction post pre@ returns the part of
+    -- @pre@ not already discharged by @post@.  Corresponds to the Brzozowski
+    -- quotient in RE, the magic wand @-*@ in SL, and the weighted quotient in WRE.
+    --
+    -- Note the argument order: @post \\\\ pre@ reads as \"pre after post\".
     subtraction   :: a -> a -> a
 
--- Lift all Composable operations through any Applicative m.
--- This lets (·), (/\), (\\) work on m eff values directly.
+-- | Product of two 'Composable' algebras: each operation is applied
+-- component-wise.  Enables e.g. @'Pledge' IO (RE Term, WRE Prob Term) a@
+-- for simultaneous Boolean and probabilistic reasoning.
+instance (Composable a, Composable b) => Composable (a, b) where
+    concatenation (a1, b1) (a2, b2) = (concatenation a1 a2, concatenation b1 b2)
+    conjunction   (a1, b1) (a2, b2) = (conjunction   a1 a2, conjunction   b1 b2)
+    subtraction   (a1, b1) (a2, b2) = (subtraction   a1 a2, subtraction   b1 b2)
+    empty                           = (empty, empty)
+    universe                        = (universe, universe)
+
+-- | Lifts all 'Composable' operations through any 'Applicative' @m@,
+-- so that @('·')@, @('/\\')@, and @('\\\\')@ work directly on @m eff@ values.
 instance {-# OVERLAPPABLE #-} (Composable eff, Applicative m) => Composable (m eff) where
     concatenation = liftA2 concatenation
     conjunction   = liftA2 conjunction
@@ -34,26 +66,55 @@ instance {-# OVERLAPPABLE #-} (Composable eff, Applicative m) => Composable (m e
     universe      = pure universe
 
 infixl 6 ·
+-- | Infix alias for 'concatenation' (@infixl 6@).
 (·) :: Composable a => a -> a -> a
 (·) = concatenation
 
 infixl 7 /\
+-- | Infix alias for 'conjunction' (@infixl 7@).
 (/\) :: Composable a => a -> a -> a
 (/\) = conjunction
 
 infixl 5 \\
+-- | Left-quotient operator (@infixl 5@): @post \\\\ pre@ returns the residual
+-- of @pre@ not discharged by @post@.
+-- Note the reversed argument order relative to 'subtraction':
+-- @a \\\\ b = subtraction b a@.
 (\\) :: Composable a => a -> a -> a
 a \\ b = subtraction b a
 
 -- ── Pledge monad ─────────────────────────────────────────────────────────────
--- A single m-action that produces the return value together with its pre-,
--- post-, and future-conditions all at once.  Because all four components come
--- from one run of the m action, stateful resources (e.g. file handles) are
--- used exactly once per invocation.
 
+-- | A monadic action in @m@ augmented with three temporal specifications in @eff@.
+--
+-- @'Pledge' m eff a@ wraps a single @m@-action that produces all four
+-- components at once:
+--
+-- @
+-- (ret, pre, post, fut) :: (a, eff, eff, eff)
+-- @
+--
+-- * @ret@  — the return value.
+-- * @pre@  — precondition: what must have held in the preceding trace.
+-- * @post@ — postcondition: what this action emits\/produces.
+-- * @fut@  — future obligation: what must be discharged by subsequent actions.
+--
+-- Because all four components come from a single run of the underlying @m@
+-- action, stateful resources (file handles, heap addresses, …) are allocated
+-- exactly once per invocation.  Data-dependent future obligations arise
+-- naturally: @ret@ is in scope when the programmer constructs @fut@ inside
+-- the @m@ action.
+--
+-- 'Pledge' is a 'Monad' when @eff@ is 'Composable' and @m@ is a 'Monad'.
+-- The bind rule propagates all four components automatically:
+--
+-- @
+-- pre  (p >>= g)  =  pre p  \/\\  (pre (g _)  \\\\  post p)
+-- post (p >>= g)  =  post p  ·   post (g _)
+-- fut  (p >>= g)  =  (fut p  \\\\  post (g _))  \/\\  fut (g _)
+-- @
 newtype Pledge m eff a = Pledge { runPledge :: m (a, eff, eff, eff) }
---                                                ^   ^    ^    ^
---                                               ret pre  post future
+-- Fields: ret, pre, post, fut
 
 -- | Embed a plain @m@ action into 'Pledge' with trivial temporal conditions:
 -- precondition @universe@ (trivially satisfied), postcondition @empty@

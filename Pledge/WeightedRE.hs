@@ -26,27 +26,24 @@ import Pledge.Core
 import Pledge.Presburger (Event(..), subsumesEvent)
 import Pledge.Semiring
 
--- ── Type ──────────────────────────────────────────────────────────────────────
--- WRE w is a regular expression whose transitions carry weights from semiring w.
+-- | A regular expression whose transitions carry weights from a 'Semiring' @w@.
 --
--- The language of a WRE is a function  Σ* → w  (words to weights):
---   wNullable r       = weight of ε in L(r)
---   wDerivative e r   = WRE whose language is  w ↦ L(r)(e·w)
+-- The language of a @WRE w t@ is a function @Σ* → w@ (words to weights).
+-- Key operations:
 --
--- The Boolean special case  WRE Bool  recovers the existing RE exactly:
---   WBot        ↔  Bot
---   WEps True   ↔  Epsilon
---   WSingle True e  ↔  Single e
---   WSeq / WAdd / WAnd / WStar  ↔  Seq / Or / And / Star
-
+-- * 'wNullable' @r@     — weight assigned to @ε@ by @r@.
+-- * 'wDerivative' @e r@ — @WRE@ for all continuations after event @e@.
+--
+-- The Boolean special case @WRE Bool@ recovers plain 'RE' exactly:
+-- @WBot ↔ Bot@, @WEps True ↔ Epsilon@, @WSeq ↔ Seq@, @WAdd ↔ Or@, etc.
 data WRE w t
-    = WBot                           -- 0: empty language  (weight 0 everywhere)
-    | WEps w                         -- ε accepted with weight w
-    | WSingle w (Event t)            -- single event accepted with weight w
-    | WSeq  (WRE w t) (WRE w t)     -- sequential composition  (⊗ on languages)
-    | WAdd  (WRE w t) (WRE w t)     -- weighted choice           (⊕ on languages)
-    | WAnd  (WRE w t) (WRE w t)     -- weighted conjunction  (pointwise ⊗)
-    | WStar (WRE w t)                -- Kleene star
+    = WBot                       -- ^ weight-0 everywhere (empty language)
+    | WEps w                     -- ^ @ε@ accepted with weight @w@
+    | WSingle w (Event t)        -- ^ single event accepted with weight @w@
+    | WSeq  (WRE w t) (WRE w t) -- ^ sequential composition (@⊗@ on languages)
+    | WAdd  (WRE w t) (WRE w t) -- ^ weighted choice (@⊕@ on languages)
+    | WAnd  (WRE w t) (WRE w t) -- ^ pointwise conjunction (pointwise @⊗@)
+    | WStar (WRE w t)            -- ^ Kleene star
     deriving (Eq)
 
 instance (Semiring w, Show t) => Show (WRE w t) where
@@ -72,10 +69,9 @@ instance (Semiring w, Show t) => Show (WRE w t) where
         go (WStar r1)   = "(" ++ show r1 ++ ")*"
         go r1           = show r1
 
--- ── Semantics: weight of ε ────────────────────────────────────────────────────
--- wNullable r = the semiring weight assigned to the empty word ε.
--- In the Boolean case this equals nullable :: RE -> Bool.
-
+-- | Weight assigned to the empty word @ε@ by a 'WRE'.
+-- Generalises @nullable :: RE -> Bool@: in the Boolean semiring,
+-- @wNullable r == sone@ iff @nullable r == True@.
 wNullable :: Semiring w => WRE w t -> w
 wNullable WBot          = szero
 wNullable (WEps w)      = w
@@ -87,6 +83,8 @@ wNullable (WStar _)     = sone   -- ε ∈ L(r*) with unit weight for every semi
 
 -- ── Alphabet ──────────────────────────────────────────────────────────────────
 
+-- | Collect all concrete (non-'Wildcard') events mentioned in a 'WRE'.
+-- Forms the effective alphabet for complement unfolding in 'wFirstWith'.
 wAtoms :: Eq t => WRE w t -> [Event t]
 wAtoms WBot               = []
 wAtoms (WEps _)           = []
@@ -97,6 +95,7 @@ wAtoms (WAdd  r1 r2)      = wAtoms r1 `union` wAtoms r2
 wAtoms (WAnd  r1 r2)      = wAtoms r1 `union` wAtoms r2
 wAtoms (WStar r)          = wAtoms r
 
+-- | Events from @alph@ that can begin a word with non-zero weight in a 'WRE'.
 wFirstWith :: (Semiring w, Eq t) => [Event t] -> WRE w t -> [Event t]
 wFirstWith _    WBot                    = []
 wFirstWith _    (WEps _)               = []
@@ -110,13 +109,13 @@ wFirstWith alph (WAnd r1 r2)           = [ e | e <- wFirstWith alph r1
                                              , e `elem` wFirstWith alph r2 ]
 wFirstWith alph (WStar r)              = wFirstWith alph r
 
+-- | Convenience wrapper: uses the events in @r@ itself as the alphabet.
 wFirst :: (Semiring w, Eq t) => WRE w t -> [Event t]
 wFirst r = wFirstWith (wAtoms r) r
 
--- ── Brzozowski derivative ─────────────────────────────────────────────────────
--- wDerivative e r: the WRE for all continuations after event e.
--- When r1 is nullable in WSeq, both branches contribute (weighted by wNullable r1).
-
+-- | Weighted Brzozowski derivative: the 'WRE' for all continuations after event @e@.
+-- When the left operand of 'WSeq' is nullable, both branches contribute,
+-- weighted by @wNullable r1@.
 wDerivative :: (Semiring w, Eq t) => Event t -> WRE w t -> WRE w t
 wDerivative _ WBot             = WBot
 wDerivative _ (WEps _)         = WBot
@@ -132,9 +131,10 @@ wDerivative e (WAdd r1 r2)     = WAdd (wDerivative e r1) (wDerivative e r2)
 wDerivative e (WAnd r1 r2)     = WAnd (wDerivative e r1) (wDerivative e r2)
 wDerivative e (WStar r)        = WSeq (wDerivative e r) (WStar r)
 
--- ── Normalization ─────────────────────────────────────────────────────────────
--- Structural simplifications that hold for every semiring.
-
+-- | Structural simplification of a 'WRE'.
+-- Applies identities that hold for every semiring:
+-- @WBot@ absorption, @WEps sone@ identity for 'WSeq', @WBot@ identity for 'WAdd',
+-- and @∅* = ε@, @ε* = ε@.
 wNormalize :: Semiring w => WRE w t -> WRE w t
 wNormalize r = case r of
     WSeq r1 r2 -> case (wNormalize r1, wNormalize r2) of
@@ -163,11 +163,10 @@ wNormalize r = case r of
 
     _ -> r
 
--- ── Quotient (weighted left-quotient) ─────────────────────────────────────────
--- wSubtraction r1 r2: the weighted residual of r2 after consuming a prefix
--- from r1.  Parallels reSubtraction using Brzozowski derivatives.
--- Base case: WEps _ means the prefix is ε, so r2 is unchanged.
-
+-- | Weighted left-quotient: the residual of @r2@ after consuming a prefix
+-- described by @r1@.  Parallels 'reSubtraction' using weighted Brzozowski
+-- derivatives.  Base case: @WEps _@ means the prefix is @ε@, so @r2@ is
+-- returned unchanged.
 wSubtraction :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
 wSubtraction (WEps _) r2 = r2
 wSubtraction r1       r2 =
@@ -179,19 +178,21 @@ wSubtraction r1       r2 =
 
 -- ── Smart constructors ────────────────────────────────────────────────────────
 
--- Σ* — universal language with unit weight on every transition.
+-- | @Σ*@ — universal language with unit weight (@sone@) on every transition.
 wTop :: Semiring w => WRE w t
 wTop = WStar (WSingle sone Wildcard)
 
--- F[w](ev) — event ev must eventually occur, observed with weight w.
+-- | @F[w](ev)@ — event @ev@ must eventually occur, weighted by @w@:
+-- @Σ* · [w]ev@.  Use in @fut@ slots.
 wFinally :: Semiring w => w -> Event t -> WRE w t
 wFinally w ev = WSeq wTop (WSingle w ev)
 
--- G[w](ev) — every step must be ev, each observed with weight w.
+-- | @G[w](ev)@ — every step must be @ev@, each with weight @w@: @([w]ev)*@.
 wGlobally :: Semiring w => w -> Event t -> WRE w t
 wGlobally w ev = WStar (WSingle w ev)
 
--- previously[w](ev) — ev occurred at some point in the past with weight w.
+-- | Past-facing alias for 'wFinally'.
+-- Use in @pre@ slots to assert @ev@ occurred somewhere in the preceding trace.
 wPreviously :: Semiring w => w -> Event t -> WRE w t
 wPreviously w ev = WSeq wTop (WSeq (WSingle w ev) wTop)
 

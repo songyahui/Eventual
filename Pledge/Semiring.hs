@@ -6,19 +6,25 @@ module Pledge.Semiring
     , Tropical(..)
     ) where
 
--- ── Class ─────────────────────────────────────────────────────────────────────
--- A semiring (w, ⊕, ⊗, 0, 1) generalises the Boolean lattice:
---   ⊕  = choice     (OR  / union  / min  / +)
---   ⊗  = sequence   (AND / concat / +    / ×)
---   0  = zero       (⊥   / ∅     / ∞    / 0)
---   1  = unit       (ε   / Σ*   / 0    / 1)
+-- | A semiring @(w, ⊕, ⊗, 0, 1)@ generalising the Boolean lattice.
 --
--- Laws: ⊗ distributes over ⊕; 0 absorbs ⊗; 1 is the identity for ⊗.
-
+-- @
+-- ⊕  = choice     (||  / union  / min  / capped-+)
+-- ⊗  = sequence   (&&  / concat / +    / ×)
+-- 0  = zero       (⊥   / ∅     / ∞    / 0)
+-- 1  = unit       (⊤   / Σ*    / 0    / 1)
+-- @
+--
+-- Laws: @⊗@ distributes over @⊕@; @0@ is absorbing for @⊗@; @1@ is the
+-- identity for @⊗@.  The 'Bool' instance recovers plain 'RE' membership.
 class (Eq w, Show w) => Semiring w where
-    szero :: w          -- additive identity / absorbing for ⊗
-    sone  :: w          -- multiplicative identity
+    -- | Additive identity; also absorbing element for 'smul'.
+    szero :: w
+    -- | Multiplicative identity.
+    sone  :: w
+    -- | Additive operation (choice / union).
     sadd  :: w -> w -> w
+    -- | Multiplicative operation (sequence / composition).
     smul  :: w -> w -> w
 
 -- Boolean semiring — recovers the existing RE / Composable behaviour exactly.
@@ -28,16 +34,13 @@ instance Semiring Bool where
     sadd  = (||)
     smul  = (&&)
 
--- ── Probability semiring ──────────────────────────────────────────────────────
--- Weights represent the probability that an obligation will be met.
--- smul corresponds to independent sequential obligations.
+-- | Probability semiring: weights represent the probability that an obligation
+-- will be met.  'smul' models independent sequential obligations (@p * q@).
 --
--- Note: sadd uses saturating addition (clamped to 1.0) so values stay in
--- [0,1].  This makes it a /saturating/ semiring, not a true algebraic
--- semiring: the distributivity law  a ⊗ (b ⊕ c) = (a ⊗ b) ⊕ (a ⊗ c)
--- can fail when b + c > 1.  Use 'Prob' only where approximate upper-bound
--- reasoning is acceptable.
-
+-- __Warning__: 'sadd' uses saturating addition (clamped to 1.0), making this
+-- a /saturating/ semiring rather than a true algebraic one — the distributivity
+-- law @a ⊗ (b ⊕ c) = (a ⊗ b) ⊕ (a ⊗ c)@ can fail when @b + c > 1@.
+-- Use 'Prob' only where approximate upper-bound reasoning is acceptable.
 newtype Prob = Prob { getProb :: Double }
     deriving (Eq, Ord)
 
@@ -50,13 +53,13 @@ instance Semiring Prob where
     sadd (Prob a) (Prob b)     = Prob (min 1.0 (a + b))
     smul (Prob a) (Prob b)     = Prob (a * b)
 
--- ── Tropical (min-plus) semiring ──────────────────────────────────────────────
--- Weights represent minimum cost (e.g. expected steps) to discharge an obligation.
--- sadd = min  (choose the cheaper path)
--- smul = +    (costs accumulate along a path)
--- szero = ∞   (unreachable / no path)
--- sone  = 0   (zero cost / already discharged)
-
+-- | Tropical (min-plus) semiring: weights represent the minimum cost (e.g.
+-- expected number of steps) to discharge an obligation.
+--
+-- * 'sadd' = @min@ — choose the cheaper path.
+-- * 'smul' = @(+)@ — costs accumulate along a path.
+-- * 'szero' = @∞@  — unreachable / no valid path exists.
+-- * 'sone'  = @0@  — zero cost / obligation already discharged.
 newtype Tropical = Tropical { getCost :: Double }
     deriving (Eq, Ord)
 

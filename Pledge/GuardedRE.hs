@@ -19,15 +19,16 @@ import Pledge.Presburger
 import Pledge.Presburger.Solver
 import Pledge.RE
 
--- ── Type ──────────────────────────────────────────────────────────────────────
--- An GuardedRE is a conjunction of two independent constraints on a state:
---   • a Presburger predicate over the heap
---   • a regular expression over the event trace
+-- | A conjunction of a Presburger predicate and a regular expression,
+-- enforcing heap invariants and trace-ordering obligations simultaneously.
 --
--- A state (heap, trace) satisfies GuardedRE p r  iff
---     heap  |= p           (Presburger side)
---   ∧ trace ∈ L(r)         (trace side)
-
+-- A state @(heap, trace)@ satisfies @GuardedRE p r@ iff:
+--
+-- * @heap  |= p@   (Presburger predicate holds on the heap), and
+-- * @trace ∈ L(r)@ (trace is in the language of the RE).
+--
+-- The two dimensions are independent: the Presburger predicate is static
+-- (not advanced by events), while the RE is advanced by 'deriveGuarded'.
 data GuardedRE a = GuardedRE PPred (RE a)
     deriving (Eq)
 
@@ -37,37 +38,36 @@ instance Show a => Show (GuardedRE a) where
 
 -- ── Construction ──────────────────────────────────────────────────────────────
 
--- Lift a plain RE (no heap constraint).
+-- | Lift a plain 'RE' into a 'GuardedRE' with no heap constraint (@PPred = PTrue@).
 fromRE :: RE a -> GuardedRE a
 fromRE = GuardedRE PTrue
 
--- Lift a plain PPred (no trace constraint: accept any trace).
+-- | Lift a plain 'PPred' into a 'GuardedRE' with no trace constraint
+-- (any trace is accepted: @RE = Σ*@).
 fromPPred :: PPred -> GuardedRE a
 fromPPred p = GuardedRE p top
 
 -- ── Conjunction ───────────────────────────────────────────────────────────────
--- (p1, r1) ∧ (p2, r2)  =  (p1 ∧ p2, r1 ∩ r2)
--- Both the heap and the trace must satisfy both constraints.
 
+-- | Conjoin two 'GuardedRE' values component-wise:
+-- @(p1, r1) ∧ (p2, r2) = (p1 ∧ p2, r1 ∩ r2)@.
+-- Both the heap predicate and the trace RE must hold simultaneously.
 conjoin :: Eq a => GuardedRE a -> GuardedRE a -> GuardedRE a
 conjoin (GuardedRE p1 r1) (GuardedRE p2 r2) =
     GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (And r1 r2))
 
 -- ── Derivatives ───────────────────────────────────────────────────────────────
--- Consuming an event advances only the trace side; the heap predicate is
--- a static constraint and does not change with individual events.
 
+-- | Advance the trace side of a 'GuardedRE' by one event.
+-- The 'PPred' component is static and is left unchanged.
 deriveGuarded :: Eq a => Event a -> GuardedRE a -> GuardedRE a
 deriveGuarded e (GuardedRE p r) = GuardedRE p (normalize (derivative e r))
 
 -- ── Membership ────────────────────────────────────────────────────────────────
 
--- nullableGuarded checks whether (heap, ε) satisfies the GuardedRE:
---   • the RE must be nullable (ε ∈ L(r))
---   • the Presburger predicate must be satisfiable against the heap
---
--- The heap is a concrete assignment Map Addr Int; we instantiate the
--- predicate with those values and ask the solver.
+-- | Check whether @(heap, ε)@ satisfies a 'GuardedRE':
+-- the RE must be nullable and the 'PPred' must be satisfiable
+-- under the concrete @heap@ assignment.  Uses Z3 via SBV.
 nullableGuarded :: Map.Map Addr Int -> GuardedRE a -> IO Bool
 nullableGuarded heap (GuardedRE p r)
     | not (nullable r) = return False
@@ -96,8 +96,8 @@ instantiate heap = go
     go (PNot q)     = PNot (go q)
     go (PAnd q1 q2) = PAnd (go q1) (go q2)
 
--- checkGuarded heap trace ext: does (heap, trace) satisfy ext?
--- Folds deriveGuarded over the trace then checks nullability.
+-- | Check whether @(heap, trace)@ satisfies a 'GuardedRE'.
+-- Folds 'deriveGuarded' over the trace and then calls 'nullableGuarded'.
 checkGuarded :: Eq a => Map.Map Addr Int -> [Event a] -> GuardedRE a -> IO Bool
 checkGuarded heap trace ext =
     nullableGuarded heap (foldl (flip deriveGuarded) ext trace)

@@ -14,16 +14,14 @@ module Pledge.Presburger
 import Data.List (nub)
 import Pledge.Event
 
--- ── Presburger Arithmetic ─────────────────────────────────────────────────────
--- Linear arithmetic over heap values.  Variables are heap addresses; ValAt a
--- dereferences address a.  Only scalar multiplication (k * e) is allowed to
--- keep expressions linear.
-
+-- | A linear arithmetic expression over heap values.
+-- Variables are heap addresses; @'ValAt' a@ dereferences address @a@.
+-- Only scalar multiplication is allowed to preserve linearity.
 data PExpr
-    = Lit Int           -- integer literal
-    | ValAt Addr        -- value stored at address: h[a]
-    | Add PExpr PExpr   -- e1 + e2
-    | Mul Int   PExpr   -- k * e  (scalar only, preserves linearity)
+    = Lit Int         -- ^ integer literal
+    | ValAt Addr      -- ^ value at address: @h[a]@
+    | Add PExpr PExpr -- ^ @e1 + e2@
+    | Mul Int   PExpr -- ^ @k * e@  (scalar only, preserves linearity)
     deriving (Eq)
 
 instance Show PExpr where
@@ -36,14 +34,17 @@ instance Show PExpr where
 pNeg :: PExpr -> PExpr
 pNeg = Mul (-1)
 
+-- | A linear arithmetic predicate over heap values.
+-- Used as the Presburger component in 'GuardedRE' and as pure assertions in 'SL'.
+-- Satisfiability is discharged to Z3 via 'checkPPred'.
 data PPred
     = PTrue
     | PFalse
-    | PLt  PExpr PExpr  -- e1 < e2
-    | PLe  PExpr PExpr  -- e1 ≤ e2
-    | PEq  PExpr PExpr  -- e1 = e2
-    | PGt  PExpr PExpr  -- e1 > e2
-    | PGe  PExpr PExpr  -- e1 ≥ e2
+    | PLt  PExpr PExpr  -- ^ @e1 < e2@
+    | PLe  PExpr PExpr  -- ^ @e1 ≤ e2@
+    | PEq  PExpr PExpr  -- ^ @e1 = e2@
+    | PGt  PExpr PExpr  -- ^ @e1 > e2@
+    | PGe  PExpr PExpr  -- ^ @e1 ≥ e2@
     | PNot PPred
     | PAnd PPred PPred
     deriving (Eq)

@@ -11,10 +11,12 @@ module Pledge.Event
 
 import Data.List (intercalate)
 
--- ── Terms ─────────────────────────────────────────────────────────────────────
--- A structured value that can be carried by an event.
-
-data Term = Str String | Num Int | List [Term]
+-- | A structured payload that can be carried by a concrete 'Event'.
+-- Terms are used as the default payload type throughout the library.
+data Term
+    = Str  String   -- ^ a string literal, e.g. a file path
+    | Num  Int      -- ^ an integer, e.g. a heap address or counter value
+    | List [Term]   -- ^ a heterogeneous list of terms
     deriving (Eq)
 
 instance Show Term where
@@ -22,12 +24,13 @@ instance Show Term where
     show (Num n)   = show n
     show (List ts) = "[" ++ intercalate ", " (map show ts) ++ "]"
 
--- ── Events ────────────────────────────────────────────────────────────────────
--- An Event is either a concrete named call or a wildcard pattern (Σ).
--- Wildcard is used only inside RE patterns (Single Wildcard ≡ Σ, any one step).
-
-data Event t = Atom String t   -- e.g. send(x)
-             | Wildcard         -- matches any single event
+-- | A single observable event, parameterised by the payload type @t@.
+--
+-- Events are the alphabet of the temporal specification languages ('RE', 'WRE', …).
+-- Concrete occurrences use 'Atom'; pattern positions inside 'RE' use 'Wildcard'.
+data Event t
+    = Atom String t  -- ^ a named event with a typed payload, e.g. @send(42)@
+    | Wildcard       -- ^ pattern that matches /any/ single event (used in RE only)
     deriving (Eq)
 
 instance Show t => Show (Event t) where
@@ -43,7 +46,9 @@ subsumesEvent (Atom n1 a1) (Atom n2 a2) = n1 == n2 && a1 == a2
 subsumesEvent Wildcard     (Atom _ _)   = False
 
 -- ── Shared type aliases ───────────────────────────────────────────────────────
--- Used by Presburger expressions, GuardedRE, and the SL instance.
 
+-- | A heap address (integer index into the symbolic heap).
 type Addr = Int
+
+-- | A heap value (integer stored at an 'Addr').
 type Val  = Int

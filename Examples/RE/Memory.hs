@@ -10,25 +10,23 @@ import System.Random
 type RETerm = (RE Term)
 
 malloc :: Pledge IO (RE Term) Addr
-malloc = Pledge
-        { ret    = randomRIO (1, 1000)
-        , pre    = pure universe
-        , post   = \addr -> pure (Single (Atom "malloc" (List [Num addr])))
-        , future = \addr -> pure (finally (Atom "free" (List [Num addr])))
-        }
+malloc = Pledge $ do
+    addr <- randomRIO (1, 1000)
+    return (addr,
+            universe,
+            Single (Atom "malloc" (List [Num addr])),
+            finally (Atom "free" (List [Num addr])))
 
 free :: Addr -> Pledge IO (RE Term) ()
-free addr = Pledge
-    { ret    = pure ()
-    , pre    = pure $ previously (Atom "malloc" (List [Num addr]))
-    , post   = \_ -> pure $ Single (Atom "free" (List [Num addr]))
-    -- noUntil free malloc: free(addr) must not occur again until malloc(addr)
-    -- happens first.  This prevents double-free while allowing re-allocation:
-    --   free → free          is forbidden  (double-free, no malloc in between)
-    --   free → malloc → free is allowed    (re-allocation is valid)
-    , future = \_ -> pure $ noUntil (Atom "free" (List [Num addr]))
-                               (Atom "malloc" (List [Num addr]))
-    }
+-- noUntil free malloc: free(addr) must not occur again until malloc(addr)
+-- happens first.  This prevents double-free while allowing re-allocation:
+--   free → free          is forbidden  (double-free, no malloc in between)
+--   free → malloc → free is allowed    (re-allocation is valid)
+free addr = Pledge $ return
+    ((),
+     previously (Atom "malloc" (List [Num addr])),
+     Single (Atom "free" (List [Num addr])),
+     noUntil (Atom "free" (List [Num addr])) (Atom "malloc" (List [Num addr])))
 
 -- Good: malloc uses the returned address to parameterise the free obligation.
 -- Demonstrates data-dependent future: future = \a -> finally(free(a)).
@@ -58,7 +56,6 @@ loopAllFreed n = replicate n eachRun
 missingFree :: Pledge IO RETerm Addr
 missingFree = (malloc >>= free) >> malloc
 
-
 -- Bad: free without a preceding malloc — precondition violated (pre = Bot).
 freeWithoutMalloc :: Pledge IO RETerm ()
 freeWithoutMalloc = free 1
@@ -68,7 +65,6 @@ freeWithoutMalloc = free 1
 -- free 2 does not discharge it, so finally(free(1)) remains.
 wrongAddrFree :: Pledge IO RETerm ()
 wrongAddrFree = malloc >>= \n -> free (n+1)
-
 
 -- Bad: free the same address twice immediately.
 -- After the first free, future = noUntil(free(1), malloc(1)).
@@ -112,26 +108,15 @@ allocReturnAddr = malloc
 -- Bad: allocate two addresses and return both — neither obligation is discharged.
 -- ret = (1, 2); future = finally(free(1)) ∧ finally(free(2)).
 allocTwoReturnPair :: Pledge IO RETerm (Addr, Addr)
-allocTwoReturnPair =
-    let paddr1 = malloc
-        paddr2 = malloc
-    in Pledge {
-        ret    = (,) <$> ret paddr1 <*> ret paddr2,
-        pre    = pre paddr1 /\ pre paddr2,
-        post   = \_ -> (ret paddr1 >>= post paddr1) · (ret paddr2 >>= post paddr2),
-        future = \_ -> (ret paddr1 >>= future paddr1) /\ (ret paddr2 >>= future paddr2) }
+allocTwoReturnPair = (,) <$> malloc <*> malloc
 
 -- Good: allocate, free, and return the freed address.
 -- ret = 1; future = noUntil(free(1), malloc(1)) — guard active, no pending finally.
 allocFreeReturnAddr :: Pledge IO RETerm Addr
-allocFreeReturnAddr =
-    let paddr = malloc
-        base :: Pledge IO RETerm () = paddr >>= free
-    in Pledge {
-        ret    = ret paddr,
-        pre    = pre base,
-        post   = \_ -> ret base >>= post base,
-        future = \_ -> ret base >>= future base }
+allocFreeReturnAddr = Pledge $ do
+    (addr, preA, postA, futA) <- runPledge malloc
+    (_, preB, postB, futB) <- runPledge (free addr)
+    return (addr, preA /\ (preB \\ postA), postA · postB, (futA \\ postB) /\ futB)
 
 main :: IO ()
 main = do

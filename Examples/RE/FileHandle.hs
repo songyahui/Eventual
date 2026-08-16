@@ -11,70 +11,55 @@ type REHandler = RE IO.Handle
 
 -- Generic open (any mode): posts open(h), future requires close(h).
 openFile :: FilePath -> IO.IOMode -> Pledge IO REHandler IO.Handle
-openFile fn mode = Pledge
-        { ret    = IO.openFile fn mode
-        , pre    = universe
-        , post   = pure . Single . Atom "open"
-        , future = pure . Single . Atom "close"
-        }
+openFile fn mode = Pledge $ do
+    h <- IO.openFile fn mode
+    return (h, universe, Single (Atom "open" h), finally (Atom "close" h))
 
 -- Read-only open: posts open(h) · readMode(h).
 openReadOnly :: FilePath -> Pledge IO REHandler IO.Handle
-openReadOnly fn = Pledge
-        { ret    = IO.openFile fn IO.ReadMode
-        , pre    = universe
-        , post   = \h -> pure $ Seq (Single (Atom "open" h)) (Single (Atom "readMode" h))
-        , future = pure . finally . Atom "close"
-        }
+openReadOnly fn = Pledge $ do
+    h <- IO.openFile fn IO.ReadMode
+    return (h, universe,
+            Seq (Single (Atom "open" h)) (Single (Atom "readMode" h)),
+            finally (Atom "close" h))
 
 -- Write-only open (truncates): posts open(h) · writeMode(h).
 openWriteOnly :: FilePath -> Pledge IO REHandler IO.Handle
-openWriteOnly fn = Pledge
-        { ret    = IO.openFile fn IO.WriteMode
-        , pre    = universe
-        , post   = \h -> pure $ Seq (Single (Atom "open" h)) (Single (Atom "writeMode" h))
-        , future = pure . finally . Atom "close"
-        }
+openWriteOnly fn = Pledge $ do
+    h <- IO.openFile fn IO.WriteMode
+    return (h, universe,
+            Seq (Single (Atom "open" h)) (Single (Atom "writeMode" h)),
+            finally (Atom "close" h))
 
 -- Append open: posts open(h) · appendMode(h).
 openAppend :: FilePath -> Pledge IO REHandler IO.Handle
-openAppend fn = Pledge
-    { ret    = IO.openFile fn IO.AppendMode
-    , pre    = universe
-    , post   = \h -> pure $ Seq (Single (Atom "open" h)) (Single (Atom "appendMode" h))
-    , future = pure . finally . Atom "close"
-    }
+openAppend fn = Pledge $ do
+    h <- IO.openFile fn IO.AppendMode
+    return (h, universe,
+            Seq (Single (Atom "open" h)) (Single (Atom "appendMode" h)),
+            finally (Atom "close" h))
 
 -- Read from h: reads contents strictly so the handle is safe to close afterward.
 -- Requires a read-mode open in the history.
 readPledge :: IO.Handle -> Pledge IO REHandler String
-readPledge h = Pledge
-    { ret    = do { contents <- IO.hGetContents h
-                  ; _ <- evaluate (length contents)
-                  ; return contents }
-    , pre    = pure $ previously (Atom "readMode" h)
-    , post   = \_ -> pure $ Single (Atom "read" h)
-    , future = \_ -> pure universe
-    }
+readPledge h = Pledge $ do
+    contents <- IO.hGetContents h
+    _ <- evaluate (length contents)
+    return (contents, previously (Atom "readMode" h), Single (Atom "read" h), universe)
 
 -- Write str to h: actually writes; requires write- or append-mode open.
 writePledge :: IO.Handle -> String -> Pledge IO REHandler ()
-writePledge h str = Pledge
-    { ret    = IO.hPutStr h str
-    , pre    = pure $ Or (previously (Atom "writeMode" h))
-                         (previously (Atom "appendMode" h))
-    , post   = \_ -> pure $ Single (Atom "write" h)
-    , future = \_ -> pure universe
-    }
+writePledge h str = Pledge $ do
+    IO.hPutStr h str
+    return ((), Or (previously (Atom "writeMode" h)) (previously (Atom "appendMode" h)),
+            Single (Atom "write" h), universe)
 
 -- Close h: actually closes; pre requires open(h); guards against double-close.
 closePledge :: IO.Handle -> Pledge IO REHandler ()
-closePledge h = Pledge
-    { ret    = IO.hClose h
-    , pre    = pure $ previously (Atom "open" h)
-    , post   = \_ -> pure $ Single (Atom "close" h)
-    , future = \_ -> pure $ noUntil (Atom "close" h) (Atom "open" h)
-    }
+closePledge h = Pledge $ do
+    IO.hClose h
+    return ((), previously (Atom "open" h), Single (Atom "close" h),
+            noUntil (Atom "close" h) (Atom "open" h))
 
 -- ── Example programs ──────────────────────────────────────────────────────────
 
@@ -151,12 +136,7 @@ badReadFromWriteOnly fn = do
 badReadFromUntracked :: Pledge IO REHandler ()
 badReadFromUntracked =
     let h = IO.stdin
-    in Pledge
-        { ret    = pure ()
-        , pre    = pure $ previously (Atom "readMode" h)
-        , post   = \_ -> pure $ Single (Atom "read" h)
-        , future = \_ -> pure universe
-        }
+    in Pledge $ return ((), previously (Atom "readMode" h), Single (Atom "read" h), universe)
 
 -- Bad: open file but never close.
 -- Future: F(close(h)) — obligation remains, never discharged.

@@ -16,7 +16,8 @@ executable pledge-main
     , sbv
   other-modules:
       Pledge
-      Examples.UnitTest
+      Examples.UnitTest.PledgeTest
+      Examples.UnitTest.PresburgerTest
       Examples.RE.Memory
       Examples.RE.FileHandle
       Examples.RE.Mutex

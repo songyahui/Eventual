@@ -63,10 +63,10 @@ liftPledge ma = Pledge $ fmap (, universe, empty, universe) ma
 
 -- | All four components of a completed 'Pledge' action, collected in one run.
 data PledgeResult eff a = PledgeResult
-    { pledgeReturn :: a    -- ^ the return value
-    , pledgePre    :: eff  -- ^ precondition (what must have held before)
-    , pledgePost   :: eff  -- ^ postcondition (what this action emitted)
-    , pledgeFut    :: eff  -- ^ future condition (what must still hold after)
+    { ret  :: a    -- ^ the return value
+    , pre  :: eff  -- ^ precondition (what must have held before)
+    , post :: eff  -- ^ postcondition (what this action emitted)
+    , fut  :: eff  -- ^ future condition (what must still hold after)
     }
 
 -- | Run a 'Pledge' action exactly once and collect all four components.

@@ -468,10 +468,10 @@ runRELawTests = do
 -- result.  Uses 'inspect' so the underlying @IO@ action executes exactly once.
 printOfPledgeRE :: forall t a. (Show a, Show t, Eq t) => String -> Pledge IO (RE t) a -> IO a
 printOfPledgeRE name prog = do
-    PledgeResult ret preC postC futC <- inspect prog
+    PledgeResult r preC postC futC <- inspect prog
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Ret:    " ++ show ret
+    putStrLn $ "Ret:    " ++ show r
     putStrLn $ "Pre:    " ++ show (normalize preC)
     putStrLn $ "Post:   " ++ show (normalize postC)
     putStrLn $ "Future: " ++ show (normalize futC)
-    return ret
+    return r

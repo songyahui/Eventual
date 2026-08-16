@@ -9,176 +9,143 @@ import System.Random
 
 type RETerm = (RE Term)
 
-malloc :: IO (Pledge RETerm Addr)
-malloc = do
-    let randomNum :: IO Int = randomRIO (1, 100)
-    addr <- randomNum
-    return $ Pledge
-        { ret    = addr
-        , pre    = universe
-        , post   = Single (Atom "malloc" (List [Num addr]))
-        , future = finally (Atom "free" (List [Num addr]))
+malloc :: Pledge IO (RE Term) Addr
+malloc = Pledge
+        { ret    = randomRIO (1, 1000)
+        , pre    = pure universe
+        , post   = \addr -> pure (Single (Atom "malloc" (List [Num addr])))
+        , future = \addr -> pure (finally (Atom "free" (List [Num addr])))
         }
 
-free :: Addr -> Pledge RETerm ()
+free :: Addr -> Pledge IO (RE Term) ()
 free addr = Pledge
-    { ret    = ()
-    , pre    = previously (Atom "malloc" (List [Num addr]))
-    , post   = Single (Atom "free" (List [Num addr]))
+    { ret    = pure ()
+    , pre    = pure $ previously (Atom "malloc" (List [Num addr]))
+    , post   = \_ -> pure $ Single (Atom "free" (List [Num addr]))
     -- noUntil free malloc: free(addr) must not occur again until malloc(addr)
     -- happens first.  This prevents double-free while allowing re-allocation:
     --   free → free          is forbidden  (double-free, no malloc in between)
     --   free → malloc → free is allowed    (re-allocation is valid)
-    , future = noUntil (Atom "free" (List [Num addr]))
+    , future = \_ -> pure $ noUntil (Atom "free" (List [Num addr]))
                                (Atom "malloc" (List [Num addr]))
     }
 
 -- Good: malloc uses the returned address to parameterise the free obligation.
 -- Demonstrates data-dependent future: future = \a -> finally(free(a)).
-mallocFreeByReturnedAddr :: IO (Pledge RETerm ())
+mallocFreeByReturnedAddr :: Pledge IO (RE Term) ()
 mallocFreeByReturnedAddr = do
-    paddr :: Pledge RETerm Addr <- malloc
-    return $ paddr >>= free
-
+    addr :: Addr <- malloc
+    free addr
 
 -- Good: two sequential malloc/free pairs — each obligation is discharged in turn.
-mallocFreeSequential :: IO (Pledge RETerm ())
+mallocFreeSequential :: Pledge IO RETerm ()
 mallocFreeSequential = do
-    paddr1 :: Pledge RETerm Addr <- malloc
-    paddr2 :: Pledge RETerm Addr <- malloc
-    return $ (paddr1 >>= free) >> (paddr2 >>= free)
+    addr1 <- malloc
+    addr2 <- malloc
+    free addr1
+    free addr2
 
 -- Good: malloc and free every address in a loop.
-loopAllFreed :: Int -> IO [Pledge RETerm ()]
-loopAllFreed n = mapM (const eachRun) [1..n]
+loopAllFreed :: Int -> [Pledge IO RETerm ()]
+loopAllFreed n = replicate n eachRun
     where
-    eachRun :: IO (Pledge RETerm ())
+    eachRun :: Pledge IO RETerm ()
     eachRun = do
-        paddr :: Pledge RETerm Addr <- malloc
-        return $ paddr >>= free
+        addr <- malloc
+        free addr
 
 -- Bad: malloc 1 and 2, only free 1 — future obligation for address 2 remains.
-missingFree :: IO (Pledge RETerm Addr)
-missingFree = do
-    paddr1 :: Pledge RETerm Addr <- malloc
-    paddr2 :: Pledge RETerm Addr <- malloc
-    return $ (paddr1 >>= free) >> paddr2
+missingFree :: Pledge IO RETerm Addr
+missingFree = (malloc >>= free) >> malloc
 
 
 -- Bad: free without a preceding malloc — precondition violated (pre = Bot).
-freeWithoutMalloc :: IO (Pledge RETerm ())
-freeWithoutMalloc = return $ free 1
+freeWithoutMalloc :: Pledge IO RETerm ()
+freeWithoutMalloc = free 1
 
 -- Bad: allocate via malloc, free the wrong address.
 -- future of (malloc 1) evaluates to finally(free(1));
 -- free 2 does not discharge it, so finally(free(1)) remains.
-wrongAddrFree :: IO (Pledge RETerm ())
-wrongAddrFree = do
-    paddr :: Pledge RETerm Addr <- malloc
-    return $ paddr >>= \n -> free (n+1)
+wrongAddrFree :: Pledge IO RETerm ()
+wrongAddrFree = malloc >>= \n -> free (n+1)
 
 
 -- Bad: free the same address twice immediately.
 -- After the first free, future = noUntil(free(1), malloc(1)).
 -- The second free posts free(1) before any malloc(1), so the future becomes ∅.
-doubleFreeImmediate :: IO (Pledge RETerm ())
-doubleFreeImmediate = do
-    paddr :: Pledge RETerm Addr <- malloc
-    return $ paddr >>= \n -> do free n >> free n
+doubleFreeImmediate :: Pledge IO RETerm ()
+doubleFreeImmediate = malloc >>= \n -> free n >> free n
 
 -- Bad: double-free with intervening work between the two frees.
 -- The noUntil(free(1), malloc(1)) future set by the first free is still active
 -- when the second free arrives, regardless of what happens in between.
-doubleFreeWithWork :: IO (Pledge RETerm ())
+doubleFreeWithWork :: Pledge IO RETerm ()
 doubleFreeWithWork = do
-    paddr1 :: Pledge RETerm Addr <- malloc
-    paddr2 :: Pledge RETerm Addr <- malloc
-    return $ do
-        addr1 <- paddr1
-        addr2 <- paddr2
-        free addr1
-        free addr2
-        free addr1
+    addr1 <- malloc
+    addr2 <- malloc
+    free addr1
+    free addr2
+    free addr1
 
 -- Bad: leak combined with double-free in the same program.
 -- addr 2 is never freed (leak) and addr 1 is freed twice (double-free).
 -- Both violations are captured: future carries ∅ from the double-free.
-leakAndDoubleFree :: IO (Pledge RETerm ())
+leakAndDoubleFree :: Pledge IO RETerm ()
 leakAndDoubleFree = do
-    paddr1 :: Pledge RETerm Addr <- malloc
-    paddr2 :: Pledge RETerm Addr <- malloc
-    return $ do
-        addr1 <- paddr1
-        _ <- paddr2
-        free addr1
-        free addr1
+    addr1 <- malloc
+    _ <- malloc
+    free addr1
+    free addr1
 
 -- Good: reallocate the same address after freeing it.
 -- After free 1: future = noUntil(free(1), malloc(1)).
 -- malloc 1 resets the guard (derivative w.r.t. malloc(1) = Σ*).
 -- malloc 1 also imposes finally(free(1)), which the second free discharges.
-mallocFreeReallocFree :: IO (Pledge RETerm ())
-mallocFreeReallocFree = do
-    paddr :: Pledge RETerm Addr <- malloc
-    return $ (paddr >>= free) >> (paddr >>= free)
+mallocFreeReallocFree :: Pledge IO RETerm ()
+mallocFreeReallocFree = (malloc >>= free) >> (malloc >>= free)
 
 -- Good: allocate and return the address without freeing.
 -- ret = 1; future = finally(free(1)) — obligation visible in the residual.
-allocReturnAddr :: IO (Pledge RETerm Addr)
+allocReturnAddr :: Pledge IO RETerm Addr
 allocReturnAddr = malloc
 
 -- Bad: allocate two addresses and return both — neither obligation is discharged.
 -- ret = (1, 2); future = finally(free(1)) ∧ finally(free(2)).
-allocTwoReturnPair :: IO (Pledge RETerm (Addr, Addr))
-allocTwoReturnPair = do
-    paddr1 :: Pledge RETerm Addr <- malloc
-    paddr2 :: Pledge RETerm Addr <- malloc
-    return $
-        Pledge {
-            ret = (ret paddr1, ret paddr2),
-            pre = pre paddr1 /\ pre paddr2,
-            post = post paddr1 · post paddr2,
-            future = future paddr1 /\ future paddr2 }
+allocTwoReturnPair :: Pledge IO RETerm (Addr, Addr)
+allocTwoReturnPair =
+    let paddr1 = malloc
+        paddr2 = malloc
+    in Pledge {
+        ret    = (,) <$> ret paddr1 <*> ret paddr2,
+        pre    = pre paddr1 /\ pre paddr2,
+        post   = \_ -> (ret paddr1 >>= post paddr1) · (ret paddr2 >>= post paddr2),
+        future = \_ -> (ret paddr1 >>= future paddr1) /\ (ret paddr2 >>= future paddr2) }
 
 -- Good: allocate, free, and return the freed address.
 -- ret = 1; future = noUntil(free(1), malloc(1)) — guard active, no pending finally.
-allocFreeReturnAddr :: IO (Pledge RETerm Addr)
-allocFreeReturnAddr = do
-    paddr :: Pledge RETerm Addr <- malloc
-    let base :: Pledge RETerm () = paddr >>= \n -> free n
-    return $
-        Pledge {
-            ret = ret paddr,
-            pre = pre base,
-            post = post base,
-            future = future base }
+allocFreeReturnAddr :: Pledge IO RETerm Addr
+allocFreeReturnAddr =
+    let paddr = malloc
+        base :: Pledge IO RETerm () = paddr >>= free
+    in Pledge {
+        ret    = ret paddr,
+        pre    = pre base,
+        post   = \_ -> ret base >>= post base,
+        future = \_ -> ret base >>= future base }
 
 main :: IO ()
 main = do
-    mallocFreeByReturnedAddr' <- mallocFreeByReturnedAddr
-    printOfPledgeRE "mallocFreeByReturnedAddr" mallocFreeByReturnedAddr'
-    mallocFreeSequential' <- mallocFreeSequential
-    printOfPledgeRE "mallocFreeSequential"     mallocFreeSequential'
-    loopAllFreed' <- loopAllFreed 3
-    mapM_ (printOfPledgeRE "loopAllFreed 3")   loopAllFreed'
-    missingFree' :: Pledge RETerm Addr <- missingFree
-    printOfPledgeRE "missingFree"              missingFree'
-    freeWithoutMalloc' <- freeWithoutMalloc
-    printOfPledgeRE "freeWithoutMalloc"        freeWithoutMalloc'
-    wrongAddrFree' <- wrongAddrFree
-    printOfPledgeRE "wrongAddrFree"            wrongAddrFree'
-    doubleFreeImmediate' <- doubleFreeImmediate
-    printOfPledgeRE "doubleFreeImmediate"      doubleFreeImmediate'
-    doubleFreeWithWork' <- doubleFreeWithWork
-    printOfPledgeRE "doubleFreeWithWork"       doubleFreeWithWork'
-    leakAndDoubleFree' <- leakAndDoubleFree
-    printOfPledgeRE "leakAndDoubleFree"        leakAndDoubleFree'
-    mallocFreeReallocFree' <- mallocFreeReallocFree
-    printOfPledgeRE "mallocFreeReallocFree"    mallocFreeReallocFree'
-    allocReturnAddr' <- allocReturnAddr
-    printOfPledgeRE "allocReturnAddr"          allocReturnAddr'
-    allocTwoReturnPair' <- allocTwoReturnPair
-    printOfPledgeRE "allocTwoReturnPair"       allocTwoReturnPair'
-    allocFreeReturnAddr' <- allocFreeReturnAddr
-    printOfPledgeRE "allocFreeReturnAddr"      allocFreeReturnAddr'
+    printOfPledgeRE "mallocFreeByReturnedAddr" mallocFreeByReturnedAddr
+    printOfPledgeRE "mallocFreeSequential"     mallocFreeSequential
+    mapM_ (printOfPledgeRE "loopAllFreed 3")   (loopAllFreed 3)
+    printOfPledgeRE "missingFree"              missingFree
+    printOfPledgeRE "freeWithoutMalloc"        freeWithoutMalloc
+    printOfPledgeRE "wrongAddrFree"            wrongAddrFree
+    printOfPledgeRE "doubleFreeImmediate"      doubleFreeImmediate
+    printOfPledgeRE "doubleFreeWithWork"       doubleFreeWithWork
+    printOfPledgeRE "leakAndDoubleFree"        leakAndDoubleFree
+    printOfPledgeRE "mallocFreeReallocFree"    mallocFreeReallocFree
+    printOfPledgeRE "allocReturnAddr"          allocReturnAddr
+    printOfPledgeRE "allocTwoReturnPair"       allocTwoReturnPair
+    printOfPledgeRE "allocFreeReturnAddr"      allocFreeReturnAddr
     return ()

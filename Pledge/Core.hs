@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -i.. #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Pledge.Core
     ( -- * Composable class
       Composable(..)
@@ -15,6 +16,15 @@ class Composable a where
     empty         :: a
     universe      :: a
     subtraction   :: a -> a -> a
+
+-- Lift all Composable operations through any Applicative m.
+-- This lets (·), (/\), (\\) work on m eff values directly.
+instance {-# OVERLAPPABLE #-} (Composable eff, Applicative m) => Composable (m eff) where
+    concatenation = liftA2 concatenation
+    conjunction   = liftA2 conjunction
+    subtraction   = liftA2 subtraction
+    empty         = pure empty
+    universe      = pure universe
 
 infixl 6 ·
 (·) :: Composable a => a -> a -> a
@@ -36,60 +46,51 @@ a \\ b = subtraction b a
 --   mallocFresh addr = Effectful { ..., future = \a -> finally(free(a)) }
 -- so that the exact address returned drives the obligation.
 
-data Pledge eff a = Pledge
-    { ret    :: a
-    , pre    :: eff
-    , post   :: eff
-    , future :: eff
+data Pledge m eff a = Pledge
+    { ret    :: m a
+    , pre    :: m eff
+    , post   :: a -> m eff
+    , future :: a -> m eff
     }
 
-instance Functor (Pledge eff) where
-    -- fmap changes the return type from a to b, so future must become
-    -- b -> eff.  We evaluate it at the known original return value and
-    -- ignore the new b argument (the obligation is already determined).
+instance (Monad m) => Functor (Pledge m eff) where
+    -- fmap changes the return type from a to b, so post and future must become
+    -- b -> m eff.  We ignore the new b argument and evaluate at the known
+    -- original return value (the obligation is already determined).
     fmap f e = Pledge
-        { ret    = f $ ret e
+        { ret    = fmap f (ret e)
         , pre    = pre e
-        , post   = post e
-        , future = future e
+        , post   = \_ -> ret e >>= post e
+        , future = \_ -> ret e >>= future e
         }
 
-instance Composable eff => Applicative (Pledge eff) where
+instance (Composable eff, Monad m) => Applicative (Pledge m eff) where
     pure x = Pledge
-        { ret    = x
-        , pre    = universe
-        , post   = empty
-        , future = universe
+        { ret    = pure x
+        , pre    = pure universe
+        , post   = const $ pure empty
+        , future = const $ pure universe
         }
     f <*> x = Pledge
-        { ret    = ret f $ ret x
-        -- Traditional precondition: pre of f, plus the residual of pre x
-        -- not covered by post f.  Mirrors the sequential Hoare rule:
-        --   {P} f {Q},  {P'} x {R}  ⊢  {P /\ (P' \\ Q)} f <*> x {R}
-        , pre    = pre f /\ (pre x \\ post f)
-        , post   = post f · post x
-        -- Future obligation: what f still requires in the future after post x
-        -- covers some of it, conjoined with x's own future obligation.
-        --   future(f <*> x) = (futureF \\ postX) /\ futureX
-        , future = (future f \\ post x) /\ future x
+        { ret    = ret f <*> ret x
+        -- pre(f <*> x) = preF /\ (preX \\ postF@retF)
+        , pre    = pre f /\ (pre x \\ (ret f >>= post f))
+        -- post(f <*> x) = postF@retF · postX@retX  (ignore the b result)
+        , post   = \_ -> (ret f >>= post f) · (ret x >>= post x)
+        -- future(f <*> x) = (futureF@retF \\ postX@retX) /\ futureX@retX
+        , future = \_ -> ((ret f >>= future f) \\ (ret x >>= post x)) /\ (ret x >>= future x)
         }
 
-
-instance Composable eff => Monad (Pledge eff) where
+instance (Composable eff, Monad m) => Monad (Pledge m eff) where
     return = pure
-    e >>= f =
-        let fe = f $ ret e in
-        Pledge
-        { ret    = ret fe
-        -- Traditional precondition: pre of e, plus the residual of pre fe
-        -- not covered by post e.  Mirrors the sequential Hoare rule:
-        --   {P} e {Q},  {P'} fe {R}  ⊢  {P /\ (P' \\ Q)} e >>= f {R}
-        , pre    = pre e /\ (pre fe \\ post e)
-        , post   = post e · post fe
-        -- Future obligation: what e still requires in the future after post fe
-        -- covers some of it, conjoined with fe's own future obligation.
-        --   future(e >>= f) = (futureE \\ postFE) /\ futureFE
-        , future = (future e \\ post fe) /\ future fe
+    e >>= f = Pledge
+        { ret    = ret e >>= \a -> ret (f a)
+        -- {P} e {Q},  {P'} (f a) {R}  ⊢  {P /\ (P' \\ Q)} e >>= f {R}
+        , pre    = ret e >>= \a -> pre e /\ (pre (f a) \\ post e a)
+        -- post and future ignore the final b; obligations are fixed by the bound a
+        , post   = \_ -> ret e >>= \a -> post e a · (ret (f a) >>= post (f a))
+        -- future(e >>= f) = (futureE@a \\ postFE@retFA) /\ futureFE@retFA
+        , future = \_ -> ret e >>= \a -> (future e a \\ (ret (f a) >>= post (f a))) /\ (ret (f a) >>= future (f a))
         }
 
 -- To be a lawful Monad, Pledge must satisfy the three monad laws.  The following

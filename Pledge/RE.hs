@@ -460,15 +460,15 @@ runRELawTests = do
     putStrLn "-- (\\\\) sequential dist."  >> quickCheck prop_sub_seq_dist
     putStrLn "-- (\\\\) conjunction dist." >> quickCheck prop_sub_conj_dist
 
-printOfPledgeRE :: forall a t. (Show a, Show t, Eq t) => String -> Pledge (RE t) a -> IO a
+printOfPledgeRE :: forall t a. (Show a, Show t, Eq t) => String -> Pledge IO (RE t) a -> IO a
 printOfPledgeRE name prog = do
-    let res = ret prog
-        preC = pre prog
-        postC = post prog
-        futrueC = future prog
+    res <- ret prog
+    preC <- pre prog
+    postC <- post prog res
+    futureC <- future prog res
     putStrLn $ "=== " ++ name ++ " ==="
     putStrLn $ "Pre:    " ++ show (normalize preC)
     putStrLn $ "Post:   " ++ show (normalize postC)
     putStrLn $ "Ret:    " ++ show res
-    putStrLn $ "Future: " ++ show (normalize futrueC)
+    putStrLn $ "Future: " ++ show (normalize futureC)
     return res

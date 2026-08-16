@@ -32,7 +32,6 @@ library
   build-depends:
       base
     , containers
-    , QuickCheck
     , sbv
 
 -- ── Executables ───────────────────────────────────────────────────────────────
@@ -69,6 +68,18 @@ executable pledge-main
       Examples.GuardedRE.BoundedCounter
       Examples.WeightedRE.Memory
       Examples.WeightedRE.TaskScheduler
+
+-- ── Test suite ────────────────────────────────────────────────────────────────
+
+test-suite pledge-laws
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   .
+  main-is:          Tests/RELaws.hs
+  default-language: GHC2021
+  build-depends:
+      base
+    , pledge
+    , QuickCheck
 
 executable pledge-solver-test
   hs-source-dirs:   .

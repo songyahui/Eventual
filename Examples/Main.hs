@@ -13,7 +13,7 @@ import qualified Examples.RE.Shadow          as REShadow
 import qualified Examples.SL.HeapMemory           as SLHeapMemory
 import qualified Examples.SL.BankAccount          as SLBankAccount
 import qualified Examples.SL.LinkedList            as SLLinkedList
-import qualified Examples.GuardedRE.Memory        as ExtREMemory
+import qualified Examples.GuardedRE.Memory         as ExtREMemory
 import qualified Examples.GuardedRE.BoundedCounter as ExtREBoundedCounter
 import qualified Examples.WeightedRE.Memory               as WREMemory
 import qualified Examples.WeightedRE.TaskScheduler        as WRETaskScheduler

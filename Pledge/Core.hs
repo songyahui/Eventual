@@ -8,6 +8,10 @@ module Pledge.Core
     , (\\)
       -- * Pledge monad
     , Pledge(..)
+    , getRet
+    , getPre
+    , getPost
+    , getFut
     ) where
 
 class Composable a where
@@ -48,6 +52,18 @@ newtype Pledge m eff a = Pledge { runPledge :: m (a, eff, eff, eff) }
 --                                                ^   ^    ^    ^
 --                                               ret pre  post future
 
+getRet :: Functor m => Pledge m eff a -> m a
+getRet = fmap (\(ret, _, _, _) -> ret) . runPledge
+
+getPre :: Functor m => Pledge m eff a -> m eff
+getPre = fmap (\(_, pre, _, _) -> pre) . runPledge
+
+getPost :: Functor m => Pledge m eff a -> m eff
+getPost = fmap (\(_, _, post, _) -> post) . runPledge
+
+getFut :: Functor m => Pledge m eff a -> m eff
+getFut = fmap (\(_, _, _, fut) -> fut) . runPledge
+
 instance Functor m => Functor (Pledge m eff) where
     fmap f (Pledge ma) =
         Pledge $ fmap (\(a, pre, post, fut) -> (f a, pre, post, fut)) ma
@@ -66,9 +82,88 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
         (b, preB, postB, futB) <- runPledge (g a)
         return (b, preA /\ (preB \\ postA), postA · postB, (futA \\ postB) /\ futB)
 
--- Monad laws hold when 'Composable' satisfies:
---   empty · a = a,  a · empty = a,  (a · b) · c = a · (b · c)
---   universe /\ a = a
---   a \\ empty = a,  universe \\ a = universe
---   x \\ (a · b) = (x \\ b) \\ a
---   (a /\ b) \\ c = (a \\ c) /\ (b \\ c)
+-- ── Monad law proofs ──────────────────────────────────────────────────────────
+--
+-- Notation: write a Pledge as (ret, pre, post, fut).
+--   pure x          = (x, universe, empty, universe)
+--   (P,Q,F) >>= g   -- where g ret = (ret', P', Q', F')
+--     = (ret', P /\ (P' \\ Q),  Q · Q',  (F \\ Q') /\ F')
+--
+-- The proofs require 'Composable' to satisfy these eight laws:
+--
+--   (C1)  empty · a       = a           left  identity of (·)
+--   (C2)  a · empty       = a           right identity of (·)
+--   (C3)  (a · b) · c     = a · (b · c) associativity  of (·)
+--   (C4)  universe /\ a   = a           universe is identity of (/\)
+--   (C5)  a \\ empty      = a           empty post discharges nothing
+--   (C6)  universe \\ a   = universe    universe is stable under subtraction
+--   (C7)  x \\ (a · b)    = (x \\ b) \\ a   sequential residual
+--   (C8)  (a /\ b) \\ c   = (a \\ c) /\ (b \\ c)  subtraction distributes over (/\)
+--
+-- ── Law 1: left identity — pure a >>= f = f a ─────────────────────────────────
+--
+-- pure a = (a, universe, empty, universe).
+-- Let f a = (b, P', Q', F').  Then pure a >>= f gives:
+--
+--   pre  : universe /\ (P' \\ empty)
+--        = universe /\ P'             -- by C5: P' \\ empty = P'
+--        = P'                         -- by C4: universe /\ P' = P'
+--
+--   post : empty · Q'
+--        = Q'                         -- by C1
+--
+--   fut  : (universe \\ Q') /\ F'
+--        = universe /\ F'             -- by C6: universe \\ Q' = universe
+--        = F'                         -- by C4
+--
+-- All three components equal those of f a.                                    □
+--
+-- ── Law 2: right identity — m >>= pure = m ────────────────────────────────────
+--
+-- Let m = (a, P, Q, F).  pure a = (a, universe, empty, universe).
+-- m >>= pure gives:
+--
+--   pre  : P /\ (universe \\ Q)
+--        = P /\ universe              -- by C6
+--        = P                          -- by C4
+--
+--   post : Q · empty
+--        = Q                          -- by C2
+--
+--   fut  : (F \\ empty) /\ universe
+--        = F /\ universe              -- by C5
+--        = F                          -- by C4
+--
+-- All three components equal those of m.                                       □
+--
+-- ── Law 3: associativity — (m >>= f) >>= g = m >>= (f >=> g) ─────────────────
+--
+-- Let m = (a,P,Q,F),  f a = (b,P',Q',F'),  g b = (c,P'',Q'',F'').
+--
+-- LHS: compute m >>= f first → (b, P∧(P'\\Q), Q·Q', (F\\Q')∧F'),
+--      then bind g:
+--
+--   pre_L  = [P /\ (P' \\ Q)] /\ (P'' \\ (Q · Q'))
+--   post_L = (Q · Q') · Q''
+--   fut_L  = [((F \\ Q') /\ F') \\ Q''] /\ F''
+--
+-- RHS: compute f a >>= g first → (c, P'∧(P''\\Q'), Q'·Q'', (F'\\Q'')∧F''),
+--      then bind that into m:
+--
+--   pre_R  = P /\ ((P' /\ (P'' \\ Q')) \\ Q)
+--   post_R = Q · (Q' · Q'')
+--   fut_R  = (F \\ (Q' · Q'')) /\ ((F' \\ Q'') /\ F'')
+--
+-- post: post_L = (Q · Q') · Q'' = Q · (Q' · Q'') = post_R              by C3  □
+--
+-- pre:  expand pre_R using C8 then C7:
+--   (P' /\ (P'' \\ Q')) \\ Q
+--     = (P' \\ Q) /\ ((P'' \\ Q') \\ Q)    by C8
+--     = (P' \\ Q) /\ (P'' \\ (Q · Q'))     by C7
+--   so pre_R = P /\ (P' \\ Q) /\ (P'' \\ (Q · Q')) = pre_L             by C3  □
+--
+-- fut:  expand fut_L using C8 then C7:
+--   ((F \\ Q') /\ F') \\ Q''
+--     = (F \\ Q') \\ Q''  /\  (F' \\ Q'')  by C8
+--     = F \\ (Q' · Q'')   /\  (F' \\ Q'')  by C7
+--   so fut_L = (F \\ (Q'·Q'')) /\ (F' \\ Q'') /\ F'' = fut_R           by C4  □

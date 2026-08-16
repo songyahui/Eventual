@@ -462,10 +462,13 @@ runRELawTests = do
 
 printOfPledgeRE :: forall t a. (Show a, Show t, Eq t) => String -> Pledge IO (RE t) a -> IO a
 printOfPledgeRE name prog = do
-    (res, preC, postC, futureC) <- runPledge prog
+    ret <- getRet prog
+    preC <- getPre prog
+    postC <- getPost prog
+    futureC <- getFut prog
     putStrLn $ "=== " ++ name ++ " ==="
+    putStrLn $ "Ret:    " ++ show ret
     putStrLn $ "Pre:    " ++ show (normalize preC)
     putStrLn $ "Post:   " ++ show (normalize postC)
-    putStrLn $ "Ret:    " ++ show res
     putStrLn $ "Future: " ++ show (normalize futureC)
-    return res
+    return ret

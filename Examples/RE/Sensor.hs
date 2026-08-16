@@ -3,73 +3,61 @@ module Examples.RE.Sensor where
 import Prelude hiding ((<>))
 import Pledge
 
-sensorInit :: Int -> Pledge RE ()
-sensorInit sid = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "sensorInit" (List [Num sid]))
-    , future = \_ -> finally (Atom "sensorSleep" (List [Num sid]))
-    }
+sensorInit :: Int -> Pledge IO (RE Term) ()
+sensorInit sid = Pledge $ return
+    ((), universe,
+     Single (Atom "sensorInit" (List [Num sid])),
+     finally (Atom "sensorSleep" (List [Num sid])))
 
-sensorRead :: Int -> Pledge RE ()
-sensorRead sid = Pledge
-    { ret    = ()
-    , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
-                  (Single (Atom "sensorRead" (List [Num sid])))
-    , post   = Single (Atom "sensorRead" (List [Num sid]))
-    , future = const universe
-    }
+sensorRead :: Int -> Pledge IO (RE Term) ()
+sensorRead sid = Pledge $ return
+    ((), Or (Single (Atom "sensorInit" (List [Num sid])))
+            (Single (Atom "sensorRead" (List [Num sid]))),
+     Single (Atom "sensorRead" (List [Num sid])),
+     universe)
 
 -- Precondition: sensor must have been initialised or read before sleeping
-sensorSleep :: Int -> Pledge RE ()
-sensorSleep sid = Pledge
-    { ret    = ()
-    , pre    = Or (Single (Atom "sensorInit" (List [Num sid])))
-                  (Single (Atom "sensorRead" (List [Num sid])))
-    , post   = Single (Atom "sensorSleep" (List [Num sid]))
-    , future = const universe
-    }
+sensorSleep :: Int -> Pledge IO (RE Term) ()
+sensorSleep sid = Pledge $ return
+    ((), Or (Single (Atom "sensorInit" (List [Num sid])))
+            (Single (Atom "sensorRead" (List [Num sid]))),
+     Single (Atom "sensorSleep" (List [Num sid])),
+     universe)
 
-motorOn :: Int -> Pledge RE ()
-motorOn mid = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "motorOn" (List [Num mid]))
-    , future = \_ -> finally (Atom "motorOff" (List [Num mid]))
-    }
+motorOn :: Int -> Pledge IO (RE Term) ()
+motorOn mid = Pledge $ return
+    ((), universe,
+     Single (Atom "motorOn" (List [Num mid])),
+     finally (Atom "motorOff" (List [Num mid])))
 
-motorOff :: Int -> Pledge RE ()
-motorOff mid = Pledge
-    { ret    = ()
-    , pre    = Single (Atom "motorOn" (List [Num mid]))
-    , post   = Single (Atom "motorOff" (List [Num mid]))
-    , future = const universe
-    }
+motorOff :: Int -> Pledge IO (RE Term) ()
+motorOff mid = Pledge $ return
+    ((), Single (Atom "motorOn" (List [Num mid])),
+     Single (Atom "motorOff" (List [Num mid])),
+     universe)
 
-actuate :: String -> Int -> Pledge RE ()
-actuate device level = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "actuate" (List [Str device, Num level]))
-    , future = const universe
-    }
+actuate :: String -> Int -> Pledge IO (RE Term) ()
+actuate device level = Pledge $ return
+    ((), universe,
+     Single (Atom "actuate" (List [Str device, Num level])),
+     universe)
 
 -- Good: init, read, sleep
-safeSensorCycle :: Pledge RE ()
+safeSensorCycle :: Pledge IO (RE Term) ()
 safeSensorCycle = do
     sensorInit 1
     sensorRead 1
     sensorSleep 1
 
 -- Good: motor on, actuate, motor off
-safeMotorCycle :: Pledge RE ()
+safeMotorCycle :: Pledge IO (RE Term) ()
 safeMotorCycle = do
     motorOn 1
     actuate "pump" 80
     motorOff 1
 
 -- Bad: sensor 2 never slept — future pending
-sensorLeftOn :: Pledge RE ()
+sensorLeftOn :: Pledge IO (RE Term) ()
 sensorLeftOn = do
     sensorInit 1
     sensorSleep 1
@@ -78,21 +66,22 @@ sensorLeftOn = do
     -- sensorSleep 2 missing
 
 -- Bad: motor left running — future pending
-motorLeftRunning :: Pledge RE ()
+motorLeftRunning :: Pledge IO (RE Term) ()
 motorLeftRunning = do
     motorOn 3
     actuate "fan" 50
 
 -- Bad: sensorRead without init — precondition violated
-readWithoutInit :: Pledge RE ()
+readWithoutInit :: Pledge IO (RE Term) ()
 readWithoutInit = sensorRead 5
 
-printResult :: String -> Pledge RE () -> IO ()
+printResult :: String -> Pledge IO (RE Term) () -> IO ()
 printResult name prog = do
+    (_, preC, postC, futC) <- runPledge prog
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
-    putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
+    putStrLn $ "Pre:    " ++ show (normalize preC)
+    putStrLn $ "Post:   " ++ show (normalize postC)
+    putStrLn $ "Future: " ++ show (normalize futC)
     putStrLn ""
 
 main :: IO ()

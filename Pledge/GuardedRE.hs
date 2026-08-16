@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -i.. #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Pledge.GuardedRE
     ( -- * Type
       GuardedRE(..)
@@ -31,7 +32,7 @@ import Pledge.RE
 data GuardedRE a = GuardedRE PPred (RE a)
     deriving (Eq)
 
-instance Show (GuardedRE a) where
+instance Show a => Show (GuardedRE a) where
     show (GuardedRE PTrue r) = show r
     show (GuardedRE p     r) = "[" ++ show p ++ "] ∧ " ++ show r
 
@@ -49,7 +50,7 @@ fromPPred p = GuardedRE p top
 -- (p1, r1) ∧ (p2, r2)  =  (p1 ∧ p2, r1 ∩ r2)
 -- Both the heap and the trace must satisfy both constraints.
 
-conjoin :: GuardedRE -> GuardedRE -> GuardedRE
+conjoin :: Eq a => GuardedRE a -> GuardedRE a -> GuardedRE a
 conjoin (GuardedRE p1 r1) (GuardedRE p2 r2) =
     GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (And r1 r2))
 
@@ -57,7 +58,7 @@ conjoin (GuardedRE p1 r1) (GuardedRE p2 r2) =
 -- Consuming an event advances only the trace side; the heap predicate is
 -- a static constraint and does not change with individual events.
 
-deriveGuarded :: Event -> GuardedRE -> GuardedRE
+deriveGuarded :: Eq a => Event a -> GuardedRE a -> GuardedRE a
 deriveGuarded e (GuardedRE p r) = GuardedRE p (normalize (derivative e r))
 
 -- ── Membership ────────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ deriveGuarded e (GuardedRE p r) = GuardedRE p (normalize (derivative e r))
 --
 -- The heap is a concrete assignment Map Addr Int; we instantiate the
 -- predicate with those values and ask the solver.
-nullableGuarded :: Map.Map Addr Int -> GuardedRE -> IO Bool
+nullableGuarded :: Map.Map Addr Int -> GuardedRE a -> IO Bool
 nullableGuarded heap (GuardedRE p r)
     | not (nullable r) = return False
     | otherwise        = do
@@ -98,7 +99,7 @@ instantiate heap = go
 
 -- checkGuarded heap trace ext: does (heap, trace) satisfy ext?
 -- Folds deriveGuarded over the trace then checks nullability.
-checkGuarded :: Map.Map Addr Int -> [Event] -> GuardedRE -> IO Bool
+checkGuarded :: Eq a => Map.Map Addr Int -> [Event a] -> GuardedRE a -> IO Bool
 checkGuarded heap trace ext =
     nullableGuarded heap (foldl (flip deriveGuarded) ext trace)
 
@@ -108,7 +109,7 @@ checkGuarded heap trace ext =
 -- subtraction: both heap predicates are conjoined in the residual, so the
 -- full constraint from both sides is preserved; the RE side uses reSubtraction.
 
-instance Composable GuardedRE where
+instance Eq a => Composable (GuardedRE a) where
     concatenation (GuardedRE p1 r1) (GuardedRE p2 r2) =
         GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (Seq r1 r2))
     conjunction   = conjoin

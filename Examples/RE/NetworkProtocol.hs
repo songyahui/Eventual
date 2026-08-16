@@ -5,58 +5,42 @@ import Pledge
 
 -- TCP-like three-way handshake modelled as effectful steps.
 
-sendSYN :: Pledge RE ()
-sendSYN = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "sendSYN" (List []))
-    , future = \_ -> finally (Atom "recvSYNACK" (List []))
-    }
+sendSYN :: Pledge IO (RE Term) ()
+sendSYN = Pledge $ return
+    ((), universe,
+     Single (Atom "sendSYN" (List [])),
+     finally (Atom "recvSYNACK" (List [])))
 
 -- Precondition: sendSYN must have just occurred
-recvSYNACK :: Pledge RE ()
-recvSYNACK = Pledge
-    { ret    = ()
-    , pre    = Single (Atom "sendSYN" (List []))
-    , post   = Single (Atom "recvSYNACK" (List []))
-    , future = \_ -> finally (Atom "sendACK" (List []))
-    }
+recvSYNACK :: Pledge IO (RE Term) ()
+recvSYNACK = Pledge $ return
+    ((), Single (Atom "sendSYN" (List [])),
+     Single (Atom "recvSYNACK" (List [])),
+     finally (Atom "sendACK" (List [])))
 
 -- Precondition: recvSYNACK must have just occurred
-sendACK :: Pledge RE ()
-sendACK = Pledge
-    { ret    = ()
-    , pre    = Single (Atom "recvSYNACK" (List []))
-    , post   = Single (Atom "sendACK" (List []))
-    , future = const universe
-    }
+sendACK :: Pledge IO (RE Term) ()
+sendACK = Pledge $ return
+    ((), Single (Atom "recvSYNACK" (List [])),
+     Single (Atom "sendACK" (List [])),
+     universe)
 
-sendData :: String -> Pledge RE ()
-sendData payload = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "sendData" (List [Str payload]))
-    , future = const universe
-    }
+sendData :: String -> Pledge IO (RE Term) ()
+sendData payload = Pledge $ return
+    ((), universe, Single (Atom "sendData" (List [Str payload])), universe)
 
-sendFIN :: Pledge RE ()
-sendFIN = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "sendFIN" (List []))
-    , future = \_ -> finally (Atom "recvFINACK" (List []))
-    }
+sendFIN :: Pledge IO (RE Term) ()
+sendFIN = Pledge $ return
+    ((), universe,
+     Single (Atom "sendFIN" (List [])),
+     finally (Atom "recvFINACK" (List [])))
 
-recvFINACK :: Pledge RE ()
-recvFINACK = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "recvFINACK" (List []))
-    , future = const universe
-    }
+recvFINACK :: Pledge IO (RE Term) ()
+recvFINACK = Pledge $ return
+    ((), universe, Single (Atom "recvFINACK" (List [])), universe)
 
 -- Good: complete handshake, data, teardown — all preconditions met, no future pending
-fullSession :: Pledge RE ()
+fullSession :: Pledge IO (RE Term) ()
 fullSession = do
     sendSYN
     recvSYNACK
@@ -66,18 +50,18 @@ fullSession = do
     recvFINACK
 
 -- Bad: SYN sent but handshake never completed — future pending
-stalledHandshake :: Pledge RE ()
+stalledHandshake :: Pledge IO (RE Term) ()
 stalledHandshake = do
     sendSYN
 
 -- Bad: recvSYNACK called without sendSYN — precondition violated
-outOfOrder :: Pledge RE ()
+outOfOrder :: Pledge IO (RE Term) ()
 outOfOrder = do
     recvSYNACK
     sendACK
 
 -- Bad: connection never torn down — future pending
-teardownMissed :: Pledge RE ()
+teardownMissed :: Pledge IO (RE Term) ()
 teardownMissed = do
     sendSYN
     recvSYNACK
@@ -86,12 +70,13 @@ teardownMissed = do
     sendFIN
     -- missing recvFINACK
 
-printResult :: String -> Pledge RE () -> IO ()
+printResult :: String -> Pledge IO (RE Term) () -> IO ()
 printResult name prog = do
+    (_, preC, postC, futC) <- runPledge prog
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
-    putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
+    putStrLn $ "Pre:    " ++ show (normalize preC)
+    putStrLn $ "Post:   " ++ show (normalize postC)
+    putStrLn $ "Future: " ++ show (normalize futC)
     putStrLn ""
 
 main :: IO ()

@@ -11,7 +11,7 @@ module Pledge
 import Pledge.Core
 import Pledge.Presburger
 import Pledge.RE
--- import Pledge.GuardedRE
+import Pledge.GuardedRE
 import Pledge.Semiring
--- import Pledge.WeightedRE
+import Pledge.WeightedRE
 import Pledge.SL

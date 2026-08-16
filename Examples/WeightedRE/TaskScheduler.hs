@@ -18,53 +18,53 @@ import Pledge.WeightedRE
 --
 -- smul = + accumulates costs along a sequential path.
 -- sadd = min chooses the cheaper of two alternatives.
--- wNullable (evalFuture prog) gives the minimum total steps to fully
+-- wNullable (future prog) gives the minimum total steps to fully
 -- discharge all future obligations (∞ = no path to full discharge).
 
-type TSRE = WRE Tropical
+type TSRE = WRE Tropical Term
 
-submit :: Int -> Pledge TSRE ()
-submit taskId = Pledge
-    { ret    = ()
-    , pre    = WEps sone                                              -- no precondition
-    , post   = WSingle (Tropical 1) (Atom "submit" (List [Num taskId]))
-    , future = \_ -> wFinally (Tropical 1) (Atom "complete" (List [Num taskId]))
-    }
+submit :: Int -> Pledge IO TSRE ()
+submit taskId = Pledge $ return
+    ( ()
+    , WEps sone                                                              -- pre: no precondition
+    , WSingle (Tropical 1) (Atom "submit" (List [Num taskId]))               -- post
+    , wFinally (Tropical 1) (Atom "complete" (List [Num taskId]))            -- future
+    )
 
-complete :: Int -> Pledge TSRE ()
-complete taskId = Pledge
-    { ret    = ()
+complete :: Int -> Pledge IO TSRE ()
+complete taskId = Pledge $ return
+    ( ()
       -- pre: submit must have been observed (costs 1 step to verify)
-    , pre    = wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
-    , post   = WSingle (Tropical 1) (Atom "complete" (List [Num taskId]))
-    , future = \_ -> WEps sone                                        -- fully discharged
-    }
+    , wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
+    , WSingle (Tropical 1) (Atom "complete" (List [Num taskId]))             -- post
+    , WEps sone                                                              -- future: fully discharged
+    )
 
 -- abort is more expensive than complete (2 steps instead of 1).
-abort :: Int -> Pledge TSRE ()
-abort taskId = Pledge
-    { ret    = ()
-    , pre    = wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
-    , post   = WSingle (Tropical 2) (Atom "abort" (List [Num taskId]))
-    , future = \_ -> WEps sone
-    }
+abort :: Int -> Pledge IO TSRE ()
+abort taskId = Pledge $ return
+    ( ()
+    , wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
+    , WSingle (Tropical 2) (Atom "abort" (List [Num taskId]))                -- post
+    , WEps sone                                                              -- future: fully discharged
+    )
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
 
 -- Good: submit then complete. Total future cost = 1 step (complete discharged).
-submitAndComplete :: Pledge TSRE ()
+submitAndComplete :: Pledge IO TSRE ()
 submitAndComplete = do
     submit 1
     complete 1
 
 -- Good: submit then abort. Future cost = 2 steps (abort is costlier).
-submitAndAbort :: Pledge TSRE ()
+submitAndAbort :: Pledge IO TSRE ()
 submitAndAbort = do
     submit 1
     abort 1
 
 -- Good: two tasks submitted and completed in sequence.
-twoTasks :: Pledge TSRE ()
+twoTasks :: Pledge IO TSRE ()
 twoTasks = do
     submit 1
     complete 1
@@ -72,31 +72,31 @@ twoTasks = do
     complete 2
 
 -- Bad: submit without completing — future = F[1](complete(1)), wNullable = ∞.
-submitOnly :: Pledge TSRE ()
+submitOnly :: Pledge IO TSRE ()
 submitOnly = submit 1
 
 -- Good: choose cheapest of complete vs abort using WAdd (⊕ = min).
 -- This models a non-deterministic choice between two resolution strategies.
 -- The future picks the minimum-cost option.
-cheapestResolution :: Pledge TSRE ()
-cheapestResolution = Pledge
-    { ret    = ()
-    , pre    = WEps sone
-    , post   = WSingle (Tropical 1) (Atom "submit" (List [Num 1]))
+cheapestResolution :: Pledge IO TSRE ()
+cheapestResolution = Pledge $ return
+    ( ()
+    , WEps sone
+    , WSingle (Tropical 1) (Atom "submit" (List [Num 1]))
       -- future: either complete (cost 1) or abort (cost 2) — min = 1
-    , future = \_ -> WAdd
-                  (wFinally (Tropical 1) (Atom "complete" (List [Num 1])))
-                  (wFinally (Tropical 2) (Atom "abort"    (List [Num 1])))
-    }
+    , WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num 1])))
+           (wFinally (Tropical 2) (Atom "abort"    (List [Num 1])))
+    )
 
 -- ── Display ───────────────────────────────────────────────────────────────────
 
-printResult :: String -> Pledge TSRE () -> IO ()
+printResult :: String -> Pledge IO TSRE () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
-    let fut = wNormalize (evalFuture prog)
-    putStrLn $ "Pre:           " ++ show (wNormalize (pre prog))
-    putStrLn $ "Post:          " ++ show (wNormalize (post prog))
+    (_, preC, postC, futC) <- runPledge prog
+    let fut = wNormalize futC
+    putStrLn $ "Pre:           " ++ show (wNormalize preC)
+    putStrLn $ "Post:          " ++ show (wNormalize postC)
     putStrLn $ "Future:        " ++ show fut
     putStrLn $ "Min cost:      " ++ show (wNullable fut)
     putStrLn ""

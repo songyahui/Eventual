@@ -58,7 +58,6 @@ fsClose = send . FsClose
 -- ── 2. Handler ────────────────────────────────────────────────────────────
 -- Interpret FileSystem into IOE: each command appends to an IORef trace
 -- and fsRead returns a simulated string.
--- IOE at the tail lets us use liftIO inside the handler.
 
 fsHandler :: IORef [String] -> EffectHandler FileSystem '[IOE]
 fsHandler ref _ cmd = case cmd of
@@ -69,14 +68,13 @@ fsHandler ref _ cmd = case cmd of
     FsClose path -> liftIO $ modifyIORef ref (++ ["close(" ++ path ++ ")"])
 
 -- ── 3. Shadow type ────────────────────────────────────────────────────────
--- A Shadow pairs the pure RE specification (F.Pledge RE a, checked
+-- A Shadow pairs the RE specification (F.Pledge IO (RE Term) a, checked
 -- statically by Pledge) with a real Eff '[FileSystem, IOE] a program
 -- (run by the effect handler at runtime).
--- The two sides share no state and cannot interfere.
 
 data Shadow a = Shadow
-    { spec :: F.Pledge RE a         -- pure spec, Pledge checks this
-    , impl :: Eff '[FileSystem, IOE] a -- real program, interpreted at runtime
+    { spec :: F.Pledge IO (F.RE F.Term) a
+    , impl :: Eff '[FileSystem, IOE] a
     }
 
 -- Run the handler side; returns the result and the event trace.
@@ -95,43 +93,36 @@ instance Applicative Shadow where
     Shadow spf eff <*> Shadow spx efx = Shadow (spf <*> spx) (eff <*> efx)
 
 -- >>= threads spec and handler monads fully independently.
--- Spec sees ret sp (statically-known); handler sees the real runtime value.
 instance Monad Shadow where
     return = pure
     Shadow sp ef >>= f = Shadow (sp >>= spec . f) (ef >>= impl . f)
 
 -- ── 4. Spec primitives ────────────────────────────────────────────────────
--- For each Eff operation, an F.Pledge RE value carrying the RE contract.
+-- For each Eff operation, an F.Pledge IO (RE Term) value carrying the RE contract.
 
-specOpen :: FilePath -> F.Pledge RE ()
-specOpen path = F.Pledge
-    { F.ret    = ()
-    , F.pre    = universe
-    , F.post   = F.Single (F.Atom "open" (F.List [F.Str path]))
-    , F.future = \_ -> finally (F.Atom "close" (F.List [F.Str path]))
-    }
+specOpen :: FilePath -> F.Pledge IO (F.RE F.Term) ()
+specOpen path = F.Pledge $ return
+    ((), universe,
+     F.Single (F.Atom "open" (F.List [F.Str path])),
+     finally (F.Atom "close" (F.List [F.Str path])))
 
-specRead :: FilePath -> F.Pledge RE String
-specRead path = F.Pledge
-    { F.ret    = ""   -- placeholder: spec models protocol, not content
-    , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
-                      (F.Single (F.Atom "read" (F.List [F.Str path])))
-    , F.post   = F.Single (F.Atom "read" (F.List [F.Str path]))
-    , F.future = const universe
-    }
+specRead :: FilePath -> F.Pledge IO (F.RE F.Term) String
+specRead path = F.Pledge $ return
+    ("",  -- placeholder: spec models protocol, not content
+     F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
+          (F.Single (F.Atom "read" (F.List [F.Str path]))),
+     F.Single (F.Atom "read" (F.List [F.Str path])),
+     universe)
 
-specClose :: FilePath -> F.Pledge RE ()
-specClose path = F.Pledge
-    { F.ret    = ()
-    , F.pre    = F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
-                      (F.Single (F.Atom "read" (F.List [F.Str path])))
-    , F.post   = F.Single (F.Atom "close" (F.List [F.Str path]))
-    , F.future = const universe
-    }
+specClose :: FilePath -> F.Pledge IO (F.RE F.Term) ()
+specClose path = F.Pledge $ return
+    ((), F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
+              (F.Single (F.Atom "read" (F.List [F.Str path]))),
+     F.Single (F.Atom "close" (F.List [F.Str path])),
+     universe)
 
 -- ── 5. Shadow operations ──────────────────────────────────────────────────
 -- Bundle the spec primitive with the Eff send into a single Shadow action.
--- Same FilePath; same protocol.  The two interpretations stay in sync.
 
 shOpen  :: FilePath -> Shadow ()
 shOpen  path = Shadow (specOpen  path) (fsOpen  path)
@@ -176,12 +167,12 @@ doubleRead = do
 
 printSpec :: Show a => String -> Shadow a -> IO ()
 printSpec name s = do
-    let sp = spec s
+    (ret, preC, postC, futC) <- F.runPledge (spec s)
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Pre:    " ++ show (normalize (F.pre sp))
-    putStrLn $ "Post:   " ++ show (normalize (F.post sp))
-    putStrLn $ "Ret:    " ++ show (F.ret sp)
-    putStrLn $ "Future: " ++ show (normalize (F.evalFuture sp))
+    putStrLn $ "Pre:    " ++ show (normalize preC)
+    putStrLn $ "Post:   " ++ show (normalize postC)
+    putStrLn $ "Ret:    " ++ show ret
+    putStrLn $ "Future: " ++ show (normalize futC)
     putStrLn ""
 
 runAndShow :: Show a => String -> Shadow a -> IO ()
@@ -212,4 +203,3 @@ main = do
 
     printSpec "doubleRead"     doubleRead
     runAndShow "doubleRead"     doubleRead
-

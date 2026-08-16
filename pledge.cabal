@@ -14,6 +14,7 @@ executable pledge-main
     , effectful-core
     , QuickCheck
     , sbv
+    , random
   other-modules:
       Pledge
       Examples.UnitTest.PledgeTest
@@ -30,6 +31,10 @@ executable pledge-main
       Examples.SL.HeapMemory
       Examples.SL.BankAccount
       Examples.SL.LinkedList
+      Examples.GuardedRE.Memory
+      Examples.GuardedRE.BoundedCounter
+      Examples.WeightedRE.Memory
+      Examples.WeightedRE.TaskScheduler
 
 executable pledge-solver-test
   hs-source-dirs:   .

@@ -3,50 +3,38 @@ module Examples.RE.CryptoSession where
 import Prelude hiding ((<>))
 import Pledge
 
-initSession :: String -> Pledge RE ()
-initSession sid = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "initSession" (List [Str sid]))
-    , future = \_ -> finally (Atom "finalizeSession" (List [Str sid]))
-    }
+initSession :: String -> Pledge IO (RE Term) ()
+initSession sid = Pledge $ return
+    ((), universe,
+     Single (Atom "initSession" (List [Str sid])),
+     finally (Atom "finalizeSession" (List [Str sid])))
 
-finalizeSession :: String -> Pledge RE ()
-finalizeSession sid = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "finalizeSession" (List [Str sid]))
-    , future = const universe
-    }
+finalizeSession :: String -> Pledge IO (RE Term) ()
+finalizeSession sid = Pledge $ return
+    ((), universe, Single (Atom "finalizeSession" (List [Str sid])), universe)
 
 -- Nonce must be consumed exactly once (use-once enforcement via future)
-generateNonce :: Int -> Pledge RE ()
-generateNonce nid = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "generateNonce" (List [Num nid]))
-    , future = \_ -> finally (Atom "consumeNonce" (List [Num nid]))
-    }
+generateNonce :: Int -> Pledge IO (RE Term) ()
+generateNonce nid = Pledge $ return
+    ((), universe,
+     Single (Atom "generateNonce" (List [Num nid])),
+     finally (Atom "consumeNonce" (List [Num nid])))
 
 -- Precondition: nonce must have just been generated
-consumeNonce :: Int -> Pledge RE ()
-consumeNonce nid = Pledge
-    { ret    = ()
-    , pre    = Single (Atom "generateNonce" (List [Num nid]))
-    , post   = Single (Atom "consumeNonce" (List [Num nid]))
-    , future = const universe
-    }
+consumeNonce :: Int -> Pledge IO (RE Term) ()
+consumeNonce nid = Pledge $ return
+    ((), Single (Atom "generateNonce" (List [Num nid])),
+     Single (Atom "consumeNonce" (List [Num nid])),
+     universe)
 
-encrypt :: String -> String -> Pledge RE ()
-encrypt sid msg = Pledge
-    { ret    = ()
-    , pre    = universe
-    , post   = Single (Atom "encrypt" (List [Str sid, Str msg]))
-    , future = const universe
-    }
+encrypt :: String -> String -> Pledge IO (RE Term) ()
+encrypt sid msg = Pledge $ return
+    ((), universe,
+     Single (Atom "encrypt" (List [Str sid, Str msg])),
+     universe)
 
 -- Good: session opened, nonce generated and consumed, session closed
-goodHandshake :: Pledge RE ()
+goodHandshake :: Pledge IO (RE Term) ()
 goodHandshake = do
     initSession "sess-1"
     generateNonce 42
@@ -55,7 +43,7 @@ goodHandshake = do
     finalizeSession "sess-1"
 
 -- Bad: nonce generated but never consumed (replay attack risk) — future remains
-nonceLeak :: Pledge RE ()
+nonceLeak :: Pledge IO (RE Term) ()
 nonceLeak = do
     initSession "sess-2"
     generateNonce 99
@@ -63,19 +51,20 @@ nonceLeak = do
     finalizeSession "sess-2"
 
 -- Bad: session never finalized — future remains
-unclosedSession :: Pledge RE ()
+unclosedSession :: Pledge IO (RE Term) ()
 unclosedSession = do
     initSession "sess-3"
     generateNonce 7
     consumeNonce 7
     encrypt "sess-3" "data"
 
-printResult :: String -> Pledge RE () -> IO ()
+printResult :: String -> Pledge IO (RE Term) () -> IO ()
 printResult name prog = do
+    (_, preC, postC, futC) <- runPledge prog
     putStrLn $ "=== " ++ name ++ " ==="
-    putStrLn $ "Pre:    " ++ show (normalize (pre    prog))
-    putStrLn $ "Post:   " ++ show (normalize (post   prog))
-    putStrLn $ "Future: " ++ show (normalize (evalFuture prog))
+    putStrLn $ "Pre:    " ++ show (normalize preC)
+    putStrLn $ "Post:   " ++ show (normalize postC)
+    putStrLn $ "Future: " ++ show (normalize futC)
     putStrLn ""
 
 main :: IO ()

@@ -41,17 +41,17 @@ import Pledge.Semiring
 --   WSingle True e  ↔  Single e
 --   WSeq / WAdd / WAnd / WStar  ↔  Seq / Or / And / Star
 
-data WRE w
-    = WBot                       -- 0: empty language  (weight 0 everywhere)
-    | WEps w                     -- ε accepted with weight w
-    | WSingle w Event            -- single event accepted with weight w
-    | WSeq  (WRE w) (WRE w)     -- sequential composition  (⊗ on languages)
-    | WAdd  (WRE w) (WRE w)     -- weighted choice           (⊕ on languages)
-    | WAnd  (WRE w) (WRE w)     -- weighted conjunction  (pointwise ⊗)
-    | WStar (WRE w)              -- Kleene star
+data WRE w t
+    = WBot                           -- 0: empty language  (weight 0 everywhere)
+    | WEps w                         -- ε accepted with weight w
+    | WSingle w (Event t)            -- single event accepted with weight w
+    | WSeq  (WRE w t) (WRE w t)     -- sequential composition  (⊗ on languages)
+    | WAdd  (WRE w t) (WRE w t)     -- weighted choice           (⊕ on languages)
+    | WAnd  (WRE w t) (WRE w t)     -- weighted conjunction  (pointwise ⊗)
+    | WStar (WRE w t)                -- Kleene star
     deriving (Eq)
 
-instance Semiring w => Show (WRE w) where
+instance (Semiring w, Show t) => Show (WRE w t) where
     show WBot                           = "∅"
     show (WEps w)     | w == sone       = "ε"
                       | otherwise       = "[" ++ show w ++ "]ε"
@@ -78,7 +78,7 @@ instance Semiring w => Show (WRE w) where
 -- wNullable r = the semiring weight assigned to the empty word ε.
 -- In the Boolean case this equals nullable :: RE -> Bool.
 
-wNullable :: Semiring w => WRE w -> w
+wNullable :: Semiring w => WRE w t -> w
 wNullable WBot          = szero
 wNullable (WEps w)      = w
 wNullable (WSingle _ _) = szero
@@ -89,7 +89,7 @@ wNullable (WStar _)     = sone   -- ε ∈ L(r*) with unit weight for every semi
 
 -- ── Alphabet ──────────────────────────────────────────────────────────────────
 
-wAtoms :: WRE w -> [Event]
+wAtoms :: Eq t => WRE w t -> [Event t]
 wAtoms WBot               = []
 wAtoms (WEps _)           = []
 wAtoms (WSingle _ Wildcard) = []
@@ -99,7 +99,7 @@ wAtoms (WAdd  r1 r2)      = wAtoms r1 `union` wAtoms r2
 wAtoms (WAnd  r1 r2)      = wAtoms r1 `union` wAtoms r2
 wAtoms (WStar r)          = wAtoms r
 
-wFirstWith :: Semiring w => [Event] -> WRE w -> [Event]
+wFirstWith :: (Semiring w, Eq t) => [Event t] -> WRE w t -> [Event t]
 wFirstWith _    WBot                    = []
 wFirstWith _    (WEps _)               = []
 wFirstWith alph (WSingle _ Wildcard)   = alph
@@ -112,14 +112,14 @@ wFirstWith alph (WAnd r1 r2)           = [ e | e <- wFirstWith alph r1
                                              , e `elem` wFirstWith alph r2 ]
 wFirstWith alph (WStar r)              = wFirstWith alph r
 
-wFirst :: Semiring w => WRE w -> [Event]
+wFirst :: (Semiring w, Eq t) => WRE w t -> [Event t]
 wFirst r = wFirstWith (wAtoms r) r
 
 -- ── Brzozowski derivative ─────────────────────────────────────────────────────
 -- wDerivative e r: the WRE for all continuations after event e.
 -- When r1 is nullable in WSeq, both branches contribute (weighted by wNullable r1).
 
-wDerivative :: Semiring w => Event -> WRE w -> WRE w
+wDerivative :: (Semiring w, Eq t) => Event t -> WRE w t -> WRE w t
 wDerivative _ WBot             = WBot
 wDerivative _ (WEps _)         = WBot
 wDerivative e (WSingle w p)
@@ -137,7 +137,7 @@ wDerivative e (WStar r)        = WSeq (wDerivative e r) (WStar r)
 -- ── Normalization ─────────────────────────────────────────────────────────────
 -- Structural simplifications that hold for every semiring.
 
-wNormalize :: Semiring w => WRE w -> WRE w
+wNormalize :: Semiring w => WRE w t -> WRE w t
 wNormalize r = case r of
     WSeq r1 r2 -> case (wNormalize r1, wNormalize r2) of
         (WBot,    _)               -> WBot
@@ -170,7 +170,7 @@ wNormalize r = case r of
 -- from r1.  Parallels reSubtraction using Brzozowski derivatives.
 -- Base case: WEps _ means the prefix is ε, so r2 is unchanged.
 
-wSubtraction :: Semiring w => WRE w -> WRE w -> WRE w
+wSubtraction :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
 wSubtraction (WEps _) r2 = r2
 wSubtraction r1       r2 =
     let alph  = wAtoms r1 `union` wAtoms r2
@@ -182,26 +182,26 @@ wSubtraction r1       r2 =
 -- ── Smart constructors ────────────────────────────────────────────────────────
 
 -- Σ* — universal language with unit weight on every transition.
-wTop :: Semiring w => WRE w
+wTop :: Semiring w => WRE w t
 wTop = WStar (WSingle sone Wildcard)
 
 -- F[w](ev) — event ev must eventually occur, observed with weight w.
-wFinally :: Semiring w => w -> Event -> WRE w
+wFinally :: Semiring w => w -> Event t -> WRE w t
 wFinally w ev = WSeq wTop (WSingle w ev)
 
 -- G[w](ev) — every step must be ev, each observed with weight w.
-wGlobally :: Semiring w => w -> Event -> WRE w
+wGlobally :: Semiring w => w -> Event t -> WRE w t
 wGlobally w ev = WStar (WSingle w ev)
 
 -- previously[w](ev) — ev occurred at some point in the past with weight w.
-wPreviously :: Semiring w => w -> Event -> WRE w
+wPreviously :: Semiring w => w -> Event t -> WRE w t
 wPreviously w ev = WSeq wTop (WSeq (WSingle w ev) wTop)
 
 -- ── Composable instance ───────────────────────────────────────────────────────
 -- WRE w lifts the Composable algebra to the weighted setting.
 -- This makes Pledge (WRE Prob) and Pledge (WRE Tropical) work out of the box.
 
-instance Semiring w => Composable (WRE w) where
+instance (Semiring w, Eq t) => Composable (WRE w t) where
     concatenation r1 r2 = wNormalize (WSeq r1 r2)
     conjunction   r1 r2 = wNormalize (WAnd r1 r2)
     empty               = WEps sone

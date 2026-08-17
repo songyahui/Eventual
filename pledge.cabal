@@ -29,10 +29,12 @@ library
       Pledge.Semiring
       Pledge.WeightedRE
       Pledge.SL
+      Pledge.Tracked
   build-depends:
       base
     , containers
     , sbv
+    , transformers
 
 -- ── Executables ───────────────────────────────────────────────────────────────
 
@@ -49,10 +51,12 @@ executable pledge-main
     , QuickCheck
     , sbv
     , random
+    , transformers
   other-modules:
       Examples.UnitTest.PledgeTest
       Examples.UnitTest.PresburgerTest
       Examples.RE.Memory
+      Examples.RE.MemorySpec
       Examples.RE.FileHandle
       Examples.RE.Mutex
       Examples.RE.Transaction

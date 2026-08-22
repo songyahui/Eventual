@@ -24,9 +24,8 @@ module Pledge.Core
 --
 -- * @'concatenation'@ is associative with unit @'empty'@.
 -- * @'conjunction'@ is associative and commutative with unit @'universe'@.
--- * @'subtraction' p q@ is the left-quotient of @q@ by @p@.
--- * @'rev'@ is an involution, anti-homomorphism over @'concatenation'@,
---   and homomorphism over @'conjunction'@.
+-- * @'leftQuotient' q p@ is the left-quotient of @p@ by @q@.
+-- * @'rightQuotient' q p@ is the right-quotient of @p@ by @q@.
 class Composable a where
     -- | Sequential composition: RE concatenation, @*@ in SL, @⊗@ in WRE.
     concatenation :: a -> a -> a
@@ -36,31 +35,28 @@ class Composable a where
     empty         :: a
     -- | Identity for 'conjunction': @Σ*@ in RE, @⊤@ in SL.
     universe      :: a
-    -- | Left-quotient: @subtraction post pre@ is the residual of @pre@ not
-    -- discharged by @post@.  Infix alias: @post \\\\ pre@ (see '(\\\\)').
-    subtraction   :: a -> a -> a
-    -- | Reversal involution: anti-homomorphism over 'concatenation'
-    -- (@rev (a · b) = rev b · rev a@), homomorphism over 'conjunction'.
-    -- Used to define '(⊖)'; full laws in the monad proof comments.
-    rev           :: a -> a
+    -- | Left-quotient: trace subtraction.  Infix alias: @post '\\\\' pre@ (see '(\\\\)').
+    leftQuotient   :: a -> a -> a
+    -- | Right-quotient: pre-residual.  Infix alias: @pre '⊖' post@ (see '(⊖)').
+    rightQuotient   :: a -> a -> a
 
 -- | Component-wise 'Composable' instance for pairs.
 instance (Composable a, Composable b) => Composable (a, b) where
     concatenation (a1, b1) (a2, b2) = (concatenation a1 a2, concatenation b1 b2)
     conjunction   (a1, b1) (a2, b2) = (conjunction   a1 a2, conjunction   b1 b2)
-    subtraction   (a1, b1) (a2, b2) = (subtraction   a1 a2, subtraction   b1 b2)
+    leftQuotient  (a1, b1) (a2, b2) = (leftQuotient   a1 a2, leftQuotient   b1 b2)
+    rightQuotient (a1, b1) (a2, b2) = (rightQuotient   a1 a2, rightQuotient   b1 b2)
     empty                           = (empty, empty)
     universe                        = (universe, universe)
-    rev (a, b)                  = (rev a, rev b)
 
 -- | Lifts 'Composable' pointwise through any 'Applicative'.
 instance {-# OVERLAPPABLE #-} (Composable eff, Applicative m) => Composable (m eff) where
     concatenation = liftA2 concatenation
     conjunction   = liftA2 conjunction
-    subtraction   = liftA2 subtraction
+    leftQuotient  = liftA2 leftQuotient
+    rightQuotient = liftA2 rightQuotient
     empty         = pure empty
     universe      = pure universe
-    rev       = fmap rev
 
 infixl 6 ·
 -- | Infix alias for 'concatenation' (@infixl 6@).
@@ -74,16 +70,15 @@ infixl 7 /\
 
 infixl 5 \\
 -- | Left-quotient (@infixl 5@): @post \\\\ pre@ is the residual of @pre@
--- not discharged by @post@.  Defined as @a \\\\ b = subtraction b a@.
+-- not discharged by @post@.  Defined as @a \\\\ b = leftQuotient b a@.
 (\\) :: Composable a => a -> a -> a
-a \\ b = subtraction b a
+a \\ b = leftQuotient b a
 
 infixl 5 ⊖
--- | Pre-residual (@infixl 5@): @P '⊖' Q = rev (rev P '\\\\' rev Q)@.
--- Satisfies the right-quotient law @(x '⊖' b) '⊖' a = x '⊖' (a '·' b)@
--- (see monad proof comments).  Used to compute preconditions in '>>='.
+-- | Right-quotient / pre-residual (@infixl 5@): @pre '⊖' post@ is the
+-- right-residual of @pre@ by @post@.  Defined as @p '⊖' q = rightQuotient q p@.
 (⊖) :: Composable a => a -> a -> a
-p ⊖ q = rev (rev p \\ rev q)
+p ⊖ q = rightQuotient q p
 
 -- ── Pledge monad ─────────────────────────────────────────────────────────────
 
@@ -98,15 +93,7 @@ p ⊖ q = rev (rev p \\ rev q)
 --
 -- All four components come from a single run of the @m@ action, so
 -- resources are allocated once and @ret@ is in scope when building @fut@.
---
--- 'Pledge' is a 'Monad' when @eff@ is 'Composable' and @m@ is a 'Monad'.
--- The bind rule is:
---
--- @
--- pre  (p >>= g)  =  pre p  \/\  (pre (g _)  ⊖  post p)
--- post (p >>= g)  =  post p  ·   post (g _)
--- fut  (p >>= g)  =  (fut p  \\\\  post (g _))  \/\  fut (g _)
--- @
+
 newtype Pledge m eff a = Pledge { runPledge :: m (a, eff, eff, eff) }
 
 -- | Lift a plain @m@ action into 'Pledge' with trivial conditions:
@@ -170,13 +157,12 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- ── Monad law proofs ──────────────────────────────────────────────────────────
 --
 -- Notation: write a Pledge as (ret, pre, post, fut).
--- Abbreviate  P ⊖ Q  for  rev (rev P \\ rev Q)  (the pre-residual).
 --
 --   pure x          = (x, universe, empty, universe)
 --   (P,Q,F) >>= g   -- where g _ = (ret', P', Q', F')
 --     = (ret', P /\ (P' ⊖ Q),  Q · Q',  (F \\ Q') /\ F')
 --
--- The proofs require 'Composable' to satisfy, for (·), (/\), (\\):
+-- Required laws for (·), (/\), (\\), and (⊖):
 --
 --   (C1)  empty · a            = a                    left  identity of (·)
 --   (C2)  a · empty            = a                    right identity of (·)
@@ -186,26 +172,10 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --   (C6)  universe \\ a        = universe             universe is stable under \\
 --   (C7)  x \\ (a · b)         = (x \\ a) \\ b        left-quotient sequential law
 --   (C8)  (a /\ b) \\ c        = (a \\ c) /\ (b \\ c) \\ distributes over (/\)
---
--- and for 'rev':
---
---   (Cr1) rev (rev x)          = x                    involution
---   (Cr2) rev (a · b)          = rev b · rev a         anti-homomorphism for (·)
---   (Cr3) rev (a /\ b)         = rev a /\ rev b        homomorphism for (/\)
---   (Cr4) rev empty            = empty
---   (Cr5) rev universe         = universe
---
--- Key derived law for ⊖ (proved from C7 + Cr1–Cr5):
---
---   (D3)  (x ⊖ b) ⊖ a = x ⊖ (a · b)                  right-quotient law for ⊖
---
---   Proof:  (x ⊖ b) ⊖ a
---         = rev ((rev x \\ rev b) \\ rev a)   -- Cr1
---         = rev (rev x \\ (rev b · rev a))    -- C7
---         = rev (rev x \\ rev (a · b))        -- Cr2
---         = x ⊖ (a · b)                       □
---
---   (\\) distributes over (/\) via C8; ⊖ distributes over (/\) analogously via C8 + Cr3.
+--   (D1)  x ⊖ empty            = x                    mirrors C5
+--   (D2)  universe ⊖ a         = universe             mirrors C6
+--   (D3)  (x ⊖ b) ⊖ a          = x ⊖ (a · b)          right-quotient sequential law
+--   (D4)  (a /\ b) ⊖ c         = (a ⊖ c) /\ (b ⊖ c)   mirrors C8
 --
 -- ── Law 1: left identity — pure a >>= f = f a ─────────────────────────────────
 --
@@ -213,7 +183,7 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- Let f a = (b, P', Q', F').  Then pure a >>= f gives:
 --
 --   pre  : universe /\ (P' ⊖ empty)
---        = universe /\ P'    -- P' ⊖ empty = P' by Cr4, C5, Cr1
+--        = universe /\ P'    -- by D1
 --        = P'                -- by C4
 --
 --   post : empty · Q' = Q'                   -- by C1
@@ -230,7 +200,7 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- m >>= pure gives:
 --
 --   pre  : P /\ (universe ⊖ Q)
---        = P /\ universe     -- universe ⊖ Q = universe by Cr5, C6, Cr5
+--        = P /\ universe     -- by D2
 --        = P                 -- by C4
 --
 --   post : Q · empty = Q                      -- by C2
@@ -263,7 +233,7 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --
 -- pre:  expand pre_R using ⊖-distributivity then D3:
 --   (P' /\ (P'' ⊖ Q')) ⊖ Q
---     = (P' ⊖ Q) /\ ((P'' ⊖ Q') ⊖ Q)    by ⊖ distributes over /\ (from C8 + Cr3)
+--     = (P' ⊖ Q) /\ ((P'' ⊖ Q') ⊖ Q)    by D4
 --     = (P' ⊖ Q) /\ (P'' ⊖ (Q · Q'))    by D3
 --   so pre_R = P /\ (P' ⊖ Q) /\ (P'' ⊖ (Q · Q')) = pre_L              □
 --

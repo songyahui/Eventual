@@ -2,9 +2,11 @@ module Pledge.Core
     ( -- * Composable class
       Composable(..)
     , (·)
-    , (/\)
-    , (≺)
-    , (⊖)
+    , (∧)
+    , (∖)
+    , (∕)
+    , ε
+    , (⊤)
       -- * Pledge monad
     , Pledge(..)
     , liftPledge
@@ -35,9 +37,9 @@ class Composable a where
     empty         :: a
     -- | Identity for 'conjunction': @Σ*@ in RE, @⊤@ in SL.
     universe      :: a
-    -- | Left-quotient: trace subtraction.  Infix alias: @post '≺' pre@ (see '(≺)').
+    -- | Left-quotient: trace subtraction.  Infix alias: @post '∖' pre@ (see '(∖)').
     leftQuotient   :: a -> a -> a
-    -- | Right-quotient: pre-residual.  Infix alias: @pre '⊖' post@ (see '(⊖)').
+    -- | Right-quotient: pre-residual.  Infix alias: @pre '∕' post@ (see '(∕)').
     rightQuotient   :: a -> a -> a
 
 -- | Component-wise 'Composable' instance for pairs.
@@ -63,22 +65,30 @@ infixl 6 ·
 (·) :: Composable a => a -> a -> a
 (·) = concatenation
 
-infixl 7 /\
+infixl 7 ∧
 -- | Infix alias for 'conjunction' (@infixl 7@).
-(/\) :: Composable a => a -> a -> a
-(/\) = conjunction
+(∧) :: Composable a => a -> a -> a
+(∧) = conjunction
 
-infixl 5 ≺
--- | Left-quotient (@infixl 5@): @post ≺ pre@ is the residual of @pre@
--- not discharged by @post@.  Defined as @a ≺ b = leftQuotient b a@.
-(≺) :: Composable a => a -> a -> a
-a ≺ b = leftQuotient b a
+infixl 5 ∖
+-- | Left-quotient (@infixl 5@): @post ∖ pre@ is the residual of @pre@
+-- not discharged by @post@.  Defined as @a ∖ b = leftQuotient b a@.
+(∖) :: Composable a => a -> a -> a
+a ∖ b = leftQuotient b a
 
-infixl 5 ⊖
--- | Right-quotient / pre-residual (@infixl 5@): @pre '⊖' post@ is the
--- right-residual of @pre@ by @post@.  Defined as @p '⊖' q = rightQuotient q p@.
-(⊖) :: Composable a => a -> a -> a
-p ⊖ q = rightQuotient q p
+infixl 5 ∕
+-- | Right-quotient / pre-residual (@infixl 5@): @pre '∕' post@ is the
+-- right-residual of @pre@ by @post@.  Defined as @p '∕' q = rightQuotient q p@.
+(∕) :: Composable a => a -> a -> a
+p ∕ q = rightQuotient q p
+
+-- | Alias for 'empty': identity for '(·)' (@ε@ in RE, @emp@ in SL).
+ε :: Composable a => a
+ε = empty
+
+-- | Alias for 'universe': identity for '(∧)' (@Σ*@ in RE, @⊤@ in SL).
+(⊤) :: Composable a => a
+(⊤) = universe
 
 -- ── Pledge monad ─────────────────────────────────────────────────────────────
 
@@ -145,14 +155,14 @@ instance (Composable eff, Monad m) => Applicative (Pledge m eff) where
     Pledge mf <*> Pledge mx = Pledge $ do
         (f, preF, postF, futF) <- mf
         (x, preX, postX, futX) <- mx
-        return (f x, preF /\ (preX ⊖ postF), postF · postX, (futF ≺ postX) /\ futX)
+        return (f x, preF ∧ (preX ∕ postF), postF · postX, (futF ∖ postX) ∧ futX)
 
 instance (Composable eff, Monad m) => Monad (Pledge m eff) where
     return = pure
     Pledge ma >>= g = Pledge $ do
         (a, preA, postA, futA) <- ma
         (b, preB, postB, futB) <- runPledge (g a)
-        return (b, preA /\ (preB ⊖ postA), postA · postB, (futA ≺ postB) /\ futB)
+        return (b, preA ∧ (preB ∕ postA), postA · postB, (futA ∖ postB) ∧ futB)
 
 -- ── Monad law proofs ──────────────────────────────────────────────────────────
 --
@@ -160,36 +170,36 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --
 --   pure x          = (x, universe, empty, universe)
 --   (P,Q,F) >>= g   -- where g _ = (ret', P', Q', F')
---     = (ret', P /\ (P' ⊖ Q),  Q · Q',  (F ≺ Q') /\ F')
+--     = (ret', P ∧ (P' ∕ Q),  Q · Q',  (F ∖ Q') ∧ F')
 --
--- Required laws for (·), (/\), (≺), and (⊖):
+-- Required laws for (·), (∧), (∖), and (∕):
 --
 --   (C1)  empty · a            = a                    left  identity of (·)
 --   (C2)  a · empty            = a                    right identity of (·)
 --   (C3)  (a · b) · c          = a · (b · c)          associativity  of (·)
---   (C4)  universe /\ a        = a /\ universe = a    two-sided identity of (/\)
---   (C5)  a ≺ empty            = a                    empty post discharges nothing
---   (C6)  universe ≺ a         = universe             universe is stable under ≺
---   (C7)  x ≺ (a · b)          = (x ≺ a) ≺ b         left-quotient sequential law
---   (C8)  (a /\ b) ≺ c         = (a ≺ c) /\ (b ≺ c)  ≺ distributes over (/\)
---   (D1)  x ⊖ empty            = x                    mirrors C5
---   (D2)  universe ⊖ a         = universe             mirrors C6
---   (D3)  (x ⊖ b) ⊖ a          = x ⊖ (a · b)          right-quotient sequential law
---   (D4)  (a /\ b) ⊖ c         = (a ⊖ c) /\ (b ⊖ c)   mirrors C8
+--   (C4)  universe ∧ a        = a ∧ universe = a    two-sided identity of (∧)
+--   (C5)  a ∖ empty            = a                    empty post discharges nothing
+--   (C6)  universe ∖ a         = universe             universe is stable under ∖
+--   (C7)  x ∖ (a · b)          = (x ∖ a) ∖ b         left-quotient sequential law
+--   (C8)  (a ∧ b) ∖ c         = (a ∖ c) ∧ (b ∖ c)  ∖ distributes over (∧)
+--   (D1)  x ∕ empty            = x                    mirrors C5
+--   (D2)  universe ∕ a         = universe             mirrors C6
+--   (D3)  (x ∕ b) ∕ a          = x ∕ (a · b)          right-quotient sequential law
+--   (D4)  (a ∧ b) ∕ c         = (a ∕ c) ∧ (b ∕ c)   mirrors C8
 --
 -- ── Law 1: left identity — pure a >>= f = f a ─────────────────────────────────
 --
 -- pure a = (a, universe, empty, universe).
 -- Let f a = (b, P', Q', F').  Then pure a >>= f gives:
 --
---   pre  : universe /\ (P' ⊖ empty)
---        = universe /\ P'    -- by D1
+--   pre  : universe ∧ (P' ∕ empty)
+--        = universe ∧ P'    -- by D1
 --        = P'                -- by C4
 --
 --   post : empty · Q' = Q'                   -- by C1
 --
---   fut  : (universe ≺ Q') /\ F'
---        = universe /\ F'                     -- by C6
+--   fut  : (universe ∖ Q') ∧ F'
+--        = universe ∧ F'                     -- by C6
 --        = F'                                 -- by C4
 --
 -- All three components equal those of f a.                                    □
@@ -199,14 +209,14 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- Let m = (a, P, Q, F).  pure a = (a, universe, empty, universe).
 -- m >>= pure gives:
 --
---   pre  : P /\ (universe ⊖ Q)
---        = P /\ universe     -- by D2
+--   pre  : P ∧ (universe ∕ Q)
+--        = P ∧ universe     -- by D2
 --        = P                 -- by C4
 --
 --   post : Q · empty = Q                      -- by C2
 --
---   fut  : (F ≺ empty) /\ universe
---        = F /\ universe                      -- by C5
+--   fut  : (F ∖ empty) ∧ universe
+--        = F ∧ universe                      -- by C5
 --        = F                                  -- by C4
 --
 -- All three components equal those of m.                                       □
@@ -215,30 +225,30 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --
 -- Let m = (a,P,Q,F),  f a = (b,P',Q',F'),  g b = (c,P'',Q'',F'').
 --
--- LHS: compute m >>= f first → (b, P∧(P'⊖Q), Q·Q', (F≺Q')∧F'),
+-- LHS: compute m >>= f first → (b, P∧(P'∕Q), Q·Q', (F∖Q')∧F'),
 --      then bind g:
 --
---   pre_L  = [P /\ (P' ⊖ Q)] /\ (P'' ⊖ (Q · Q'))
+--   pre_L  = [P ∧ (P' ∕ Q)] ∧ (P'' ∕ (Q · Q'))
 --   post_L = (Q · Q') · Q''
---   fut_L  = [((F ≺ Q') /\ F') ≺ Q''] /\ F''
+--   fut_L  = [((F ∖ Q') ∧ F') ∖ Q''] ∧ F''
 --
--- RHS: compute f a >>= g first → (c, P'∧(P''⊖Q'), Q'·Q'', (F'≺Q'')∧F''),
+-- RHS: compute f a >>= g first → (c, P'∧(P''∕Q'), Q'·Q'', (F'∖Q'')∧F''),
 --      then bind that into m:
 --
---   pre_R  = P /\ ((P' /\ (P'' ⊖ Q')) ⊖ Q)
+--   pre_R  = P ∧ ((P' ∧ (P'' ∕ Q')) ∕ Q)
 --   post_R = Q · (Q' · Q'')
---   fut_R  = (F ≺ (Q' · Q'')) /\ ((F' ≺ Q'') /\ F'')
+--   fut_R  = (F ∖ (Q' · Q'')) ∧ ((F' ∖ Q'') ∧ F'')
 --
 -- post: post_L = (Q · Q') · Q'' = Q · (Q' · Q'') = post_R              by C3  □
 --
--- pre:  expand pre_R using ⊖-distributivity then D3:
---   (P' /\ (P'' ⊖ Q')) ⊖ Q
---     = (P' ⊖ Q) /\ ((P'' ⊖ Q') ⊖ Q)    by D4
---     = (P' ⊖ Q) /\ (P'' ⊖ (Q · Q'))    by D3
---   so pre_R = P /\ (P' ⊖ Q) /\ (P'' ⊖ (Q · Q')) = pre_L              □
+-- pre:  expand pre_R using ∕-distributivity then D3:
+--   (P' ∧ (P'' ∕ Q')) ∕ Q
+--     = (P' ∕ Q) ∧ ((P'' ∕ Q') ∕ Q)    by D4
+--     = (P' ∕ Q) ∧ (P'' ∕ (Q · Q'))    by D3
+--   so pre_R = P ∧ (P' ∕ Q) ∧ (P'' ∕ (Q · Q')) = pre_L              □
 --
 -- fut:  expand fut_L using C8 then C7:
---   ((F ≺ Q') /\ F') ≺ Q''
---     = (F ≺ Q') ≺ Q''  /\  (F' ≺ Q'')  by C8
---     = F ≺ (Q' · Q'')  /\  (F' ≺ Q'')  by C7
---   so fut_L = (F ≺ (Q'·Q'')) /\ (F' ≺ Q'') /\ F'' = fut_R            □
+--   ((F ∖ Q') ∧ F') ∖ Q''
+--     = (F ∖ Q') ∖ Q''  ∧  (F' ∖ Q'')  by C8
+--     = F ∖ (Q' · Q'')  ∧  (F' ∖ Q'')  by C7
+--   so fut_L = (F ∖ (Q'·Q'')) ∧ (F' ∖ Q'') ∧ F'' = fut_R            □

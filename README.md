@@ -85,9 +85,9 @@ All `eff` types share a six-operation algebra:
 ```haskell
 class Composable a where
     concatenation :: a -> a -> a   -- (·)   sequential composition
-    conjunction   :: a -> a -> a   -- (∧)  simultaneous constraint
-    leftQuotient  :: a -> a -> a   -- (\\)  left-quotient
-    rightQuotient :: a -> a -> a   -- (⊖)   right-quotient
+    conjunction   :: a -> a -> a   -- (∧)   simultaneous constraint
+    leftQuotient  :: a -> a -> a   -- (\)   left-quotient
+    rightQuotient :: a -> a -> a   -- (∕)   right-quotient
     empty         :: a             -- identity for (·)
     universe      :: a             -- identity for (∧)
 ```

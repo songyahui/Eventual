@@ -14,7 +14,8 @@ module Pledge.RE
     , first
     , derivative
     , antiDeriv
-    , reSubtraction
+    , reLeftQuotient
+    , reRightQuotient
     , normalize
       -- * LTL
     , LTL(..)
@@ -200,16 +201,32 @@ antiDeriv e (Not r)       = [normalize (Not (derivative e r))]
 -- Brzozowski step @∂_e(r2)@, the full Antimirov set @∂_e^A(r2)@ is used,
 -- keeping intermediate terms smaller.  The result language is identical to
 -- the Brzozowski version because @⋃ L(∂_e^A(r2)) = L(∂_e(r2))@.
-reSubtraction :: Eq t => RE t -> RE t -> RE t
-reSubtraction Epsilon r2 = r2
-reSubtraction r1 r2 =
+reLeftQuotient :: Eq t => RE t -> RE t -> RE t
+reLeftQuotient Epsilon r2 = r2
+reLeftQuotient r1 r2 =
     let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
         evts   = firstWith alph r1
         step e =
             let dr1  = normalize (derivative e r1)
                 dr2s = antiDeriv e r2           -- Antimirov set of r2 residuals
-            in foldr (Or . reSubtraction dr1) Bot dr2s
+            in foldr (Or . reLeftQuotient dr1) Bot dr2s
     in foldr (Or . step) Bot evts
+
+-- Reverse an RE: revRE(r) accepts exactly {w^R | w ∈ L(r)}.
+revRE :: RE t -> RE t
+revRE Bot           = Bot
+revRE Epsilon       = Epsilon
+revRE (Single e)    = Single e
+revRE (Seq r1 r2)   = Seq (revRE r2) (revRE r1)
+revRE (Or  r1 r2)   = Or  (revRE r1) (revRE r2)
+revRE (And r1 r2)   = And (revRE r1) (revRE r2)
+revRE (Star r)      = Star (revRE r)
+revRE (Not r)       = Not (revRE r)
+
+-- | Right-quotient @r2 ∕ r1@: the residual of @r2@ with @r1@ stripped from
+-- the right.  Computed via reversal: @r2 ∕ r1 = rev(rev(r2) ∖ rev(r1))@.
+reRightQuotient :: Eq t => RE t -> RE t -> RE t
+reRightQuotient r1 r2 = revRE (reLeftQuotient (revRE r1) (revRE r2))
 
 -- | Linear Temporal Logic formulae over finite traces.
 -- Use 'ltlToRe' to translate to 'RE'; no automaton construction is required.
@@ -282,7 +299,8 @@ instance Eq t => Composable (RE t) where
     conjunction   = And
     empty         = Epsilon
     universe      = top
-    subtraction   = reSubtraction
+    leftQuotient  = reLeftQuotient
+    rightQuotient = reRightQuotient
 
 -- | Simplify an 'RE' using algebraic identities and De Morgan laws.
 --

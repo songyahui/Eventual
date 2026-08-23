@@ -90,7 +90,7 @@ prop_conj_id x = langEq (universe /\ x) x
 prop_sub_right_zero :: RE Term -> Bool
 prop_sub_right_zero x = langEq (x \\ empty) x
 
--- | @'universe'@ is stable under subtraction: @universe \\\\ x = universe@.
+-- | @'universe'@ is stable under left-quotient: @universe \\\\ x = universe@.
 prop_sub_universe :: RE Term -> Property
 prop_sub_universe x =
     let u :: RE Term = universe

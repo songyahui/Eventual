@@ -85,17 +85,17 @@ All `eff` types share a six-operation algebra:
 ```haskell
 class Composable a where
     concatenation :: a -> a -> a   -- (·)   sequential composition
-    conjunction   :: a -> a -> a   -- (∧)   simultaneous constraint
+    conjunction   :: a -> a -> a   -- (⊓)   simultaneous constraint
     leftQuotient  :: a -> a -> a   -- (\)   left-quotient
     rightQuotient :: a -> a -> a   -- (∕)   right-quotient
     empty         :: a             -- identity for (·)
-    universe      :: a             -- identity for (∧)
+    universe      :: a             -- identity for (⊓)
 ```
 
 | Operator | Fixity | Meaning |
 |---|---|---|
 | `(·)` | `infixl 6` | concatenation |
-| `(∧)` | `infixl 7` | conjunction |
+| `(⊓)` | `infixl 7` | conjunction |
 | `(∖)` | `infixl 5` | left-quotient: `L ∖ R` = residual of `R` with `L` stripped from the left |
 | `(∕)` | `infixl 5` | right-quotient: `L ∕ R` = residual of `L` with `R` stripped from the right |
 
@@ -105,16 +105,16 @@ The `Composable` instance lifts through any `Applicative`:
 instance (Composable eff, Applicative m) => Composable (m eff)
 ```
 
-so `(·)`, `(∧)`, `(∖)`, `(∕)` work directly on `m eff` values.
+so `(·)`, `(⊓)`, `(∖)`, `(∕)` work directly on `m eff` values.
 
 ### Bind propagation laws
 
 When `p >>= f` is evaluated, the monad propagates all four components:
 
 ```
-pre  (p >>= f)  =  pre p  ∧  (pre (f _)  ∕  post p)
+pre  (p >>= f)  =  pre p  ⊓  (pre (f _)  ∕  post p)
 post (p >>= f)  =  post p  ·   post (f _)
-fut  (p >>= f)  =  (fut p  ∖  post (f _))  ∧  fut (f _)
+fut  (p >>= f)  =  (fut p  ∖  post (f _))  ⊓  fut (f _)
 ```
 
 `pre (f _) ∕ post p` is the **right-quotient** — the residual precondition of `f`
@@ -220,14 +220,14 @@ data SL
     | Pure PPred       -- pure arithmetic predicate
     | Cell Addr Val    -- singleton: address a holds value v
     | SepStar SL SL    -- P * Q   separating conjunction
-    | Conj   SL SL     -- P ∧ Q   ordinary conjunction
+    | Conj   SL SL     -- P ⊓ Q   ordinary conjunction
     | Wand   SL SL     -- P -* Q  magic wand (residual)
 ```
 
 | Composable operation | SL semantics |
 |---|---|
 | `concatenation` | `SepStar` (∗) |
-| `conjunction` | `Conj` (∧) |
+| `conjunction` | `Conj` (⊓) |
 | `leftQuotient p q` | magic wand `p -* q` |
 | `rightQuotient p q` | magic wand `p -* q` (same as left-quotient; `SepStar` is commutative) |
 | `empty` | `Emp` |
@@ -244,7 +244,7 @@ trace constraints simultaneously.
 
 ```haskell
 data GuardedRE a = GuardedRE PPred (RE a)
--- satisfies (heap, trace)  iff  heap |= PPred  ∧  trace ∈ L(RE)
+-- satisfies (heap, trace)  iff  heap |= PPred  ⊓  trace ∈ L(RE)
 ```
 
 #### Construction

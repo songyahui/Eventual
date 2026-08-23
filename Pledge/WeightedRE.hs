@@ -12,7 +12,8 @@ module Pledge.WeightedRE
       -- * Normalization
     , wNormalize
       -- * Quotient
-    , wSubtraction
+    , wLeftQuotient
+    , wRightQuotient
       -- * Smart constructors
     , wTop
     , wFinally
@@ -164,17 +165,31 @@ wNormalize r = case r of
     _ -> r
 
 -- | Weighted left-quotient: the residual of @r2@ after consuming a prefix
--- described by @r1@.  Parallels 'reSubtraction' using weighted Brzozowski
--- derivatives.  Base case: @WEps _@ means the prefix is @ε@, so @r2@ is
--- returned unchanged.
-wSubtraction :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
-wSubtraction (WEps _) r2 = r2
-wSubtraction r1       r2 =
+-- described by @r1@.  Base case: @WEps _@ means the prefix is @ε@, so @r2@
+-- is returned unchanged.
+wLeftQuotient :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
+wLeftQuotient (WEps _) r2 = r2
+wLeftQuotient r1       r2 =
     let alph  = wAtoms r1 `union` wAtoms r2
         evts  = wFirstWith alph r1
-        step e = wSubtraction (wNormalize (wDerivative e r1))
-                               (wNormalize (wDerivative e r2))
+        step e = wLeftQuotient (wNormalize (wDerivative e r1))
+                                (wNormalize (wDerivative e r2))
     in foldr (WAdd . step) WBot evts
+
+-- Reverse a WRE: wRev(r) accepts exactly {w^R | w ∈ L(r)} with the same weights.
+wRev :: WRE w t -> WRE w t
+wRev WBot             = WBot
+wRev (WEps w)         = WEps w
+wRev (WSingle w e)    = WSingle w e
+wRev (WSeq  r1 r2)    = WSeq  (wRev r2) (wRev r1)
+wRev (WAdd  r1 r2)    = WAdd  (wRev r1) (wRev r2)
+wRev (WAnd  r1 r2)    = WAnd  (wRev r1) (wRev r2)
+wRev (WStar r)        = WStar (wRev r)
+
+-- | Weighted right-quotient: the residual of @r2@ with @r1@ stripped from
+-- the right.  Computed via reversal: @r2 ∕ r1 = wRev(wRev(r2) ∖ wRev(r1))@.
+wRightQuotient :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
+wRightQuotient r1 r2 = wRev (wLeftQuotient (wRev r1) (wRev r2))
 
 -- ── Smart constructors ────────────────────────────────────────────────────────
 
@@ -205,4 +220,5 @@ instance (Semiring w, Eq t) => Composable (WRE w t) where
     conjunction   r1 r2 = wNormalize (WAnd r1 r2)
     empty               = WEps sone
     universe            = wTop
-    subtraction         = wSubtraction
+    leftQuotient        = wLeftQuotient
+    rightQuotient       = wRightQuotient

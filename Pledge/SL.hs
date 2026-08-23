@@ -64,8 +64,10 @@ instance Composable SL where
     universe      = Top
 
     -- emp -* Q = Q: providing nothing leaves the obligation unchanged.
-    subtraction Emp q = q
+    leftQuotient Emp q = q
     -- Contract convention: ⊤ precondition is trivially discharged.
-    subtraction Top _ = Emp
+    leftQuotient Top _ = Emp
     -- General case: symbolic magic wand.
-    subtraction p   q = Wand p q
+    leftQuotient p   q = Wand p q
+    -- SepStar is commutative, so left- and right-quotients coincide.
+    rightQuotient = leftQuotient

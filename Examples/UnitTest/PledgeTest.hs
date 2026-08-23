@@ -572,7 +572,7 @@ test_normalize counter = do
     check counter "normalize ((∅ · a)*) = ε   (inner Bot collapses before Star)" $
         normalize (Star (Seq Bot (Single a))) == Epsilon
 
--- ── reSubtraction ─────────────────────────────────────────────────────────────
+-- ── reLeftQuotient ─────────────────────────────────────────────────────────────
 -- r1 \\ r2: residual obligation in r2 after trace r1.
 -- Implemented via Antimirov partial derivatives on r2: instead of a single
 -- Brzozowski step, antiDeriv yields a LIST of residuals whose language union
@@ -587,20 +587,20 @@ test_normalize counter = do
 --   a \\ (a ∨ (a·b)) = ε ∨ b   (both Or-branches fire as separate residuals)
 --   b \\ (a*·b) = ε             (nullable head a* skipped via Antimirov nullable split)
 
-test_reSubtraction :: IORef Int -> IO ()
-test_reSubtraction counter = do
-    putStrLn "\n── reSubtraction (Antimirov partial derivatives) ────────────────"
+test_reLeftQuotient :: IORef Int -> IO ()
+test_reLeftQuotient counter = do
+    putStrLn "\n── reLeftQuotient (Antimirov partial derivatives) ────────────────"
 
     -- ── Base case: identity trace ──────────────────────────────────────────────
-    -- reSubtraction Epsilon r2 = r2  (base case, no derivative taken)
+    -- reLeftQuotient Epsilon r2 = r2  (base case, no derivative taken)
     check counter "ε \\\\ a = a   (nothing consumed, obligation unchanged)" $
-        reSubtraction Epsilon (Single a) == Single a
+        reLeftQuotient Epsilon (Single a) == Single a
 
     check counter "ε \\\\ ∅ = ∅" $
-        reSubtraction (Epsilon :: RE Term) Bot == Bot
+        reLeftQuotient (Epsilon :: RE Term) Bot == Bot
 
     check counter "ε \\\\ Σ* = Σ*" $
-        reSubtraction (Epsilon :: RE Term) (Not Bot) == Not Bot
+        reLeftQuotient (Epsilon :: RE Term) (Not Bot) == Not Bot
 
     -- ── Σ* as the trace ───────────────────────────────────────────────────────
     -- The key invariant: derivative e (Not Bot) = Not (derivative e Bot) = Not Bot,
@@ -615,61 +615,61 @@ test_reSubtraction counter = do
 
     -- r2 = ∅: atoms ∅ = []; no events in alphabet → immediately ∅.
     check counter "Σ* \\\\ ∅ = ∅   (atoms ∅ is empty; no events to explore)" $
-        normalize (reSubtraction (Not Bot :: RE Term) Bot) == Bot
+        normalize (reLeftQuotient (Not Bot :: RE Term) Bot) == Bot
 
     -- r2 = ε: atoms ε = []; same as above.
     check counter "Σ* \\\\ ε = ∅   (atoms ε is empty; no events to explore)" $
-        normalize (reSubtraction (Not Bot :: RE Term) Epsilon) == Bot
+        normalize (reLeftQuotient (Not Bot :: RE Term) Epsilon) == Bot
 
     -- r2 = Σ*: atoms (Not Bot) = []; combined alphabet still empty.
     check counter "Σ* \\\\ Σ* = ∅   (atoms of Not Bot is empty; no events explored)" $
-        normalize (reSubtraction (Not Bot :: RE Term) (Not Bot)) == Bot
+        normalize (reLeftQuotient (Not Bot :: RE Term) (Not Bot)) == Bot
 
     -- r2 = Single a: alph = [a]; evts = [a] (∂_a(∅) = ∅, not total).
     -- step a: dr1 = Not Bot (unchanged); antiDeriv a (Single a) = [ε].
     -- recurse: Σ* \\ ε → alph = [] → ∅.
     check counter "Σ* \\\\ a = ∅   (reaches Σ* \\\\ ε after one step; no atoms in ε)" $
-        normalize (reSubtraction (Not Bot) (Single a)) == Bot
+        normalize (reLeftQuotient (Not Bot) (Single a)) == Bot
 
     -- r2 = a ∨ b: alph = [a, b]; both steps produce [ε] via antiDeriv,
     -- then recurse to Σ* \\ ε = ∅.
     check counter "Σ* \\\\ (a ∨ b) = ∅   (both Or-branches reduce to Σ* \\\\ ε)" $
-        normalize (reSubtraction (Not Bot) (Or (Single a) (Single b))) == Bot
+        normalize (reLeftQuotient (Not Bot) (Or (Single a) (Single b))) == Bot
 
     -- r2 = a · b: alph = [a, b].
     -- step a: antiDeriv a (a·b) = [b]; recurse Σ* \\ b → ∅.
     -- step b: antiDeriv b (a·b) = [];  no residuals → ∅.
     check counter "Σ* \\\\ (a · b) = ∅   (chain reduces to Σ* \\\\ ε)" $
-        normalize (reSubtraction (Not Bot) (Seq (Single a) (Single b))) == Bot
+        normalize (reLeftQuotient (Not Bot) (Seq (Single a) (Single b))) == Bot
 
     -- ── Single-step traces ─────────────────────────────────────────────────────
-    -- Exact match: antiDeriv a (Single a) = [ε]; reSubtraction ε ε = ε.
+    -- Exact match: antiDeriv a (Single a) = [ε]; reLeftQuotient ε ε = ε.
     check counter "a \\\\ a = ε   (obligation exactly discharged)" $
-        normalize (reSubtraction (Single a) (Single a)) == Epsilon
+        normalize (reLeftQuotient (Single a) (Single a)) == Epsilon
 
     -- Mismatch: antiDeriv b (Single a) = []; no residual, result is ∅.
     check counter "b \\\\ a = ∅   (disjoint trace and obligation)" $
-        normalize (reSubtraction (Single b) (Single a)) == Bot
+        normalize (reLeftQuotient (Single b) (Single a)) == Bot
 
-    -- Prefix: antiDeriv a (a·b) = [ε·b] = [b]; reSubtraction ε b = b.
+    -- Prefix: antiDeriv a (a·b) = [ε·b] = [b]; reLeftQuotient ε b = b.
     check counter "a \\\\ (a · b) = b   (head consumed, tail remains)" $
-        normalize (reSubtraction (Single a)
+        normalize (reLeftQuotient (Single a)
                                  (Seq (Single a) (Single b))) == Single b
 
     -- Overshoot: ∂_a(a·b) = b; antiDeriv b (Single a) = []; ∅.
     check counter "(a · b) \\\\ a = ∅   (trace overshoots obligation)" $
-        normalize (reSubtraction (Seq (Single a) (Single b))
+        normalize (reLeftQuotient (Seq (Single a) (Single b))
                                  (Single a)) == Bot
 
     -- ── Multi-step traces ──────────────────────────────────────────────────────
     -- Exact multi-step: each step peels one layer; both sides reduce to ε.
     check counter "(a · b) \\\\ (a · b) = ε   (multi-step exact match)" $
-        normalize (reSubtraction (Seq (Single a) (Single b))
+        normalize (reLeftQuotient (Seq (Single a) (Single b))
                                  (Seq (Single a) (Single b))) == Epsilon
 
     -- Partial multi-step: one step consumed, b · c remains.
     check counter "a \\\\ (a · b · c) = b · c   (prefix consumed, tail remains)" $
-        normalize (reSubtraction (Single a)
+        normalize (reLeftQuotient (Single a)
                                  (Seq (Single a) (Seq (Single b) (Single c))))
             == Seq (Single b) (Single c)
 
@@ -677,7 +677,7 @@ test_reSubtraction counter = do
     -- antiDeriv a (a ∨ b) = [ε] ∪ [] = [ε]: only the a-branch fires.
     -- The b-branch contributes nothing; result is ε.
     check counter "a \\\\ (a ∨ b) = ε   (only the matching Or-branch yields a residual)" $
-        normalize (reSubtraction (Single a)
+        normalize (reLeftQuotient (Single a)
                                  (Or (Single a) (Single b))) == Epsilon
 
     -- antiDeriv a (a ∨ (a·b)) = [ε] ∪ [b] = [ε, b]: BOTH branches fire.
@@ -685,7 +685,7 @@ test_reSubtraction counter = do
     -- meaning the continuation either satisfies the obligation immediately (ε)
     -- or must still perform b (a·b-branch).
     check counter "a \\\\ (a ∨ (a · b)) = ε ∨ b   (Antimirov splits two matching Or-branches)" $
-        normalize (reSubtraction (Single a)
+        normalize (reLeftQuotient (Single a)
                                  (Or (Single a) (Seq (Single a) (Single b))))
             == Or Epsilon (Single b)
 
@@ -694,7 +694,7 @@ test_reSubtraction counter = do
     --   left  = {a*·b}   (a consumed from a*; loop back)
     --   right = ∅        (nullable a*, but antiDeriv a b = []; no split contribution)
     check counter "a \\\\ (a* · b) = a* · b   (one step of a* consumed; loop continues)" $
-        normalize (reSubtraction (Single a)
+        normalize (reLeftQuotient (Single a)
                                  (Seq (Star (Single a)) (Single b)))
             == Seq (Star (Single a)) (Single b)
 
@@ -703,7 +703,7 @@ test_reSubtraction counter = do
     --   right = [ε]      (nullable a* triggers the split; antiDeriv b b = [ε])
     -- The nullable split produces residual ε: a* was skipped entirely.
     check counter "b \\\\ (a* · b) = ε   (nullable a* skipped; b discharged via nullable split)" $
-        normalize (reSubtraction (Single b)
+        normalize (reLeftQuotient (Single b)
                                  (Seq (Star (Single a)) (Single b)))
             == Epsilon
 
@@ -887,14 +887,14 @@ test_effectful counter = do
 -- ── Pledge SL ──────────────────────────────────────────────────────────────
 -- Mirrors test_effectful but with SL as the effect type.
 -- concatenation = SepStar, conjunction = Conj, empty = Emp, universe = Top,
--- subtraction base cases: Emp\q = q,  Top\_ = Emp,  general = Wand p q.
+-- leftQuotient base cases: Emp\q = q,  Top\_ = Emp,  general = Wand p q.
 
 test_effectful_sl :: IORef Int -> IO ()
 test_effectful_sl counter = do
     putStrLn "\n── Pledge SL ─────────────────────────────────────────────────────"
 
     -- ── pre: post = Emp, nothing provided ───────────────────────────────────────
-    -- subtraction Emp (Cell 0 42) = Cell 0 42   (base case: Emp\q = q)
+    -- leftQuotient Emp (Cell 0 42) = Cell 0 42   (base case: Emp\q = q)
     -- pre = Top /\ Cell 0 42 = Conj Top (Cell 0 42)
     let e0  = Pledge $ return ((), Top,       Emp,       Top) :: Pledge IO SL ()
         fe0 = Pledge $ return ((), Cell 0 42, Emp,       Top) :: Pledge IO SL ()
@@ -903,7 +903,7 @@ test_effectful_sl counter = do
         pre0 == Conj Top (Cell 0 42)
 
     -- ── pre: post = Top, all preconditions discharged ───────────────────────────
-    -- subtraction Top (Cell 0 42) = Emp          (base case: Top\_ = Emp)
+    -- leftQuotient Top (Cell 0 42) = Emp          (base case: Top\_ = Emp)
     -- pre = Top /\ Emp = Conj Top Emp
     let e1  = Pledge $ return ((), Top,       Top,       Top) :: Pledge IO SL ()
         fe1 = Pledge $ return ((), Cell 0 42, Emp,       Top) :: Pledge IO SL ()
@@ -922,7 +922,7 @@ test_effectful_sl counter = do
 
     -- ── future: obligation not discharged when post fe = Emp ────────────────────
     -- e has future = Cell 0 42 (must eventually hold).
-    -- subtraction Emp (Cell 0 42) = Cell 0 42    (fe produced nothing toward it)
+    -- leftQuotient Emp (Cell 0 42) = Cell 0 42    (fe produced nothing toward it)
     -- future combined = Cell 0 42 /\ Top = Conj (Cell 0 42) Top
     let e3  = Pledge $ return ((), Top, Emp, Cell 0 42) :: Pledge IO SL ()
         fe3 = Pledge $ return ((), Top, Emp, Top)       :: Pledge IO SL ()
@@ -931,7 +931,7 @@ test_effectful_sl counter = do
         fut3 == Conj (Cell 0 42) Top
 
     -- ── future: obligation discharged when post fe = Top ────────────────────────
-    -- subtraction Top (Cell 0 42) = Emp          (Top covers everything)
+    -- leftQuotient Top (Cell 0 42) = Emp          (Top covers everything)
     -- future combined = Emp /\ Top = Conj Emp Top
     let e4  = Pledge $ return ((), Top, Emp, Cell 0 42) :: Pledge IO SL ()
         fe4 = Pledge $ return ((), Top, Top, Top)       :: Pledge IO SL ()
@@ -1034,7 +1034,7 @@ main = do
     test_atoms         counter
     test_first         counter
     test_normalize     counter
-    test_reSubtraction counter
+    test_reLeftQuotient counter
     test_effectful     counter
     test_ltl_to_re     counter
     test_effectful_sl  counter

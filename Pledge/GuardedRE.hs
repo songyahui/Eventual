@@ -105,8 +105,8 @@ checkGuarded heap trace ext =
 -- ── Composable instance ───────────────────────────────────────────────────────
 -- Lifts the RE algebra to GuardedRE, threading PPred as a conjunction.
 --
--- subtraction: both heap predicates are conjoined in the residual, so the
--- full constraint from both sides is preserved; the RE side uses reSubtraction.
+-- leftQuotient/rightQuotient: both heap predicates are conjoined in the
+-- residual; the RE side uses reLeftQuotient / reRightQuotient.
 
 instance Eq a => Composable (GuardedRE a) where
     concatenation (GuardedRE p1 r1) (GuardedRE p2 r2) =
@@ -114,5 +114,7 @@ instance Eq a => Composable (GuardedRE a) where
     conjunction   = conjoin
     empty         = GuardedRE PTrue Epsilon
     universe      = GuardedRE PTrue top
-    subtraction   (GuardedRE p1 r1) (GuardedRE p2 r2) =
-        GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (reSubtraction r1 r2))
+    leftQuotient  (GuardedRE p1 r1) (GuardedRE p2 r2) =
+        GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (reLeftQuotient r1 r2))
+    rightQuotient (GuardedRE p1 r1) (GuardedRE p2 r2) =
+        GuardedRE (normalizePPred (PAnd p1 p2)) (normalize (reRightQuotient r1 r2))

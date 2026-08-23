@@ -2,7 +2,7 @@
 # PledgeMonadLaws
 
 Formal verification that the `Pledge` monad from `Pledge/Core.hs` satisfies
-the three monad laws under the `Composable` axioms (C1–C8 + Ccomm).
+the three monad laws under the `Composable` axioms (C1–C8, D1–D4).
 
 ## Model
 
@@ -10,77 +10,108 @@ the three monad laws under the `Composable` axioms (C1–C8 + Ccomm).
 effect conditions:
 
 ```
-  pure x    = (x,  univ,  emp,  univ)
-  p >>= g   = let gp := g p.ret
-              (gp.ret,  p.pre ⊓ (p.post ≺ gp.pre),  p.post ⋄ gp.post,
-                        (gp.post ≺ p.future) ⊓ gp.future)
+  pure x    = (x,  ⊤,  ε,  ⊤)
+  p >>= g   = let gp := g p.ret in
+              (gp.ret,  p.pre ∧ (gp.pre ∕ p.post),  p.post ⋄ gp.post,
+                        (p.future ∖ gp.post) ∧ gp.future)
 ```
 
 ## Notation (mirrors `Pledge/Core.hs`)
 
-| Lean   | Haskell      | Meaning                           |
-|--------|--------------|-----------------------------------|
-| `a ⋄ b`  | `a · b`    | sequential concatenation          |
-| `a ⊓ b`  | `a /\\ b`   | conjunction / intersection        |
-| `r ≺ s`  | `s \\\\ r`  | residual of `s` after `r`         |
-| `emp`    | `empty`     | unit for `⋄`                      |
-| `univ`   | `universe`  | unit for `⊓`                      |
+| Lean    | Haskell      | Meaning                                              |
+|---------|--------------|------------------------------------------------------|
+| `a ⋄ b` | `a · b`      | sequential concatenation                             |
+| `a ⊓ b` | `a ⊓ b`      | conjunction / intersection                           |
+| `r ∖ s` | `r ∖ s`      | left-quotient: residual of `r` after stripping prefix `s`  |
+| `a ∕ b` | `a ∕ b`      | right-quotient: residual of `a` after stripping suffix `b` |
+| `ε`     | `empty`      | unit for `⋄`                                        |
+| `⊤`     | `universe`   | unit for `⊓`                                        |
 
-`r ≺ s` = `subtraction r s` in the Haskell typeclass = `s \\ r` in Core.hs.
+`r ∖ s = leftQuotient s r` in Core.hs: dividend `r` on the left, divisor `s` on the right.
+`a ∕ b = rightQuotient b a` in Core.hs: dividend `a` on the left, divisor `b` on the right.
 
 ## Axioms required
 
-| Label  | Statement                          | Used for              |
-|--------|------------------------------------|-----------------------|
-| C1     | `emp ⋄ a = a`                     | Law 1 post            |
-| C2     | `a ⋄ emp = a`                     | Law 2 post            |
-| C3     | `(a ⋄ b) ⋄ c = a ⋄ (b ⋄ c)`      | Law 3 post            |
-| C4     | `univ ⊓ a = a`                    | Laws 1,2 pre,future   |
-| C4r    | `a ⊓ univ = a`                    | Laws 2 pre,future     |
-| C5     | `emp ≺ a = a`                     | Laws 1,2 pre,future   |
-| C6     | `r ≺ univ = univ`                 | Laws 1,2 pre,future   |
-| C7     | `(a ⋄ b) ≺ x = a ≺ (b ≺ x)`      | Law 3 pre,future      |
-| C8     | `c ≺ (a ⊓ b) = (c ≺ a) ⊓ (c ≺ b)`| Law 3 pre,future      |
-| Ccomm  | `(a ⋄ b) ≺ x = (b ⋄ a) ≺ x`      | Law 3 future only     |
+### Sequential algebra (`⋄`, `⊓`)
 
-**Note on Ccomm**: The informal proof in `Core.hs` implicitly uses Ccomm when
-applying C7 to the `future` component of Law 3.  Ccomm does not follow from
-C1–C8 alone; it holds for all concrete instances (RE, SL, GuardedRE, WRE)
-where post-conditions commute inside residuals.
+| Label | Statement                         | Used for            |
+|-------|-----------------------------------|---------------------|
+| C1    | `ε ⋄ a = a`                       | Law 1 post          |
+| C2    | `a ⋄ ε = a`                       | Law 2 post          |
+| C3    | `(a ⋄ b) ⋄ c = a ⋄ (b ⋄ c)`        | Law 3 post          |
+| C4    | `⊤ ∧ a = a`                       | Laws 1, 2           |
+| C4r   | `a ∧ ⊤ = a`                       | Law 2               |
+
+### Left-quotient axioms (`∖`, C5–C8)
+
+| Label | Statement                             | Used for       |
+|-------|---------------------------------------|----------------|
+| C5    | `a ∖ ε = a`                           | Law 2 future   |
+| C6    | `⊤ ∖ r = ⊤`                           | Law 1 future   |
+| C7    | `x ∖ (a ⋄ b) = (x ∖ a) ∖ b`           | Law 3 future   |
+| C8    | `(a ∧ b) ∖ c = (a ∖ c) ∧ (b ∖ c)`     | Law 3 future   |
+
+### Right-quotient axioms (`∕`, D1–D4)
+
+| Label | Statement                             | Used for     |
+|-------|---------------------------------------|--------------|
+| D1    | `a ∕ ε = a`                           | Law 1 pre    |
+| D2    | `⊤ ∕ q = ⊤`                           | Law 2 pre    |
+| D3    | `(a ∕ b) ∕ c = a ∕ (c ⋄ b)`           | Law 3 pre    |
+| D4    | `(a ∧ b) ∕ c = (a ∕ c) ∧ (b ∕ c)`     | Law 3 pre    |
+
+The `Ccomm` axiom from the previous version is no longer required.
+Law 3's `future` proof follows from C7 alone (the corrected left-quotient
+sequential law `x ∖ (a⋄b) = (x∖a) ∖ b`) without needing commutativity of `⋄`.
 -/
+
+section PledgeMonad
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- § 1  Composable algebra
 -- ═══════════════════════════════════════════════════════════════════════════
 
-/-- Abstract algebra for effect types, matching `class Composable` in Core.hs. -/
-class Composable (eff : Type) where
-  cat  : eff → eff → eff   -- (·)  sequential composition
-  meet : eff → eff → eff   -- (/\) conjunction
-  res  : eff → eff → eff   -- res r s = subtraction r s = s \\ r in Haskell
-  emp  : eff               -- empty:    unit for cat
-  univ : eff               -- universe: unit for meet
+/-- Abstract algebra for effect types, matching `class Composable` in Core.hs.
 
-infixl:70 " ⋄ " => Composable.cat
-infixl:65 " ⊓ " => Composable.meet
-infixl:60 " ≺ " => Composable.res   -- r ≺ s  means  s \\ r  in Haskell
+  `lq r s`   = `leftQuotient s r`  = `r ∖ s`   in Haskell (dividend r, divisor s).
+  `rqOp a b` = `rightQuotient b a` = `a ∕ b`   in Haskell (dividend a, divisor b). -/
+class Composable (eff : Type) where
+  cat   : eff → eff → eff   -- (·)   sequential composition
+  meet  : eff → eff → eff   -- (∧)   conjunction
+  lq    : eff → eff → eff   -- lq r s  =  leftQuotient s r  (dividend r, divisor s)
+  rqOp  : eff → eff → eff   -- rqOp a b  =  rightQuotient b a  =  a ∕ b
+  emp   : eff               -- empty:    unit for cat   (written ε)
+  univ  : eff               -- universe: unit for meet  (written ⊤)
+
+local infixl:70 " ⋄ "  => Composable.cat
+local infixl:65 " ⊓ "  => Composable.meet  -- written ∧ in doc comments / Core.hs
+local infixl:60 " ∖ "  => Composable.lq    -- r ∖ s  =  leftQuotient s r  (dividend r, divisor s)
+local infixl:60 " ∕ "  => Composable.rqOp  -- a ∕ b  =  rightQuotient b a  (dividend a, divisor b)
+local notation "ε"     => Composable.emp    -- identity for ⋄  (mirrors ε   in Core.hs)
+local notation "⊤"     => Composable.univ   -- identity for ⊓  (mirrors (⊤) in Core.hs)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- § 2  Axioms
 -- ═══════════════════════════════════════════════════════════════════════════
 
-/-- The ten algebraic laws required for the three monad-law proofs. -/
+/-- Algebraic laws required for the three monad-law proofs. -/
 structure ComposableAxioms (eff : Type) [Composable eff] : Type where
+  -- Sequential algebra
   C1    : ∀ a : eff,         Composable.emp ⋄ a = a
   C2    : ∀ a : eff,         a ⋄ Composable.emp = a
   C3    : ∀ a b c : eff,     (a ⋄ b) ⋄ c = a ⋄ (b ⋄ c)
   C4    : ∀ a : eff,         Composable.univ ⊓ a = a
   C4r   : ∀ a : eff,         a ⊓ Composable.univ = a
-  C5    : ∀ a : eff,         Composable.emp ≺ a = a
-  C6    : ∀ r : eff,         r ≺ Composable.univ = Composable.univ
-  C7    : ∀ a b x : eff,     (a ⋄ b) ≺ x = a ≺ (b ≺ x)
-  C8    : ∀ c a b : eff,     c ≺ (a ⊓ b) = (c ≺ a) ⊓ (c ≺ b)
-  Ccomm : ∀ a b x : eff,     (a ⋄ b) ≺ x = (b ⋄ a) ≺ x
+  -- Left-quotient laws
+  C5    : ∀ a : eff,         a ∖ Composable.emp = a
+  C6    : ∀ r : eff,         Composable.univ ∖ r = Composable.univ
+  C7    : ∀ a b x : eff,     x ∖ (a ⋄ b) = (x ∖ a) ∖ b
+  C8    : ∀ c a b : eff,     (a ⊓ b) ∖ c = (a ∖ c) ⊓ (b ∖ c)
+  -- Right-quotient laws
+  D1    : ∀ a : eff,         a ∕ Composable.emp = a
+  D2    : ∀ q : eff,         Composable.univ ∕ q = Composable.univ
+  D3    : ∀ a b x : eff,     (x ∕ b) ∕ a = x ∕ (a ⋄ b)
+  D4    : ∀ c a b : eff,     (a ⊓ b) ∕ c = (a ∕ c) ⊓ (b ∕ c)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- § 3  The Pledge structure
@@ -113,15 +144,15 @@ def Pledge.bind [Composable eff] (p : Pledge eff α) (g : α → Pledge eff β) 
     Pledge eff β :=
   let gp := g p.ret
   { ret    := gp.ret
-    pre    := p.pre ⊓ (p.post ≺ gp.pre)
+    pre    := p.pre ⊓ (gp.pre ∕ p.post)          -- ∧ (preB ∕ postA)   right-quotient
     post   := p.post ⋄ gp.post
-    future := (gp.post ≺ p.future) ⊓ gp.future }
+    future := (p.future ∖ gp.post) ⊓ gp.future }  -- (futA ∖ postB) ∧ futB  left-quotient
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- § 5  Monad laws
 -- ═══════════════════════════════════════════════════════════════════════════
 
-variable {eff : Type} [Composable eff]
+variable {eff : Type} [Composable eff] (ax : ComposableAxioms eff)
 variable {α β γ : Type}
 
 /-!
@@ -129,17 +160,17 @@ variable {α β γ : Type}
 
 Let `g x = (b, P', Q', F')`.
 
-| component | expression       | steps                    |
-|-----------|------------------|--------------------------|
-| pre    | `univ ⊓ (emp ≺ P')` | `= univ ⊓ P' = P'`   C5, C4 |
-| post   | `emp ⋄ Q'`          | `= Q'`               C1     |
-| future | `(Q' ≺ univ) ⊓ F'` | `= univ ⊓ F' = F'`   C6, C4 |
+| component | expression              | steps                           |
+|-----------|-------------------------|---------------------------------|
+| pre       | `⊤ ∧ (P' ∕ ε)`         | `= ⊤ ∧ P' = P'`   D1, C4       |
+| post      | `ε ⋄ Q'`               | `= Q'`            C1             |
+| future    | `(⊤ ∖ Q') ∧ F'`        | `= ⊤ ∧ F' = F'`   C6, C4       |
 -/
 theorem pledge_left_id (ax : ComposableAxioms eff) (x : α) (g : α → Pledge eff β) :
     Pledge.bind (Pledge.pure x) g = g x := by
   apply Pledge.ext
   · simp only [Pledge.bind, Pledge.pure]
-  · simp only [Pledge.bind, Pledge.pure, ax.C5, ax.C4]
+  · simp only [Pledge.bind, Pledge.pure, ax.D1, ax.C4]
   · simp only [Pledge.bind, Pledge.pure, ax.C1]
   · simp only [Pledge.bind, Pledge.pure, ax.C6, ax.C4]
 
@@ -148,17 +179,17 @@ theorem pledge_left_id (ax : ComposableAxioms eff) (x : α) (g : α → Pledge e
 
 Let `p = (a, P, Q, F)`.
 
-| component | expression        | steps                     |
-|-----------|-------------------|---------------------------|
-| pre    | `P ⊓ (Q ≺ univ)`    | `= P ⊓ univ = P`   C6, C4r |
-| post   | `Q ⋄ emp`           | `= Q`               C2     |
-| future | `(emp ≺ F) ⊓ univ`  | `= F ⊓ univ = F`   C5, C4r |
+| component | expression              | steps                            |
+|-----------|-------------------------|----------------------------------|
+| pre       | `P ∧ (⊤ ∕ Q)`          | `= P ∧ ⊤ = P`   D2, C4r         |
+| post      | `Q ⋄ ε`                | `= Q`            C2              |
+| future    | `(F ∖ ε) ∧ ⊤`          | `= F ∧ ⊤ = F`   C5, C4r         |
 -/
 theorem pledge_right_id (ax : ComposableAxioms eff) (p : Pledge eff α) :
     Pledge.bind p Pledge.pure = p := by
   apply Pledge.ext
   · simp only [Pledge.bind, Pledge.pure]
-  · simp only [Pledge.bind, Pledge.pure, ax.C6, ax.C4r]
+  · simp only [Pledge.bind, Pledge.pure, ax.D2, ax.C4r]
   · simp only [Pledge.bind, Pledge.pure, ax.C2]
   · simp only [Pledge.bind, Pledge.pure, ax.C5, ax.C4r]
 
@@ -169,37 +200,36 @@ Let `p=(a,P,Q,F)`, `f a=(b,P',Q',F')`, `g b=(c,P'',Q'',F'')`.
 
 **LHS** (`(p >>= f) >>= g`):
 ```
-  pre_L    = [P ⊓ (Q ≺ P')] ⊓ [(Q ⋄ Q') ≺ P'']
+  pre_L    = [P ∧ (P' ∕ Q)] ∧ (P'' ∕ (Q ⋄ Q'))
   post_L   = (Q ⋄ Q') ⋄ Q''
-  future_L = (Q'' ≺ [(Q' ≺ F) ⊓ F']) ⊓ F''
+  future_L = ([(F ∖ Q') ∧ F'] ∖ Q'') ∧ F''
 ```
 
 **RHS** (`p >>= (fun x => f x >>= g)`):
 ```
-  pre_R    = P ⊓ (Q ≺ [P' ⊓ (Q' ≺ P'')])
+  pre_R    = P ∧ ([P' ∧ (P'' ∕ Q')] ∕ Q)
   post_R   = Q ⋄ (Q' ⋄ Q'')
-  future_R = ((Q' ⋄ Q'') ≺ F) ⊓ [(Q'' ≺ F') ⊓ F'']
+  future_R = (F ∖ (Q' ⋄ Q'')) ∧ [(F' ∖ Q'') ∧ F'']
 ```
 
 **post**: `post_L = post_R` by C3.
 
-**pre** (rewrite RHS using C8, ←C7, ←meet_assoc):
+**pre** (expand RHS using D4, D3, then ←meet_assoc):
 ```
-  Q ≺ [P' ⊓ (Q'≺P'')]
-    = (Q≺P') ⊓ (Q ≺ (Q'≺P''))   by C8
-    = (Q≺P') ⊓ ((Q⋄Q') ≺ P'')   by ←C7
-  P ⊓ [(Q≺P') ⊓ ((Q⋄Q')≺P'')]
-    = [P⊓(Q≺P')] ⊓ [(Q⋄Q')≺P''] by ←meet_assoc
+  [P' ∧ (P'' ∕ Q')] ∕ Q
+    = (P' ∕ Q) ∧ ((P'' ∕ Q') ∕ Q)   by D4
+    = (P' ∕ Q) ∧ (P'' ∕ (Q ⋄ Q'))   by D3
+  P ∧ [(P' ∕ Q) ∧ (P'' ∕ (Q ⋄ Q'))]
+    = [P ∧ (P' ∕ Q)] ∧ (P'' ∕ (Q ⋄ Q'))  by ←meet_assoc
 ```
 
-**future** (expand LHS using C8, ←C7, Ccomm, meet_assoc):
+**future** (expand LHS using C8, ←C7, then meet_assoc):
 ```
-  Q'' ≺ [(Q'≺F) ⊓ F']
-    = (Q''≺(Q'≺F)) ⊓ (Q''≺F')    by C8
-    = ((Q''⋄Q')≺F) ⊓ (Q''≺F')   by ←C7  (a=Q'', b=Q', x=F)
-    = ((Q'⋄Q'')≺F) ⊓ (Q''≺F')   by Ccomm
-  [((Q'⋄Q'')≺F)⊓(Q''≺F')]⊓F''
-    = (Q'⋄Q'')≺F ⊓ [(Q''≺F')⊓F''] by meet_assoc
+  [(F ∖ Q') ∧ F'] ∖ Q''
+    = ((F ∖ Q') ∖ Q'') ∧ (F' ∖ Q'')   by C8
+    = (F ∖ (Q' ⋄ Q'')) ∧ (F' ∖ Q'')   by ←C7  (x=F, a=Q', b=Q'')
+  [(F ∖ (Q' ⋄ Q'')) ∧ (F' ∖ Q'')] ∧ F''
+    = (F ∖ (Q' ⋄ Q'')) ∧ [(F' ∖ Q'') ∧ F'']   by meet_assoc
 ```
 -/
 theorem pledge_assoc
@@ -211,15 +241,15 @@ theorem pledge_assoc
   apply Pledge.ext
   · -- ret: definitional
     simp only [Pledge.bind]
-  · -- pre: [P⊓(Q≺P')]⊓[(Q⋄Q')≺P''] = P⊓(Q≺[P'⊓(Q'≺P'')])
+  · -- pre: [P∧(P'∕Q)]∧(P''∕(Q⋄Q')) = P∧([P'∧(P''∕Q')]∕Q)
     simp only [Pledge.bind]
-    rw [ax.C8, ← ax.C7, ← meet_assoc]
+    rw [ax.D4, ax.D3, ← meet_assoc]
   · -- post: (Q⋄Q')⋄Q'' = Q⋄(Q'⋄Q'')
     simp only [Pledge.bind]
     rw [ax.C3]
-  · -- future: (Q''≺[(Q'≺F)⊓F'])⊓F'' = ((Q'⋄Q'')≺F)⊓[(Q''≺F')⊓F'']
+  · -- future: ([(F∖Q')∧F']∖Q'')∧F'' = (F∖(Q'⋄Q''))∧[(F'∖Q'')∧F'']
     simp only [Pledge.bind]
-    rw [ax.C8, ← ax.C7, ax.Ccomm, meet_assoc]
+    rw [ax.C8, ← ax.C7, meet_assoc]
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- § 6  Summary
@@ -228,19 +258,25 @@ theorem pledge_assoc
 /-!
 ## Theorem inventory
 
-| Theorem            | sorry-free? | Axioms consumed           |
-|--------------------|-------------|---------------------------|
-| `pledge_left_id`   | ✓           | C1, C4, C5, C6            |
-| `pledge_right_id`  | ✓           | C2, C4r, C5, C6           |
-| `pledge_assoc`     | ✓           | C3, C7, C8, Ccomm, meet_assoc |
+| Theorem            | sorry-free? | Axioms consumed              |
+|--------------------|-------------|------------------------------|
+| `pledge_left_id`   | ✓           | C1, C4, C6, D1               |
+| `pledge_right_id`  | ✓           | C2, C4r, C5, D2              |
+| `pledge_assoc`     | ✓           | C3, C7, C8, D3, D4, meet_assoc |
 
-All three proofs are `sorry`-free.
+All three proofs are `sorry`-free.  `Ccomm` is not required: the corrected
+C7 (`x ∖ (a⋄b) = (x∖a) ∖ b`) handles the `future` associativity step directly.
 
-## Relationship to `FutureCond.lean`
+## Changes from previous version
 
-- `FutureCond.lean` formalises an older `Effectful` design where `pre` uses
-  `cat` (`e.pre ⋄ (fe.pre ∖∖ e.post)`).  The current `Pledge/Core.hs` uses
-  `meet` (`preA /\\ (preB \\\\ postA)`).  This file formalises the current design.
-- `assoc_future` in `FutureCond.lean` carries a `sorry` for the same reason:
-  it implicitly needs `Ccomm` which was not listed among C1–C8.
+- `res` renamed to `lq` (left-quotient); `rqOp` added (right-quotient).
+- Notation convention: `r ∖ s` has dividend `r` on the left (matches Core.hs `a ∖ b = leftQuotient b a`).
+- Bind `future` updated to `p.future ∖ gp.post` (dividend first); `pre` uses `∕` (right-quotient).
+- C5–C8 restated in dividend-left form: `a ∖ emp`, `univ ∖ r`, `x ∖ (a⋄b) = (x∖a)∖b`, `(a∧b)∖c`.
+- C7 corrected to `x ∖ (a⋄b) = (x∖a) ∖ b` (left-quotient sequential law).
+- `Ccomm` axiom removed (was only needed to paper over the wrong C7 direction).
+- D1–D4 axioms added for the right-quotient `∕`.
+- Law 1/2 pre proofs now cite D1/D2 instead of C5/C6.
 -/
+
+end PledgeMonad

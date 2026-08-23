@@ -80,22 +80,24 @@ when `m` has observable side effects, since each accessor re-runs the action.
 
 ## The `Composable` Class
 
-All `eff` types share a five-operation algebra:
+All `eff` types share a six-operation algebra:
 
 ```haskell
 class Composable a where
     concatenation :: a -> a -> a   -- (·)   sequential composition
-    conjunction   :: a -> a -> a   -- (/\)  simultaneous constraint
-    subtraction   :: a -> a -> a   -- (\\)  left-quotient / residual
+    conjunction   :: a -> a -> a   -- (∧)  simultaneous constraint
+    leftQuotient  :: a -> a -> a   -- (\\)  left-quotient
+    rightQuotient :: a -> a -> a   -- (⊖)   right-quotient
     empty         :: a             -- identity for (·)
-    universe      :: a             -- identity for (/\)
+    universe      :: a             -- identity for (∧)
 ```
 
 | Operator | Fixity | Meaning |
 |---|---|---|
 | `(·)` | `infixl 6` | concatenation |
-| `(/\)` | `infixl 7` | conjunction |
-| `(\\)` | `infixl 5` | subtraction (post `\\` pre = residual of pre after post) |
+| `(∧)` | `infixl 7` | conjunction |
+| `(∖)` | `infixl 5` | left-quotient: `L ∖ R` = residual of `R` with `L` stripped from the left |
+| `(∕)` | `infixl 5` | right-quotient: `L ∕ R` = residual of `L` with `R` stripped from the right |
 
 The `Composable` instance lifts through any `Applicative`:
 
@@ -103,25 +105,28 @@ The `Composable` instance lifts through any `Applicative`:
 instance (Composable eff, Applicative m) => Composable (m eff)
 ```
 
-so `(·)`, `(/\)`, `(\\)` work directly on `m eff` values.
+so `(·)`, `(∧)`, `(∖)`, `(∕)` work directly on `m eff` values.
 
 ### Bind propagation laws
 
 When `p >>= f` is evaluated, the monad propagates all four components:
 
 ```
-pre  (p >>= f)  =  pre p  /\  (pre (f _)  \\  post p)
+pre  (p >>= f)  =  pre p  ∧  (pre (f _)  ∕  post p)
 post (p >>= f)  =  post p  ·   post (f _)
-fut  (p >>= f)  =  (fut p  \\  post (f _))  /\  fut (f _)
+fut  (p >>= f)  =  (fut p  ∖  post (f _))  ∧  fut (f _)
 ```
 
-`post p \\ pre (f _)` is the **Brzozowski quotient** — the residual precondition
-of `f` not already discharged by `p`'s output. When `post p` fully covers
-`pre (f _)` the residual collapses to `empty` (obligation met); when it does not
-cover it, the residual is `Bot` / `∅` (violation detected).
+`pre (f _) ∕ post p` is the **right-quotient** — the residual precondition of `f`
+not already discharged by `p`'s output (stripped from the right). When `post p`
+fully covers `pre (f _)` the residual collapses to `empty` (obligation met); when
+it does not, the residual is `Bot` / `∅` (violation detected).
 
-The monad laws hold provided `Composable` satisfies eight algebraic laws; these
-are proved by inlining and equational reasoning in `Pledge.Core`.
+`fut p ∖ post (f _)` is the **left-quotient** — the future obligation of `p`
+remaining after `f`'s output has discharged what it can from the left.
+
+The monad laws hold provided `Composable` satisfies eight algebraic laws for `∖`
+(C1–C8) and four for `∕` (D1–D4); these are proved in `Pledge.Core`.
 
 ---
 
@@ -195,7 +200,8 @@ with no single-step projection. No automaton construction is required.
 |---|---|
 | `concatenation` | `Seq` |
 | `conjunction` | `And` (intersection) |
-| `subtraction r1 r2` | Antimirov quotient `r2 \\ r1` (residual of `r2` after `r1`) |
+| `leftQuotient r1 r2` | Antimirov quotient: residual of `r2` after `r1` (strip `r1` from left) |
+| `rightQuotient r1 r2` | Reverse-Antimirov quotient: residual of `r2` before `r1` (strip `r1` from right) |
 | `empty` | `Epsilon` |
 | `universe` | `Not Bot` (= Σ*) |
 
@@ -222,7 +228,8 @@ data SL
 |---|---|
 | `concatenation` | `SepStar` (∗) |
 | `conjunction` | `Conj` (∧) |
-| `subtraction p q` | magic wand `p -* q` |
+| `leftQuotient p q` | magic wand `p -* q` |
+| `rightQuotient p q` | magic wand `p -* q` (same as left-quotient; `SepStar` is commutative) |
 | `empty` | `Emp` |
 | `universe` | `Top` |
 
@@ -441,24 +448,15 @@ Each example prints:
 
 ## Lean 4 Formalization
 
-`Formalization/` contains a mechanized proof of the core theory in Lean 4:
-syntax, denotational semantics, nullability, Brzozowski derivatives,
-normalization soundness, `Composable` algebra, and `Pledge` monad laws.
+`Formalization/PledgeMonadLaws.lean` contains a mechanized proof of the
+`Pledge` monad laws under the `Composable` axioms (C1–C8, D1–D4) in Lean 4.
 
 ```bash
 cd Formalization && lake build Pledge
 ```
 
-| Section | Status |
+| Theorem | Status |
 |---|---|
-| Syntax & semantics, nullability | proved |
-| Derivative correctness (non-star cases + `Not`) | proved |
-| Derivative correctness (star/nil subcase) | `sorry` |
-| Normalization soundness (seq-ε, not, star) | proved |
-| Normalization soundness (or/and cases) | `sorry` |
-| De Morgan, distributivity | proved |
-| Monad left/right identity | proved |
-| Monad associativity of `post` | proved |
-| Monad associativity of `future` | `sorry` |
-| Hoare precondition collapse/violation | proved |
-| Future-condition propagation, `no_leak_iff` | proved |
+| Left identity (`pledge_left_id`) | proved |
+| Right identity (`pledge_right_id`) | proved |
+| Associativity (`pledge_assoc`) | proved |

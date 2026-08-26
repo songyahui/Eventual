@@ -176,18 +176,20 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --
 -- Required laws for (·), (⊓), (∖), and (∕):
 --
---   (C1)  empty · a            = a                    left  identity of (·)
---   (C2)  a · empty            = a                    right identity of (·)
---   (C3)  (a · b) · c          = a · (b · c)          associativity  of (·)
---   (C4)  universe ⊓ a         = a ⊓ universe = a     two-sided identity of (⊓)
---   (C5)  a ∖ empty            = a                    empty post discharges nothing
---   (C6)  universe ∖ a         = universe             universe is stable under ∖
---   (C7)  x ∖ (a · b)          = (x ∖ a) ∖ b          left-quotient sequential law
---   (C8)  (a ⊓ b) ∖ c          = (a ∖ c) ⊓ (b ∖ c)    ∖ distributes over (⊓)
---   (D1)  x ∕ empty            = x                    mirrors C5
---   (D2)  universe ∕ a         = universe             mirrors C6
---   (D3)  (x ∕ b) ∕ a          = x ∕ (a · b)          right-quotient sequential law
---   (D4)  (a ⊓ b) ∕ c          = (a ∕ c) ⊓ (b ∕ c)    mirrors C8
+--   (S1)  empty · a            = a                    left  identity of (·)
+--   (S2)  a · empty            = a                    right identity of (·)
+--   (S3)  (a · b) · c          = a · (b · c)          associativity  of (·)
+--   (C1)  a ⊓ b                = b ⊓ a                commutativity of (⊓)
+--   (C2)  (a ⊓ b) ⊓ c          = a ⊓ (b ⊓ c)          associativity of (⊓)
+--   (C3)  universe ⊓ a         = a                    left  identity of (⊓)
+--   (L1)  a ∖ empty            = a                    empty post discharges nothing
+--   (L2)  universe ∖ a         = universe             universe is stable under ∖
+--   (L3)  x ∖ (a · b)          = (x ∖ a) ∖ b          left-quotient sequential law
+--   (L4)  (a ⊓ b) ∖ c          = (a ∖ c) ⊓ (b ∖ c)    ∖ distributes over (⊓)
+--   (R1)  x ∕ empty            = x                    mirrors L1
+--   (R2)  universe ∕ a         = universe             mirrors L2
+--   (R3)  (x ∕ b) ∕ a          = x ∕ (a · b)          right-quotient sequential law
+--   (R4)  (a ⊓ b) ∕ c          = (a ∕ c) ⊓ (b ∕ c)    mirrors L4
 --
 -- ── Law 1: left identity — pure a >>= f = f a ─────────────────────────────────
 --
@@ -195,14 +197,14 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- Let f a = (b, P', Q', F').  Then pure a >>= f gives:
 --
 --   pre  : universe ⊓ (P' ∕ empty)
---        = universe ⊓ P'    -- by D1
---        = P'               -- by C4
+--        = universe ⊓ P'    -- by R1
+--        = P'               -- by C3
 --
---   post : empty · Q' = Q'                   -- by C1
+--   post : empty · Q' = Q'                   -- by S1
 --
 --   fut  : (universe ∖ Q') ⊓ F'
---        = universe ⊓ F'                     -- by C6
---        = F'                                -- by C4
+--        = universe ⊓ F'                     -- by L2
+--        = F'                                -- by C3
 --
 -- All three components equal those of f a.                                    □
 --
@@ -212,14 +214,16 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 -- m >>= pure gives:
 --
 --   pre  : P ⊓ (universe ∕ Q)
---        = P ⊓ universe     -- by D2
---        = P                 -- by C4
+--        = P ⊓ universe           -- by R2
+--        = universe ⊓ P           -- by C1
+--        = P                       -- by C3
 --
---   post : Q · empty = Q                      -- by C2
+--   post : Q · empty = Q                      -- by S2
 --
 --   fut  : (F ∖ empty) ⊓ universe
---        = F ⊓ universe                       -- by C5
---        = F                                  -- by C4
+--        = F ⊓ universe                       -- by L1
+--        = universe ⊓ F                       -- by C1
+--        = F                                  -- by C3
 --
 -- All three components equal those of m.                                       □
 --
@@ -241,16 +245,18 @@ instance (Composable eff, Monad m) => Monad (Pledge m eff) where
 --   post_R = Q · (Q' · Q'')
 --   fut_R  = (F ∖ (Q' · Q'')) ⊓ ((F' ∖ Q'') ⊓ F'')
 --
--- post: post_L = (Q · Q') · Q'' = Q · (Q' · Q'') = post_R              by C3  □
+-- post: post_L = (Q · Q') · Q'' = Q · (Q' · Q'') = post_R              by S3  □
 --
--- pre:  expand pre_R using ∕-distributivity then D3:
+-- pre:  expand pre_R using ∕-distributivity then R3:
 --   (P' ⊓ (P'' ∕ Q')) ∕ Q
---     = (P' ∕ Q) ⊓ ((P'' ∕ Q') ∕ Q)    by D4
---     = (P' ∕ Q) ⊓ (P'' ∕ (Q · Q'))    by D3
---   so pre_R = P ⊓ (P' ∕ Q) ⊓ (P'' ∕ (Q · Q')) = pre_L              □
+--     = (P' ∕ Q) ⊓ ((P'' ∕ Q') ∕ Q)    by R4
+--     = (P' ∕ Q) ⊓ (P'' ∕ (Q · Q'))    by R3
+--   so pre_R = P ⊓ ((P' ∕ Q) ⊓ (P'' ∕ (Q · Q')))
+--           = (P ⊓ (P' ∕ Q)) ⊓ (P'' ∕ (Q · Q')) = pre_L          by C2  □
 --
--- fut:  expand fut_L using C8 then C7:
+-- fut:  expand fut_L using L4 then L3:
 --   ((F ∖ Q') ⊓ F') ∖ Q''
---     = (F ∖ Q') ∖ Q''  ⊓  (F' ∖ Q'')  by C8
---     = F ∖ (Q' · Q'')  ⊓  (F' ∖ Q'')  by C7
---   so fut_L = (F ∖ (Q'·Q'')) ⊓ (F' ∖ Q'') ⊓ F'' = fut_R            □
+--     = (F ∖ Q') ∖ Q''  ⊓  (F' ∖ Q'')  by L4
+--     = F ∖ (Q' · Q'')  ⊓  (F' ∖ Q'')  by L3
+--   so fut_L = ((F ∖ (Q'·Q'')) ⊓ (F' ∖ Q'')) ⊓ F''
+--           = (F ∖ (Q'·Q'')) ⊓ ((F' ∖ Q'') ⊓ F'') = fut_R         by C2  □

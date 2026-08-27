@@ -85,8 +85,8 @@
 \newcommand{\norm}[1]{\lceil #1 \rceil}
 \newcommand{\sem}[1]{\llbracket #1 \rrbracket}
 \newcommand{\univ}{\neg\varnothing}
-\newcommand{\lq}{\mathbin{\setminus}}   % left-quotient infix
-\newcommand{\rq}{\mathbin{/}}           % right-quotient infix
+\newcommand{\lquot}{\mathbin{\setminus}}   % left-quotient infix
+\newcommand{\rquot}{\mathbin{/}}           % right-quotient infix
 
 \begin{document}
 
@@ -120,9 +120,9 @@ annotation fields $(\mathtt{pre}, \mathtt{post}, \mathtt{fut}) :: \mathit{eff}$
 describing what must have held before, what this action produces, and
 what must still hold afterwards.
 Monadic bind propagates these annotations using two algebraic operations:
-\emph{left-quotient} ($\lq$) discharges the first computation's future
+\emph{left-quotient} ($\lquot$) discharges the first computation's future
 against the continuation's postcondition, and
-\emph{right-quotient} ($\rq$) combines the continuation's precondition
+\emph{right-quotient} ($\rquot$) combines the continuation's precondition
 with the first computation's postcondition;
 the residual obligations are the unmet portions.
 
@@ -239,23 +239,23 @@ Monadic bind propagates these through two quotient operations on
 \lstinline{eff}:
 
 \begin{align}
-  \pre(p \mathbin{>\!\!>\!\!=} q)  &\;=\; \pre(p) \sqcap (\pre(q) \rq \post(p))
+  \pre(p \mathbin{>\!\!>\!\!=} q)  &\;=\; \pre(p) \sqcap (\pre(q) \rquot \post(p))
   \label{eq:pre-bind}  \\
   \post(p \mathbin{>\!\!>\!\!=} q) &\;=\; \post(p) \cdot \post(q)
   \label{eq:post-bind} \\
-  \fut(p \mathbin{>\!\!>\!\!=} q)  &\;=\; (\fut(p) \lq \post(q)) \sqcap \fut(q)
+  \fut(p \mathbin{>\!\!>\!\!=} q)  &\;=\; (\fut(p) \lquot \post(q)) \sqcap \fut(q)
   \label{eq:fut-bind}
 \end{align}
 
 \noindent
-Here $\lq$ is the \emph{left-quotient} (strips an observed prefix from a
-pending obligation) and $\rq$ is the \emph{right-quotient} (checks whether a
+Here $\lquot$ is the \emph{left-quotient} (strips an observed prefix from a
+pending obligation) and $\rquot$ is the \emph{right-quotient} (checks whether a
 produced postcondition satisfies the continuation's precondition).
 A fully-discharged residual --- $\pre = \univ$ and $\fut = \univ$ --- is the
 certificate that the composed program is contract-correct.
 
 The \lstinline{Composable} typeclass abstracts six operations:
-$(\cdot, \sqcap, \varepsilon, \top, \lq, \rq)$.
+$(\cdot, \sqcap, \varepsilon, \top, \lquot, \rquot)$.
 It admits four independent instances:
 
 \begin{itemize}[wide, labelindent=10pt]
@@ -476,9 +476,9 @@ The library provides Unicode infix aliases:
 \lstinline{a ∖ b = leftQuotient b a}, and
 \lstinline{p ∕ q = rightQuotient q p}.
 The swapped arguments in the infix definitions are intentional:
-$\fut \lq \post$ means ``left-quotient of $\fut$ by $\post$,'' i.e.,
+$\fut \lquot \post$ means ``left-quotient of $\fut$ by $\post$,'' i.e.,
 strip $\post$ from the left of $\fut$.
-Similarly, $\pre \rq \post$ means ``right-quotient of $\pre$ by $\post$,''
+Similarly, $\pre \rquot \post$ means ``right-quotient of $\pre$ by $\post$,''
 i.e., strip $\post$ from the right of $\pre$.
 
 \paragraph{Algebraic roles.}
@@ -489,20 +489,20 @@ The two quotient operations implement \emph{obligation discharge}.
 Intuitively:
 
 \begin{itemize}
-\item $\fut \lq \post$: given that the continuation has posted
+\item $\fut \lquot \post$: given that the continuation has posted
   $\post$, what of the original future obligation $\fut$ remains
   unmet from the left?
 
-\item $\pre \rq \post$: given that the current action has produced
+\item $\pre \rquot \post$: given that the current action has produced
   $\post$, what portion of the next action's precondition $\pre$ is not
   yet satisfied from the right?
 \end{itemize}
 
 \noindent
 Two base cases anchor both quotients:
-$r \lq \varepsilon = r$ (nothing observed, obligation unchanged) and
-$r \lq \top = \top$ (universal postcondition covers anything).
-The symmetric laws hold for $\rq$.
+$r \lquot \varepsilon = r$ (nothing observed, obligation unchanged) and
+$r \lquot \top = \top$ (universal postcondition covers anything).
+The symmetric laws hold for $\rquot$.
 
 \paragraph{Component-wise lifting.}
 The instance for pairs lifts \lstinline{Composable} component-wise,
@@ -572,7 +572,7 @@ Pledge ma >>= g = Pledge $ do
 \end{lstlisting}
 
 \paragraph{Future condition.}
-The expression $\fut(A) \lq \post(B)$ computes the residual of $A$'s
+The expression $\fut(A) \lquot \post(B)$ computes the residual of $A$'s
 future obligation after observing $B$'s postcondition: events discharged
 by $\post(B)$ are removed, and the remainder is conjoined with $B$'s own
 future obligation.
@@ -580,7 +580,7 @@ When the result normalises to $\top$, all future obligations are
 discharged.
 
 \paragraph{Precondition.}
-The expression $\pre(B) \rq \post(A)$ is the \emph{residual precondition}:
+The expression $\pre(B) \rquot \post(A)$ is the \emph{residual precondition}:
 the part of $B$'s precondition not yet satisfied by $A$'s postcondition.
 If $\post(A)$ does not cover $\pre(B)$, the residual is $\varnothing$,
 flagging the violation.
@@ -630,13 +630,114 @@ residual obligations without requiring a data-dependent
 \lstinline{a -> eff} type for the future field.
 
 %% =========================================================================
+\section{Monad Laws}
+\label{sec:monad-laws}
+%% =========================================================================
+
+Every monad must satisfy three equational laws.
+\lstinline{Pledge}'s four annotation fields do not all satisfy the laws under
+ordinary equality: $\pre$ follows the Hoare-rule discipline of
+Equation~\eqref{eq:pre-bind}, which deliberately departs from left-identity
+when a precondition violation is detected (the violation must remain visible
+after further binding).
+What we prove, and mechanise in Lean~4, is that the triple $(\ret, \post, \fut)$
+satisfies the three laws exactly.
+The $\pre$ field is carried alongside as a separate contract-checking
+annotation, analogous to a writer-monad log that is inspected but not
+required to satisfy the monad laws on its own.
+
+The laws hold assuming the twelve axioms in Table~\ref{tab:axioms},
+which we state abstractly over the \lstinline{Composable} algebra.
+
+\begin{table}[ht]
+\caption{The twelve \lstinline{Composable} axioms required to prove the
+         monad laws for the $(\ret, \post, \fut)$ triple.}
+\label{tab:axioms}
+\small
+\begin{tabular}{lll}
+\toprule
+Label & Axiom & Used for \\
+\midrule
+S1 & $\varepsilon \cdot a = a$ & Law 1, post \\
+S2 & $a \cdot \varepsilon = a$ & Law 2, post \\
+S3 & $(a \cdot b) \cdot c = a \cdot (b \cdot c)$ & Law 3, post \\
+\midrule
+C1 & $a \sqcap b = b \sqcap a$ & Law 2, pre / fut \\
+C2 & $(a \sqcap b) \sqcap c = a \sqcap (b \sqcap c)$ & Law 3, pre / fut \\
+C3 & $\top \sqcap a = a$ & Laws 1, 2 \\
+\midrule
+L1 & $r \lquot \varepsilon = r$ & Law 2, fut \\
+L2 & $\top \lquot r = \top$ & Law 1, fut \\
+L3 & $r \lquot (a \cdot b) = (r \lquot a) \lquot b$ & Law 3, fut \\
+L4 & $(a \sqcap b) \lquot c = (a \lquot c) \sqcap (b \lquot c)$ & Law 3, fut \\
+\midrule
+R1 & $a \rquot \varepsilon = a$ & Law 1, pre \\
+R2 & $\top \rquot r = \top$ & Law 2, pre \\
+R3 & $(a \rquot b) \rquot c = a \rquot (c \cdot b)$ & Law 3, pre \\
+R4 & $(a \sqcap b) \rquot c = (a \rquot c) \sqcap (b \rquot c)$ & Law 3, pre \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We verify all three laws using these axioms.
+In each case we show that both sides of the law produce equal
+$(\ret, \post, \fut)$ triples.
+
+\paragraph{Left identity: \lstinline{pure x >>= f = f x}.}
+
+Let $p = \mathtt{pure}\;x = (x, \top, \varepsilon, \top)$ and $q = f\,x$.
+By Equations~\eqref{eq:pre-bind}--\eqref{eq:fut-bind}:
+\begin{align*}
+  \ret  &: \ret(q). \checkmark \\
+  \post &: \varepsilon \cdot \post(q) = \post(q). \quad\text{(S1)} \checkmark \\
+  \fut  &: (\top \lquot \post(q)) \sqcap \fut(q)
+         = \top \sqcap \fut(q) = \fut(q). \quad\text{(L2, C3)} \checkmark
+\end{align*}
+For $\pre$: $\pre(q) \rquot \varepsilon = \pre(q)$ (R1), so $\pre = \top \sqcap \pre(q)
+= \pre(q)$ (C3). $\checkmark$
+
+\paragraph{Right identity: \lstinline{e >>= pure = e}.}
+
+Let $q = \mathtt{pure}(\ret(e)) = (\ret(e), \top, \varepsilon, \top)$.
+\begin{align*}
+  \ret  &: \ret(e). \checkmark \\
+  \post &: \post(e) \cdot \varepsilon = \post(e). \quad\text{(S2)} \checkmark \\
+  \fut  &: (\fut(e) \lquot \varepsilon) \sqcap \top
+         = \fut(e) \sqcap \top = \top \sqcap \fut(e) = \fut(e). \quad\text{(L1, C1, C3)} \checkmark
+\end{align*}
+
+\paragraph{Associativity.}
+
+Let $r_1 = \ret(e)$, $r_2 = \ret(f\,r_1)$.
+Both sides yield $\ret(g\,r_2)$ and
+$\post(e) \cdot \post(f\,r_1) \cdot \post(g\,r_2)$ (by S3).
+For the future, unfolding Equation~\eqref{eq:fut-bind} on the LHS and
+applying L4 then L3 gives:
+\[
+  \bigl((\fut(e) \lquot \post(f\,r_1)) \lquot \post(g\,r_2)\bigr) \sqcap
+  (\fut(f\,r_1) \lquot \post(g\,r_2)) \sqcap \fut(g\,r_2)
+\]
+which equals the RHS by C2 and L3. $\checkmark$
+For $\pre$, applying R4 then R3 gives the same result on both sides by C2. $\checkmark$
+
+\paragraph{Lean~4 mechanisation.}
+The three law proofs are mechanised in Lean~4 in the file
+\texttt{Formalization/PledgeMonadLaws.lean}, using an abstract
+\lstinline{Composable} structure parametrised over the twelve axioms of
+Table~\ref{tab:axioms}.
+The Lean file carries no \lstinline{sorry}; all proofs are term-mode
+derivations from the stated axioms.
+A companion file \texttt{Formalization/REComposableLaws.lean} verifies that
+the $\RE$ instance satisfies all twelve axioms.
+
+%% =========================================================================
 \section{The RE Instance}
 \label{sec:re-instance}
 %% =========================================================================
 
 The \lstinline{Composable (RE t)} instance maps the algebra operations onto
 RE constructors and implements the quotients via Brzozowski derivatives.
-The left-quotient $r_2 \lq r_1$ --- ``what of $r_2$ remains after $r_1$ is
+The left-quotient $r_2 \lquot r_1$ --- ``what of $r_2$ remains after $r_1$ is
 consumed from the left'' --- is computed by Antimirov partial derivatives on
 $r_2$, which keep intermediate terms smaller than the Brzozowski derivative
 while producing the same language.
@@ -653,7 +754,7 @@ instance Eq t => Composable (RE t) where
 
 \noindent
 The right-quotient is computed via reversal:
-$r_2 \rq r_1 = \mathit{rev}(\mathit{rev}(r_2) \lq \mathit{rev}(r_1))$,
+$r_2 \rquot r_1 = \mathit{rev}(\mathit{rev}(r_2) \lquot \mathit{rev}(r_1))$,
 where $\mathit{rev}(r)$ reverses the sequences accepted by $r$.
 A normaliser applies the laws in Table~\ref{tab:normalize-laws}
 to simplify RE terms, exploiting the complement constructor to push
@@ -726,9 +827,9 @@ By induction on the structure of $e$.
 For $e = \mathtt{pure}\;x$, both residuals are $\univ$ by construction
 and there are no obligations; the claim holds vacuously.
 For $e = p \mathbin{>\!\!>\!\!=} f$: by Equation~\eqref{eq:fut-bind},
-$\fut(e) = \univ$ iff $(\fut(p) \lq \post(f\,r)) \sqcap \fut(f\,r) = \univ$,
-i.e.\ $\fut(p) \lq \post(f\,r) = \univ$ and $\fut(f\,r) = \univ$.
-By Lemma~\ref{lem:deriv-correct}, $\fut(p) \lq \post(f\,r) = \univ$ means
+$\fut(e) = \univ$ iff $(\fut(p) \lquot \post(f\,r)) \sqcap \fut(f\,r) = \univ$,
+i.e.\ $\fut(p) \lquot \post(f\,r) = \univ$ and $\fut(f\,r) = \univ$.
+By Lemma~\ref{lem:deriv-correct}, $\fut(p) \lquot \post(f\,r) = \univ$ means
 that every trace matching $\post(f\,r)$ discharges the entire obligation
 $\fut(p)$; the inductive hypothesis on $p$ and $f\,r$ then gives that the
 corresponding trace segments satisfy their respective obligations.
@@ -1056,7 +1157,7 @@ unchanged.
 For \lstinline{releaseWithoutAcquire}, \lstinline{pre} collapses to
 $\varnothing$: the \lstinline{Single(acquire(1))} precondition of
 \lstinline{release} is never posted, so the right-quotient
-$\mathtt{Single}(\mathtt{acquire}(1)) \rq \varepsilon = \varnothing$.
+$\mathtt{Single}(\mathtt{acquire}(1)) \rquot \varepsilon = \varnothing$.
 
 \subsection{Database Transactions (\texorpdfstring{$\RE$}{RE} Instance)}
 \label{sec:ex-tx}
@@ -1106,7 +1207,7 @@ future.
 \lstinline{committedTx} and \lstinline{rolledBackTx} fully discharge the
 obligation, yielding $\univ$.
 The disjunction is computed by the left-quotient:
-$(\finally{\mathtt{commit}} \vee \finally{\mathtt{rollback}}) \lq
+$(\finally{\mathtt{commit}} \vee \finally{\mathtt{rollback}}) \lquot
 \mathtt{Single}(\mathtt{commit})$
 reduces to $\univ$ because $\mathtt{commit}$ advances the
 $\finally{\mathtt{commit}}$ branch to $\univ$.
@@ -1330,15 +1431,15 @@ C1 & $a \sqcap b = b \sqcap a$ & Law 2, pre / fut \\
 C2 & $(a \sqcap b) \sqcap c = a \sqcap (b \sqcap c)$ & Law 3, pre / fut \\
 C3 & $\top \sqcap a = a$ & Laws 1, 2 \\
 \midrule
-L1 & $r \lq \varepsilon = r$ & Law 2, fut \\
-L2 & $\top \lq r = \top$ & Law 1, fut \\
-L3 & $r \lq (a \cdot b) = (r \lq a) \lq b$ & Law 3, fut \\
-L4 & $(a \sqcap b) \lq c = (a \lq c) \sqcap (b \lq c)$ & Law 3, fut \\
+L1 & $r \lquot \varepsilon = r$ & Law 2, fut \\
+L2 & $\top \lquot r = \top$ & Law 1, fut \\
+L3 & $r \lquot (a \cdot b) = (r \lquot a) \lquot b$ & Law 3, fut \\
+L4 & $(a \sqcap b) \lquot c = (a \lquot c) \sqcap (b \lquot c)$ & Law 3, fut \\
 \midrule
-R1 & $a \rq \varepsilon = a$ & Law 1, pre \\
-R2 & $\top \rq r = \top$ & Law 2, pre \\
-R3 & $(a \rq b) \rq c = a \rq (c \cdot b)$ & Law 3, pre \\
-R4 & $(a \sqcap b) \rq c = (a \rq c) \sqcap (b \rq c)$ & Law 3, pre \\
+R1 & $a \rquot \varepsilon = a$ & Law 1, pre \\
+R2 & $\top \rquot r = \top$ & Law 2, pre \\
+R3 & $(a \rquot b) \rquot c = a \rquot (c \cdot b)$ & Law 3, pre \\
+R4 & $(a \sqcap b) \rquot c = (a \rquot c) \sqcap (b \rquot c)$ & Law 3, pre \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1354,11 +1455,11 @@ By Equations~\eqref{eq:pre-bind}--\eqref{eq:fut-bind}:
 \begin{align*}
   \ret  &: \ret(q). \checkmark \\
   \post &: \varepsilon \cdot \post(q) = \post(q). \quad\text{(S1)} \checkmark \\
-  \fut  &: (\top \lq \post(q)) \sqcap \fut(q)
+  \fut  &: (\top \lquot \post(q)) \sqcap \fut(q)
          = \top \sqcap \fut(q) = \fut(q). \quad\text{(L2, C3)} \checkmark
 \end{align*}
 For the future, $\pre(p) = \top$ is the right-quotient's absorbing element:
-$\pre(q) \rq \varepsilon = \pre(q)$ (R1), so $\pre = \top \sqcap \pre(q)
+$\pre(q) \rquot \varepsilon = \pre(q)$ (R1), so $\pre = \top \sqcap \pre(q)
 = \pre(q)$ (C3). $\checkmark$
 
 \paragraph{Right identity: \lstinline{e >>= pure = e}.}
@@ -1367,11 +1468,11 @@ Let $q = \mathtt{pure}(\ret(e)) = (\ret(e), \top, \varepsilon, \top)$.
 \begin{align*}
   \ret  &: \ret(e). \checkmark \\
   \post &: \post(e) \cdot \varepsilon = \post(e). \quad\text{(S2)} \checkmark \\
-  \fut  &: (\fut(e) \lq \varepsilon) \sqcap \top
+  \fut  &: (\fut(e) \lquot \varepsilon) \sqcap \top
          = \fut(e) \sqcap \top = \top \sqcap \fut(e) = \fut(e). \quad\text{(L1, C1, C3)} \checkmark
 \end{align*}
 
-\paragraph{Associativity: \lstinline{(e >>= f) >>= g = e >>= (\x -> f x >>= g)}.}
+\paragraph{Associativity.}
 
 Let $r_1 = \ret(e)$, $r_2 = \ret(f\,r_1)$.
 Both sides yield $\ret(g\,r_2)$ and
@@ -1379,8 +1480,8 @@ $\post(e) \cdot \post(f\,r_1) \cdot \post(g\,r_2)$ (by S3).
 For the future, unfolding Equation~\eqref{eq:fut-bind} on the LHS and
 applying L4 then L3 gives:
 \[
-  \bigl((\fut(e) \lq \post(f\,r_1)) \lq \post(g\,r_2)\bigr) \sqcap
-  (\fut(f\,r_1) \lq \post(g\,r_2)) \sqcap \fut(g\,r_2)
+  \bigl((\fut(e) \lquot \post(f\,r_1)) \lquot \post(g\,r_2)\bigr) \sqcap
+  (\fut(f\,r_1) \lquot \post(g\,r_2)) \sqcap \fut(g\,r_2)
 \]
 which equals the RHS by C2 and L3. $\checkmark$
 For the precondition, applying R4 then R3 gives the same result on both sides

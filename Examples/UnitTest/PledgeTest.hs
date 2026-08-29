@@ -602,45 +602,55 @@ test_reLeftQuotient counter = do
     check counter "ε \\\\ Σ* = Σ*" $
         reLeftQuotient (Epsilon :: RE Term) (Not Bot) == Not Bot
 
-    -- ── Σ* as the trace ───────────────────────────────────────────────────────
-    -- The key invariant: derivative e (Not Bot) = Not (derivative e Bot) = Not Bot,
-    -- so r1 stays Not Bot at every recursive step.  Exploration is entirely driven
-    -- by atoms r2; the recursion terminates only when antiDeriv produces residuals
-    -- with no further atoms, at which point firstWith [] (Not Bot) = [] → Bot.
+    -- ── Σ* as the divisor ─────────────────────────────────────────────────────
+    -- Quotienting by Σ* asks: what is left of r2 once an /arbitrary/ prefix has
+    -- been consumed?  The answer is the suffix closure of L(r2) — neither ∅ nor
+    -- Σ*.  Two parts of 'reLeftQuotient' are load-bearing here:
     --
-    -- Consequence: Σ* \\ r2 = ∅ for every r2 whose atoms-driven derivation
-    -- eventually reaches a residual with empty atoms (ε or ∅).
-    -- The semantically correct left-quotient Σ*\r2 = Σ* in all cases, but the
-    -- atoms-based alphabet extraction cannot produce events from Not Bot alone.
+    --   (1) the nullable base case.  ε ∈ L(Σ*), so the whole of r2 is still
+    --       owed along the empty-prefix branch and must be unioned in.
+    --   (2) 'Wildcard' in the alphabet, standing for "an event other than the
+    --       named atoms".  ∂_e(Σ*) = Σ* for every e, so exploration is driven
+    --       entirely by the atoms; a pair naming no concrete atom (Σ*, ε, ∅)
+    --       would otherwise have no successors at all.
+    --
+    -- Dropping either one collapses every case below to ∅.
 
-    -- r2 = ∅: atoms ∅ = []; no events in alphabet → immediately ∅.
-    check counter "Σ* \\\\ ∅ = ∅   (atoms ∅ is empty; no events to explore)" $
+    check counter "Σ* \\\\ ∅ = ∅   (nothing to take a suffix of)" $
         normalize (reLeftQuotient (Not Bot :: RE Term) Bot) == Bot
 
-    -- r2 = ε: atoms ε = []; same as above.
-    check counter "Σ* \\\\ ε = ∅   (atoms ε is empty; no events to explore)" $
-        normalize (reLeftQuotient (Not Bot :: RE Term) Epsilon) == Bot
+    check counter "Σ* \\\\ ε = ε   (only the empty prefix lands in ε)" $
+        normalize (reLeftQuotient (Not Bot :: RE Term) Epsilon) == Epsilon
 
-    -- r2 = Σ*: atoms (Not Bot) = []; combined alphabet still empty.
-    check counter "Σ* \\\\ Σ* = ∅   (atoms of Not Bot is empty; no events explored)" $
-        normalize (reLeftQuotient (Not Bot :: RE Term) (Not Bot)) == Bot
+    check counter "Σ* \\\\ Σ* = Σ*   (axiom L2: universe stable under quotient)" $
+        normalize (reLeftQuotient (Not Bot :: RE Term) (Not Bot)) == Not Bot
 
-    -- r2 = Single a: alph = [a]; evts = [a] (∂_a(∅) = ∅, not total).
-    -- step a: dr1 = Not Bot (unchanged); antiDeriv a (Single a) = [ε].
-    -- recurse: Σ* \\ ε → alph = [] → ∅.
-    check counter "Σ* \\\\ a = ∅   (reaches Σ* \\\\ ε after one step; no atoms in ε)" $
-        normalize (reLeftQuotient (Not Bot) (Single a)) == Bot
+    -- suffix closure of {a} = {ε, a}
+    check counter "Σ* \\\\ a = {ε, a}" $
+        let q = reLeftQuotient (Not Bot) (Single a)
+        in matches q [] && matches q [a]
+           && not (matches q [b]) && not (matches q [a, a])
 
-    -- r2 = a ∨ b: alph = [a, b]; both steps produce [ε] via antiDeriv,
-    -- then recurse to Σ* \\ ε = ∅.
-    check counter "Σ* \\\\ (a ∨ b) = ∅   (both Or-branches reduce to Σ* \\\\ ε)" $
-        normalize (reLeftQuotient (Not Bot) (Or (Single a) (Single b))) == Bot
+    -- suffix closure of {a, b} = {ε, a, b}
+    check counter "Σ* \\\\ (a ∨ b) = {ε, a, b}" $
+        let q = reLeftQuotient (Not Bot) (Or (Single a) (Single b))
+        in matches q [] && matches q [a] && matches q [b]
+           && not (matches q [a, b])
 
-    -- r2 = a · b: alph = [a, b].
-    -- step a: antiDeriv a (a·b) = [b]; recurse Σ* \\ b → ∅.
-    -- step b: antiDeriv b (a·b) = [];  no residuals → ∅.
-    check counter "Σ* \\\\ (a · b) = ∅   (chain reduces to Σ* \\\\ ε)" $
-        normalize (reLeftQuotient (Not Bot) (Seq (Single a) (Single b))) == Bot
+    -- suffix closure of {ab} = {ε, b, ab}
+    check counter "Σ* \\\\ (a · b) = {ε, b, ab}" $
+        let q = reLeftQuotient (Not Bot) (Seq (Single a) (Single b))
+        in matches q [] && matches q [b] && matches q [a, b]
+           && not (matches q [a]) && not (matches q [b, a])
+
+    -- Termination: before cycle detection, a divisor whose derivative does not
+    -- shrink (Σ* and any starred language) made this recursion diverge.
+    check counter "Σ* \\\\ F(a) terminates   (cycle detection on ACI-equal pairs)" $
+        normalize (reLeftQuotient (Not Bot) (finally a)) == Not Bot
+
+    check counter "(a|b)* \\\\ F(a) terminates" $
+        normalize (reLeftQuotient (Star (Or (Single a) (Single b))) (finally a))
+            == Not Bot
 
     -- ── Single-step traces ─────────────────────────────────────────────────────
     -- Exact match: antiDeriv a (Single a) = [ε]; reLeftQuotient ε ε = ε.
@@ -684,10 +694,13 @@ test_reLeftQuotient counter = do
     -- Antimirov yields two separate residuals; their union is ε ∨ b,
     -- meaning the continuation either satisfies the obligation immediately (ε)
     -- or must still perform b (a·b-branch).
+    -- Compared as a language: the Or-branches may be accumulated in either
+    -- order, so structural equality would over-specify the result.
     check counter "a \\\\ (a ∨ (a · b)) = ε ∨ b   (Antimirov splits two matching Or-branches)" $
-        normalize (reLeftQuotient (Single a)
-                                 (Or (Single a) (Seq (Single a) (Single b))))
-            == Or Epsilon (Single b)
+        let q = reLeftQuotient (Single a)
+                               (Or (Single a) (Seq (Single a) (Single b)))
+        in matches q [] && matches q [b]
+           && not (matches q [a]) && not (matches q [b, b])
 
     -- ── Seq with nullable head: Antimirov nullable split ──────────────────────
     -- antiDeriv a (a*·b):

@@ -22,7 +22,7 @@ generateNonce nid = Pledge $ return
 -- Precondition: nonce must have just been generated
 consumeNonce :: Int -> Pledge IO (RE Term) ()
 consumeNonce nid = Pledge $ return
-    ((), Single (Atom "generateNonce" (List [Num nid])),
+    ((), previously (Atom "generateNonce" (List [Num nid])),
      Single (Atom "consumeNonce" (List [Num nid])),
      universe)
 

@@ -13,9 +13,28 @@ import Pledge.GuardedRE
 --   Heap constraint (PPred): the counter value satisfies 0 ≤ h[addr] ≤ maxVal
 --                            at every step; inc/dec are guarded accordingly.
 --
--- Neither constraint alone is sufficient:
---   RE alone would accept inc-sequences that overflow the counter.
---   PPred alone would accept arbitrary event sequences.
+-- ⚠ THIS EXAMPLE IS OUTSIDE WHAT GuardedRE CAN EXPRESS, and is kept as a
+-- cautionary case rather than a working one.  See Examples/GuardedRE/Memory.hs
+-- for the instance used in the paper.
+--
+-- A GuardedRE pairs a trace RE with a *static* Presburger predicate: every
+-- operation of the algebra conjoins the two predicates and quotients only the
+-- two REs, so the predicate is never advanced by an event.  It can therefore
+-- state an invariant of the whole run, but not a property that changes as the
+-- run proceeds.
+--
+-- A counter is exactly the latter.  `initCounter` posts h[addr] = 0 and
+-- `decrement` requires h[addr] > 0; these hold at *different moments*, but
+-- composition conjoins them into h[addr] = 0 ∧ h[addr] > 0, which is
+-- unsatisfiable.  The verdicts consequently invert:
+--
+--   normalUse  (correct)   ⇒ pre = [false]   -- reported as violating
+--   overflow   (incorrect) ⇒ pre = [true]    -- h < 10 never contradicts h = 0
+--
+-- Expressing state change needs values indexed by trace position, i.e. a
+-- Presburger encoding of the trace itself rather than a predicate alongside
+-- it.  Neither constraint alone suffices for this problem, but neither does
+-- their conjunction in this instance.
 
 -- ── Primitives ────────────────────────────────────────────────────────────────
 
@@ -58,7 +77,7 @@ snapshot addr = Pledge $ return
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
 
--- Good: init, two increments, one decrement, snapshot.
+-- Intended good; reports pre = [false].  See the header note.
 normalUse :: Pledge IO (GuardedRE Term) ()
 normalUse = do
     initCounter 0
@@ -67,13 +86,13 @@ normalUse = do
     decrement   0
     snapshot    0
 
--- Good: init and immediately snapshot (counter stays at zero).
+-- Reports pre = [true]: no decrement, so no contradiction arises.
 emptyRun :: Pledge IO (GuardedRE Term) ()
 emptyRun = do
     initCounter 0
     snapshot    0
 
--- Good: fill to max, then drain to zero.
+-- Intended good; reports pre = [false].  See the header note.
 fillAndDrain :: Int -> Pledge IO (GuardedRE Term) ()
 fillAndDrain maxVal = do
     initCounter 0
@@ -81,20 +100,25 @@ fillAndDrain maxVal = do
     replicateM_ maxVal (decrement 0)
     snapshot    0
 
--- Bad: increment past maximum — pre of increment carries PLt(h[0], 10)
---      but after 10 increments h[0] = 10, so the 11th pre is violated.
+-- Intended bad; reports pre = [true], i.e. NOT caught.  See the header note.
+-- The intent was that after 10 increments h[0] = 10 should violate the 11th
+-- increment's PLt(h[0], 10).  But the predicate is static: conjoining
+-- PLt(h[0],10) with itself eleven times is just PLt(h[0],10), which is
+-- satisfiable, and nothing tracks that h[0] has grown.
 overflow :: Pledge IO (GuardedRE Term) ()
 overflow = do
     initCounter 0
-    replicateM_ 11 (increment 0 10)  -- 11th violates PLt
+    replicateM_ 11 (increment 0 10)
     snapshot    0
 
--- Bad: decrement below zero — pre of decrement carries PGt(h[0], 0)
---      but after init the counter is 0, so the first decrement is rejected.
+-- Intended bad; reports pre = [false], and so happens to be flagged -- but
+-- for the wrong reason.  It is init's PEq(h[0],0) contradicting decrement's
+-- PGt(h[0],0), the same conjunction that also condemns the correct
+-- `normalUse` above, not a genuine underflow check.
 underflow :: Pledge IO (GuardedRE Term) ()
 underflow = do
     initCounter 0
-    decrement   0   -- pre requires h[0] > 0, but h[0] = 0
+    decrement   0
 
 -- Bad: skip init — trace pre of initCounter not satisfied.
 noInit :: Pledge IO (GuardedRE Term) ()

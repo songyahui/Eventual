@@ -194,23 +194,91 @@ antiDeriv e (Star r)      = map (\t -> normalize (Seq t (Star r))) (antiDeriv e 
 antiDeriv e (And r1 r2)   = [normalize (And (derivative e r1) (derivative e r2))]
 antiDeriv e (Not r)       = [normalize (Not (derivative e r))]
 
--- | Left-quotient @r1 \\ r2@: the residual obligation in @r2@ after the
--- trace described by @r1@.
+-- ── ACI-equality (for cycle detection) ────────────────────────────────────────
+
+-- Flatten an 'Or'-chain into its list of alternatives; likewise for 'And'.
+-- The elements are never themselves 'Or' (resp. 'And') at the top level.
+orTerms, andTerms :: RE t -> [RE t]
+orTerms  (Or  r1 r2) = orTerms  r1 ++ orTerms  r2
+orTerms  r           = [r]
+andTerms (And r1 r2) = andTerms r1 ++ andTerms r2
+andTerms r           = [r]
+
+-- Set equality under a supplied element equality (quadratic; the lists are
+-- the alternatives of a single Or/And node, so they stay short).
+sameSetBy :: (a -> a -> Bool) -> [a] -> [a] -> Bool
+sameSetBy eq xs ys = all (\x -> any (eq x) ys) xs
+                  && all (\y -> any (eq y) xs) ys
+
+-- | Structural equality modulo associativity, commutativity and idempotence
+-- of 'Or' and 'And'.
 --
--- Computed via Antimirov partial derivatives on @r2@: instead of a single
--- Brzozowski step @∂_e(r2)@, the full Antimirov set @∂_e^A(r2)@ is used,
--- keeping intermediate terms smaller.  The result language is identical to
--- the Brzozowski version because @⋃ L(∂_e^A(r2)) = L(∂_e(r2))@.
+-- Brzozowski's finiteness result — an 'RE' has finitely many distinct
+-- derivatives — holds only /modulo ACI/, so 'reLeftQuotient' must use this
+-- rather than the derived 'Eq' to recognise a repeated state.  With derived
+-- 'Eq', @Or a (Or b a)@ and @Or b a@ count as different states and the
+-- traversal below need not terminate.
+aciEq :: Eq t => RE t -> RE t -> Bool
+aciEq Bot         Bot         = True
+aciEq Epsilon     Epsilon     = True
+aciEq (Single e1) (Single e2) = e1 == e2
+aciEq (Seq  a b)  (Seq  c d)  = aciEq a c && aciEq b d
+aciEq (Star a)    (Star b)    = aciEq a b
+aciEq (Not  a)    (Not  b)    = aciEq a b
+aciEq r@(Or  _ _) s@(Or  _ _) = sameSetBy aciEq (orTerms  r) (orTerms  s)
+aciEq r@(And _ _) s@(And _ _) = sameSetBy aciEq (andTerms r) (andTerms s)
+aciEq _           _           = False
+
+-- ── Left-quotient ─────────────────────────────────────────────────────────────
+
+-- | Left-quotient @r1 \\ r2@: the residual obligation in @r2@ after any
+-- trace described by @r1@, i.e.\ the language
+-- @{ w | ∃u ∈ L(r1). u·w ∈ L(r2) }@.
+--
+-- Note this is a quotient by a whole /language/, not by a single event.
+-- It satisfies the recurrence
+--
+-- @
+--   r1 \\ r2  =  (if ν(r1) then r2 else ∅)  ∪  ⋃_e (∂_e r1) \\ (∂_e r2)
+-- @
+--
+-- whose first summand contributes @r2@ whenever @ε ∈ L(r1)@.  The
+-- derivative of @r2@ is taken as the full Antimirov set @∂_e^A(r2)@ rather
+-- than the single Brzozowski step, which keeps intermediate terms smaller;
+-- the result language is unchanged because @⋃ L(∂_e^A(r2)) = L(∂_e(r2))@.
+--
+-- The recurrence is solved by a worklist traversal of the reachable pairs
+-- @(∂_w r1, ∂_w^A r2)@, accumulating the residual of every pair whose first
+-- component is nullable.  A pair already seen (up to 'aciEq') contributes
+-- nothing new and is dropped, which is what makes the traversal terminate:
+-- both components range over finite sets modulo ACI (Brzozowski for @r1@,
+-- Antimirov for @r2@), so the product is finite.  Without that check the
+-- traversal diverges for any divisor whose derivative does not shrink —
+-- @Σ*@ and any starred language being the common cases.
 reLeftQuotient :: Eq t => RE t -> RE t -> RE t
 reLeftQuotient Epsilon r2 = r2
-reLeftQuotient r1 r2 =
-    let alph   = atoms r1 `union` atoms r2   -- combined alphabet for complement unfolding
-        evts   = firstWith alph r1
-        step e =
-            let dr1  = normalize (derivative e r1)
-                dr2s = antiDeriv e r2           -- Antimirov set of r2 residuals
-            in foldr (Or . reLeftQuotient dr1) Bot dr2s
-    in foldr (Or . step) Bot evts
+reLeftQuotient r1 r2 = normalize (go [(r1, r2)] [] Bot)
+  where
+    go []             _    acc = acc
+    go ((p, q):queue) seen acc
+        | any (samePair (p, q)) seen = go queue seen acc
+        | otherwise                  = go (nexts ++ queue) ((p, q) : seen) acc'
+      where
+        -- ε ∈ L(p) means the whole of q is still owed along this branch.
+        acc' | nullable p = Or q acc
+             | otherwise  = acc
+        -- Combined alphabet, so complement is unfolded over the events
+        -- mentioned by either side.  'Wildcard' is included as the
+        -- representative of Σ minus those events: without it a pair naming
+        -- no concrete atom (@Σ*@, @¬ε@, …) would have an empty alphabet and
+        -- no successors at all, silently yielding ∅.
+        alph  = Wildcard : (atoms p `union` atoms q)
+        nexts = [ (normalize (derivative e p), q')
+                | e  <- firstWith alph p
+                , q' <- antiDeriv e q
+                ]
+
+    samePair (p1, q1) (p2, q2) = aciEq p1 p2 && aciEq q1 q2
 
 -- Reverse an RE: revRE(r) accepts exactly {w^R | w ∈ L(r)}.
 revRE :: RE t -> RE t
@@ -314,6 +382,15 @@ normalize r = case r of
         (_, Bot)      -> Bot
         (Epsilon, r') -> r'
         (r', Epsilon) -> r'
+        -- Σ*·r = Σ* when ε ∈ L(r):  Σ* ⊆ Σ*·r (take ε from r) and
+        -- Σ*·r ⊆ Σ*, so the two are equal.  Symmetrically for r·Σ*.
+        -- Without this a fully discharged residual such as
+        -- Σ*·(a·Σ* ∨ ε) stays syntactically distinct from Σ*, and a
+        -- structural @== universe@ discharge check reports a violation
+        -- for a program that has in fact met every obligation.
+        (r1', r2')
+            | isTop r1', nullable r2' -> top
+            | isTop r2', nullable r1' -> top
         (r1', r2')    -> Seq r1' r2'
 
     Or r1 r2 -> case (normalize r1, normalize r2) of

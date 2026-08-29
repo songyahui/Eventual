@@ -24,7 +24,7 @@ type PRE = WRE Prob Term   -- weighted RE over the probability semiring
 malloc :: Addr -> Pledge IO PRE Addr
 malloc addr = Pledge $ return
     ( addr
-    , WEps sone                                                         -- pre: always allowed
+    , wTop                                                              -- pre: always allowed
     , WSingle (Prob 0.99) (Atom "malloc" (List [Num addr]))             -- post
     , wFinally (Prob 0.95) (Atom "free" (List [Num addr]))              -- future
     )
@@ -35,7 +35,7 @@ free addr = Pledge $ return
       -- pre: 95% confidence that malloc(addr) was previously observed
     , wPreviously (Prob 0.95) (Atom "malloc" (List [Num addr]))
     , WSingle (Prob 0.99) (Atom "free" (List [Num addr]))               -- post
-    , WEps sone                                                         -- future: no obligation
+    , wTop                                                              -- future: no obligation
     )
 
 -- ── Programs ──────────────────────────────────────────────────────────────────

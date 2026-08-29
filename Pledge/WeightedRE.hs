@@ -57,6 +57,11 @@ instance (Semiring w, Show t) => Show (WRE w t) where
     show (WSingle w e)| w == sone       = show e
                       | otherwise       = "[" ++ show w ++ "]" ++ show e
     -- recognise common patterns for nicer display
+    -- wFinally: Σ* · [w]ev · Σ*
+    show (WSeq (WStar (WSingle w1 Wildcard))
+               (WSeq (WSingle w2 ev) (WStar (WSingle w3 Wildcard))))
+        | w1 == sone && w3 == sone && w2 == sone = "F(" ++ show ev ++ ")"
+        | w1 == sone && w3 == sone   = "F[" ++ show w2 ++ "](" ++ show ev ++ ")"
     show (WSeq (WStar (WSingle w1 Wildcard)) (WSingle w2 ev))
         | w1 == sone && w2 == sone      = "F(" ++ show ev ++ ")"
         | otherwise                     = "F[" ++ show w2 ++ "](" ++ show ev ++ ")"
@@ -155,6 +160,14 @@ wNormalize r = case r of
         (WBot,    _)      -> WBot
         (_,       WBot)   -> WBot
         (WEps w1, WEps w2)-> WEps (smul w1 w2)
+        -- 'wTop' is the identity for 'WAnd', exactly as Σ* is for RE's 'And'.
+        -- It assigns @sone@ to every word (@sone ⊗ … ⊗ sone = sone@), and
+        -- @sone@ is the identity for @⊗@, so @wTop ⊗ r = r@ pointwise.
+        -- Without this rule a discharged residual keeps accumulating
+        -- @WAnd _ wTop@ layers and never reduces to the identity.
+        (r1',     r2')
+            | isWTop r1'  -> r2'
+            | isWTop r2'  -> r1'
         (r1',     r2')    -> WAnd r1' r2'
 
     WStar r1 -> case wNormalize r1 of
@@ -165,16 +178,57 @@ wNormalize r = case r of
     _ -> r
 
 -- | Weighted left-quotient: the residual of @r2@ after consuming a prefix
--- described by @r1@.  Base case: @WEps _@ means the prefix is @ε@, so @r2@
--- is returned unchanged.
+-- described by @r1@.  As a formal power series,
+--
+-- @
+--   (r1 \\ r2)(w)  =  ⊕_u  r1(u) ⊗ r2(u·w)
+-- @
+--
+-- which unfolds into the recurrence
+--
+-- @
+--   r1 \\ r2  =  (ν(r1) ⊗ r2)  ⊕  ⊕_e (∂_e r1) \\ (∂_e r2)
+-- @
+--
+-- The first summand is the @u = ε@ term, weighted by @r1@'s own ε-weight:
+-- it is /not/ simply @r2@, since a prefix language accepting @ε@ with weight
+-- @w@ contributes @w ⊗ r2@ and dropping @w@ silently loses it.
+--
+-- Solved by the same worklist traversal as 'Pledge.RE.reLeftQuotient': walk
+-- the reachable pairs @(∂_w r1, ∂_w r2)@, accumulate the nullable
+-- contribution at each, and drop a pair already seen.
+--
+-- __Termination.__ Unlike the Boolean case this is /not/ guaranteed in
+-- general.  Cycle detection here uses plain structural equality, because ACI
+-- normalisation would be unsound: neither @⊕@ nor @⊗@ is idempotent in an
+-- arbitrary semiring (@'Prob' 0.5 ⊕ 'Prob' 0.5 = 'Prob' 1.0@).  Worse, a
+-- weighted star has infinitely many distinct derivatives whenever its weight
+-- does not stabilise under @⊗@ --- @([0.9]a)*@ generates
+-- @0.9, 0.81, 0.729, …@.  Termination therefore holds exactly when the
+-- divisor has finitely many distinct derivative terms: for unit weights
+-- (@'wTop'@, @'wGlobally' 'sone'@, and the whole Boolean semiring, where
+-- @∂_e r = r@ holds on the nose) it does; for a divisor carrying a
+-- non-unit star weight it may not.  Divisors in practice are postconditions,
+-- which are unit-weight event sequences, so this is not hit --- but it is a
+-- real restriction and not merely a missing optimisation.
 wLeftQuotient :: (Semiring w, Eq t) => WRE w t -> WRE w t -> WRE w t
-wLeftQuotient (WEps _) r2 = r2
-wLeftQuotient r1       r2 =
-    let alph  = wAtoms r1 `union` wAtoms r2
-        evts  = wFirstWith alph r1
-        step e = wLeftQuotient (wNormalize (wDerivative e r1))
-                                (wNormalize (wDerivative e r2))
-    in foldr (WAdd . step) WBot evts
+wLeftQuotient r1 r2 = wNormalize (go [(r1, r2)] [] WBot)
+  where
+    go []             _    acc = acc
+    go ((p, q):queue) seen acc
+        | (p, q) `elem` seen = go queue seen acc
+        | otherwise          = go (nexts ++ queue) ((p, q) : seen) acc'
+      where
+        -- u = ε contributes ν(p) ⊗ q.
+        acc' | wNullable p /= szero = WAdd (WSeq (WEps (wNullable p)) q) acc
+             | otherwise            = acc
+        -- 'Wildcard' represents Σ minus the named atoms; without it a pair
+        -- naming no concrete event (wTop, WEps, WBot) has no successors and
+        -- the result collapses to WBot.
+        alph  = Wildcard : (wAtoms p `union` wAtoms q)
+        nexts = [ (wNormalize (wDerivative e p), wNormalize (wDerivative e q))
+                | e <- wFirstWith alph p
+                ]
 
 -- Reverse a WRE: wRev(r) accepts exactly {w^R | w ∈ L(r)} with the same weights.
 wRev :: WRE w t -> WRE w t
@@ -197,10 +251,22 @@ wRightQuotient r1 r2 = wRev (wLeftQuotient (wRev r1) (wRev r2))
 wTop :: Semiring w => WRE w t
 wTop = WStar (WSingle sone Wildcard)
 
+-- | Is this term 'wTop'?  Used by 'wNormalize' to apply the 'WAnd' identity.
+isWTop :: Semiring w => WRE w t -> Bool
+isWTop (WStar (WSingle w Wildcard)) = w == sone
+isWTop _                            = False
+
 -- | @F[w](ev)@ — event @ev@ must eventually occur, weighted by @w@:
--- @Σ* · [w]ev@.  Use in @fut@ slots.
+-- @Σ* · [w]ev · Σ*@.  Use in @fut@ slots.
+--
+-- The trailing @Σ*@ is essential and mirrors 'Pledge.RE.finally'.  Without
+-- it the obligation reads ``the trace /ends with/ @ev@'' rather than
+-- ``@ev@ occurs somewhere'', so an obligation discharged anywhere but at the
+-- very last event is reported as unmet: in @submit 1; complete 1; submit 2;
+-- complete 2@ task 1's obligation would survive, because the trace ends with
+-- @complete(2)@.
 wFinally :: Semiring w => w -> Event t -> WRE w t
-wFinally w ev = WSeq wTop (WSingle w ev)
+wFinally w ev = WSeq wTop (WSeq (WSingle w ev) wTop)
 
 -- | @G[w](ev)@ — every step must be @ev@, each with weight @w@: @([w]ev)*@.
 wGlobally :: Semiring w => w -> Event t -> WRE w t

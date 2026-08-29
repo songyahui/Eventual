@@ -25,9 +25,14 @@ type TSRE = WRE Tropical Term
 submit :: Int -> Pledge IO TSRE ()
 submit taskId = Pledge $ return
     ( ()
-    , WEps sone                                                              -- pre: no precondition
+    , wTop                                                                   -- pre: no precondition
     , WSingle (Tropical 1) (Atom "submit" (List [Num taskId]))               -- post
-    , wFinally (Tropical 1) (Atom "complete" (List [Num taskId]))            -- future
+      -- future: the task must be resolved, by completing (1 step) or
+      -- aborting (2 steps).  ⊕ = min, so the residual cost is that of the
+      -- cheaper route still available.  Naming only `complete` here would
+      -- make `submitAndAbort` report an undischarged obligation.
+    , WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num taskId])))
+           (wFinally (Tropical 2) (Atom "abort"    (List [Num taskId])))
     )
 
 complete :: Int -> Pledge IO TSRE ()
@@ -36,7 +41,7 @@ complete taskId = Pledge $ return
       -- pre: submit must have been observed (costs 1 step to verify)
     , wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
     , WSingle (Tropical 1) (Atom "complete" (List [Num taskId]))             -- post
-    , WEps sone                                                              -- future: fully discharged
+    , wTop                                                                   -- future: fully discharged
     )
 
 -- abort is more expensive than complete (2 steps instead of 1).
@@ -45,7 +50,7 @@ abort taskId = Pledge $ return
     ( ()
     , wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))
     , WSingle (Tropical 2) (Atom "abort" (List [Num taskId]))                -- post
-    , WEps sone                                                              -- future: fully discharged
+    , wTop                                                                   -- future: fully discharged
     )
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
@@ -74,13 +79,14 @@ twoTasks = do
 submitOnly :: Pledge IO TSRE ()
 submitOnly = submit 1
 
--- Good: choose cheapest of complete vs abort using WAdd (⊕ = min).
--- This models a non-deterministic choice between two resolution strategies.
--- The future picks the minimum-cost option.
+-- Unresolved: a submit whose obligation is still open.  The residual is the
+-- full disjunction, and wNullable is ∞ — not a violation, but a statement
+-- that no trace of length zero discharges it.  Resolving it costs
+-- min(1, 2) = 1 step, which is what `submitAndComplete` realises.
 cheapestResolution :: Pledge IO TSRE ()
 cheapestResolution = Pledge $ return
     ( ()
-    , WEps sone
+    , wTop     
     , WSingle (Tropical 1) (Atom "submit" (List [Num 1]))
       -- future: either complete (cost 1) or abort (cost 2) — min = 1
     , WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num 1])))

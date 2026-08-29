@@ -8,10 +8,16 @@ acquire mid = Pledge $ return
      Single (Atom "acquire" (List [Num mid])),
      finally (Atom "release" (List [Num mid])))
 
--- Precondition: acquire(mid) must have been the immediately preceding event
+-- Precondition: acquire(mid) must have occurred somewhere earlier.
+--
+-- Note this is 'previously' (Σ*·acquire(mid)·Σ*), not 'Single'.  'Single'
+-- would demand that acquire(mid) be the /immediately preceding/ event, which
+-- fails as soon as anything happens in between: in 'nestedLocks' the event
+-- before release(1) is release(2), so the precondition of the whole block
+-- would collapse to ∅ even though the program is correct.
 release :: Int -> Pledge IO (RE Term) ()
 release mid = Pledge $ return
-    ((), Single (Atom "acquire" (List [Num mid])),
+    ((), previously (Atom "acquire" (List [Num mid])),
      Single (Atom "release" (List [Num mid])),
      universe)
 

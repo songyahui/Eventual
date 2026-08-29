@@ -17,7 +17,7 @@ useToken user resource = Pledge $ return
 -- Precondition: a token must have just been requested for this user
 revokeToken :: String -> Pledge IO (RE Term) ()
 revokeToken user = Pledge $ return
-    ((), Single (Atom "requestToken" (List [Str user])),
+    ((), previously (Atom "requestToken" (List [Str user])),
      Single (Atom "revokeToken" (List [Str user])),
      universe)
 
@@ -29,7 +29,7 @@ escalate role = Pledge $ return
 
 deescalate :: String -> Pledge IO (RE Term) ()
 deescalate role = Pledge $ return
-    ((), Single (Atom "escalate" (List [Str role])),
+    ((), previously (Atom "escalate" (List [Str role])),
      Single (Atom "deescalate" (List [Str role])),
      universe)
 

@@ -13,14 +13,14 @@ sendSYN = Pledge $ return
 -- Precondition: sendSYN must have just occurred
 recvSYNACK :: Pledge IO (RE Term) ()
 recvSYNACK = Pledge $ return
-    ((), Single (Atom "sendSYN" (List [])),
+    ((), previously (Atom "sendSYN" (List [])),
      Single (Atom "recvSYNACK" (List [])),
      finally (Atom "sendACK" (List [])))
 
 -- Precondition: recvSYNACK must have just occurred
 sendACK :: Pledge IO (RE Term) ()
 sendACK = Pledge $ return
-    ((), Single (Atom "recvSYNACK" (List [])),
+    ((), previously (Atom "recvSYNACK" (List [])),
      Single (Atom "sendACK" (List [])),
      universe)
 

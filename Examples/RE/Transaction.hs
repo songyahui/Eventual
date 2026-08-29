@@ -15,11 +15,18 @@ dbWrite key val = Pledge $ return
      Single (Atom "write" (List [Str key, Num val])),
      universe)
 
--- Precondition: a write must have just occurred (commit requires at least one write)
+-- Precondition: a transaction must have been begun somewhere earlier.
+--
+-- Two things this deliberately does /not/ say.  It is 'previously', not
+-- 'Single': a commit may be separated from its beginTx by arbitrary writes.
+-- And it does not try to require "at least one write": an event pattern is
+-- either 'Wildcard' (matching /any/ event) or an 'Atom' matching its payload
+-- exactly, so @Atom "write" (List [])@ matches only a write with /no/
+-- arguments -- never @dbWrite "balance" 100@.  There is currently no way to
+-- write "a write with any arguments"; see Feedback/revision-todo.md.
 commit :: Pledge IO (RE Term) ()
 commit = Pledge $ return
-    ((), Or (Single (Atom "beginTx" (List [])))
-            (Single (Atom "write"   (List []))),  -- wildcard args checked by RE matching
+    ((), previously (Atom "beginTx" (List [])),
      Single (Atom "commit" (List [])),
      universe)
 

@@ -10,16 +10,16 @@ sensorInit sid = Pledge $ return
 
 sensorRead :: Int -> Pledge IO (RE Term) ()
 sensorRead sid = Pledge $ return
-    ((), Or (Single (Atom "sensorInit" (List [Num sid])))
-            (Single (Atom "sensorRead" (List [Num sid]))),
+    ((), Or (previously (Atom "sensorInit" (List [Num sid])))
+            (previously (Atom "sensorRead" (List [Num sid]))),
      Single (Atom "sensorRead" (List [Num sid])),
      universe)
 
 -- Precondition: sensor must have been initialised or read before sleeping
 sensorSleep :: Int -> Pledge IO (RE Term) ()
 sensorSleep sid = Pledge $ return
-    ((), Or (Single (Atom "sensorInit" (List [Num sid])))
-            (Single (Atom "sensorRead" (List [Num sid]))),
+    ((), Or (previously (Atom "sensorInit" (List [Num sid])))
+            (previously (Atom "sensorRead" (List [Num sid]))),
      Single (Atom "sensorSleep" (List [Num sid])),
      universe)
 
@@ -31,7 +31,7 @@ motorOn mid = Pledge $ return
 
 motorOff :: Int -> Pledge IO (RE Term) ()
 motorOff mid = Pledge $ return
-    ((), Single (Atom "motorOn" (List [Num mid])),
+    ((), previously (Atom "motorOn" (List [Num mid])),
      Single (Atom "motorOff" (List [Num mid])),
      universe)
 

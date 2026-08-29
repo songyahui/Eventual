@@ -105,18 +105,24 @@ specOpen path = F.Pledge $ return
      F.Single (F.Atom "open" (F.List [F.Str path])),
      finally (F.Atom "close" (F.List [F.Str path])))
 
+-- Preconditions use 'previously' (Σ*·e·Σ*), not 'Single'.  A 'Single'
+-- precondition constrains only the /immediately preceding/ event, and such a
+-- condition does not survive composition: in @p >>= q@ the precondition is
+-- @pre p ⊓ (pre q ∕ post p)@, and once @pre q@ is discharged by @post p@ the
+-- right operand collapses to ε, whose intersection with the non-nullable
+-- @pre p@ is ∅.  So a chain of Single-preconditions reports a violation for a
+-- program that is in fact correct.  Preconditions must be properties of the
+-- whole preceding trace.
 specRead :: FilePath -> F.Pledge IO (F.RE F.Term) String
 specRead path = F.Pledge $ return
     ("",  -- placeholder: spec models protocol, not content
-     F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
-          (F.Single (F.Atom "read" (F.List [F.Str path]))),
+     previously (F.Atom "open" (F.List [F.Str path])),
      F.Single (F.Atom "read" (F.List [F.Str path])),
      universe)
 
 specClose :: FilePath -> F.Pledge IO (F.RE F.Term) ()
 specClose path = F.Pledge $ return
-    ((), F.Or (F.Single (F.Atom "open" (F.List [F.Str path])))
-              (F.Single (F.Atom "read" (F.List [F.Str path]))),
+    ((), previously (F.Atom "open" (F.List [F.Str path])),
      F.Single (F.Atom "close" (F.List [F.Str path])),
      universe)
 

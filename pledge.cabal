@@ -29,7 +29,6 @@ library
       Pledge.Semiring
       Pledge.WeightedRE
       Pledge.SL
-      Pledge.Tracked
   build-depends:
       base
     , containers

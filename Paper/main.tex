@@ -103,45 +103,42 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-Pre- and post-conditions are the standard vocabulary for modular program
-specification, yet they are silent about obligations that span multiple
-calls.
-In real Haskell code such obligations are ubiquitous: an acquired mutex
-must eventually be released; a \lstinline{beginTx} must eventually reach
-\lstinline{commit} or \lstinline{rollback}; a submitted job must complete
-within a minimum cost budget.
-No single pre/post pair can express these properties on its own, because
-the discharge point lies in an unknown future context.
+An acquired mutex must eventually be released.
+An opened handle must eventually be closed, on every path.
+Pre- and post-conditions cannot say this: the discharge point lies in code
+that has not been written yet.
 
-We present \emph{Pledge}, a Haskell library that realises this idea as a
-monad transformer: \lstinline{Pledge m eff a} wraps an underlying monad
-\lstinline{m} and carries, alongside the return value \lstinline{a}, three
-annotation fields $(\mathtt{pre}, \mathtt{post}, \mathtt{fut}) :: \mathit{eff}$
-describing what must have held before, what this action produces, and
-what must still hold afterwards.
-Monadic bind propagates these annotations using two algebraic operations:
-\emph{left-quotient} ($\lquot$) discharges the first computation's future
-against the continuation's postcondition, and
-\emph{right-quotient} ($\rquot$) combines the continuation's precondition
-with the first computation's postcondition;
-the residual obligations are the unmet portions.
+We present \emph{Pledge}, a Haskell library in which such obligations are
+ordinary values.
+A \lstinline{Pledge m eff a} carries, beside its result, what must have held
+before it ran, what it produces, and what must still hold after.
+One bind formula propagates all three by \emph{quotient}: binding strips
+from a pending obligation whatever the continuation actually delivers.
+What is left over --- the \emph{residual} --- names precisely what the
+program still owes.
+Preconditions need no separate machinery: they are future conditions read
+backwards, and the two quotients are one operation under time reversal.
 
-The design is parameterised over a \lstinline{Composable} algebra with
-six operations: sequential composition ($\cdot$), simultaneous constraint
-($\sqcap$), their identities (\lstinline{empty}, \lstinline{universe}),
-left-quotient, and right-quotient.
-We present four instances:
-trace protocols via extended regular expressions ($\RE$, with
-Brzozowski-derivative quotients and a direct LTL$_f$ embedding);
-Presburger-guarded traces ($\GRE$, checked by Z3);
-semiring-weighted obligations ($\WRE$, covering probabilistic and
-min-cost scenarios); and separation-logic heap predicates ($\SL$, with
-magic wand as quotient).
-All four share a single bind formula; the monad laws are verified
-mechanically in Lean~4 from twelve algebraic axioms.
-We prove a soundness theorem for the $\RE$ instance connecting a
-fully-discharged residual to satisfaction of the obligation by every
-terminating trace.
+The formula needs only six operations, which we instantiate four ways:
+regular expressions with complement, where the quotient is computed by
+derivative and no automaton is ever built;
+Presburger-guarded traces, discharged by Z3;
+semiring-weighted obligations, whose residual is a completion probability
+or a minimum discharge cost;
+and separation-logic heaps, where the quotient is the magic wand.
+One bind, four notions of obligation.
+
+We prove the monad laws in Lean~4 from twelve algebraic axioms, and
+identify exactly the two side conditions under which regular expressions
+satisfy them --- conditions the obvious way of writing an annotation
+quietly violates, silently reporting a violated contract for a correct
+program.
+A soundness theorem completes the picture: a discharged residual entails
+that every terminating trace meets its obligations.
+Because the underlying monad is arbitrary, the residual describes the path
+a program actually took and can be computed beside a real effect handler,
+which we demonstrate on top of the \lstinline{effectful} library.
+\lstinline{Pledge} tells you what is still owed; it does not enforce it.
 \end{abstract}
 
 \keywords{temporal specification, monadic effects, regular expressions,
@@ -211,24 +208,67 @@ Parameterised and indexed monads~\cite{atkey2009} encode protocol states at
 the type level but require non-standard syntax and are confined to a single
 domain.
 
-\paragraph{Relation to prior work.}
-The idea of a \emph{future condition} as a first-class specification
-component is due to \citet{song2025futurecond}, who formalise it at the
-level of a logical system.
-This paper's contribution is a concrete, runnable library realisation:
-a \lstinline{Pledge} monad transformer, an algebraic interface
-(\lstinline{Composable}) that covers four distinct specification domains, and
-a Lean~4 mechanisation of the monad laws.
+\paragraph{The gap.}
+Future conditions themselves are not new.
+\citet{song2025futurecond} introduce them as a first-class extension to
+pre/post contracts and give a logical semantics;
+\citet{song2024provenfix} encode temporal properties as regular expressions
+and use derivatives to drive automated program repair in the ProveNFix tool.
+Neither, however, treats an obligation as a \emph{value} that a program can
+carry, combine, and hand on.
+The first works at the level of a logical system, with no implementation;
+the second embeds its reasoning inside a whole-program analysis that a
+programmer cannot invoke compositionally, and that is specific to traces.
+What is missing is an account of how an obligation propagates through
+effectful code one bind at a time --- and, with it, a library a Haskell
+programmer can actually use.
 
-\paragraph{Specification, not enforcement.}
-\lstinline{Pledge} is a \emph{specification} library.
+\paragraph{Why a library, and not a type system or a model checker.}
+Temporal properties have been attacked from many directions: encoded in
+indexed or graded types, discharged by a model checker, or proved in a
+theorem prover.
+Each buys stronger guarantees at a cost.
+Type-level encodings force the protocol into the type of every
+intermediate computation, so a change to the specification perturbs
+type signatures throughout the program, and each domain (traces, heap
+ownership, cost budgets) needs its own encoding.
+Model checkers and provers work on a model of the program rather than the
+program, and demand that the property be fixed before the code is written.
+Making the obligation an ordinary Haskell \emph{value} costs the static
+guarantee, but buys three things those approaches do not offer together:
+obligations can be computed --- built from runtime data, passed to
+functions, stored in data structures;
+a single bind formula serves every domain, so a new obligation language is
+a new \lstinline{Composable} instance rather than a new encoding;
+and the unmet remainder is itself an inspectable value, so a failure
+\emph{names} what is still owed instead of reporting that a proof did not
+go through.
+
+\paragraph{What Pledge does, and what it does not.}
 A \lstinline{Pledge m eff a} value is a computation in the underlying monad
-\lstinline{m} that also produces three annotation fields
-$(\pre, \post, \fut) :: \mathit{eff}$; composing \lstinline{Pledge} values
-propagates these annotations algebraically.
-A programmer or toolchain inspects the residual annotations \emph{before}
-committing to any real effect; \lstinline{Pledge} itself does not instrument
-or guard a running computation.
+\lstinline{m} that additionally produces three annotation fields
+$(\pre, \post, \fut) :: \mathit{eff}$, and composing such values propagates
+those annotations algebraically alongside whatever \lstinline{m} does.
+Two consequences are worth stating before the details.
+
+First, the annotations are \emph{path-sensitive}.
+Because \lstinline{m} is a monad, bind must run the first action before it
+can apply the continuation to the result, so the annotations that come out
+describe the one path the program actually took --- not an
+over-approximation of every path it might have taken.
+A specification therefore need not stay detached from the code it
+describes: \S\ref{sec:effects} pairs a \lstinline{Pledge} term with a real
+effect handler so that a single \lstinline{do} block drives both, and lets
+annotations mention the runtime values the handler produces.
+
+Second, nothing intervenes.
+The residual is a value to be inspected; a program that fails to discharge
+an obligation still runs to completion, and \lstinline{Pledge} names the
+omission rather than preventing it.
+Promoting the residual to a runtime guard --- checking it after each bind
+and failing on $\varnothing$ --- is a short step from what is already here,
+but it is future work (\S\ref{sec:discussion}) and we claim nothing about
+it.
 
 \paragraph{Our approach.}
 A value of type \lstinline{Pledge m eff a} carries three annotations:
@@ -248,63 +288,137 @@ Monadic bind propagates these through two quotient operations on
 \end{align}
 
 \noindent
-Here $\lquot$ is the \emph{left-quotient} (strips an observed prefix from a
-pending obligation) and $\rquot$ is the \emph{right-quotient} (checks whether a
-produced postcondition satisfies the continuation's precondition).
+Here $\lquot$ is the \emph{left quotient} (strips from a pending obligation
+whatever the continuation actually produced) and $\rquot$ is the
+\emph{right quotient} (checks whether a produced postcondition satisfies
+the continuation's precondition).
+Both are quotients of one specification by another, not by a single event:
+$r \lquot s$ is the residual of $r$ after \emph{any} behaviour described by
+$s$.
 A fully-discharged residual --- $\pre = \univ$ and $\fut = \univ$ --- is the
-certificate that the composed program is contract-correct.
+certificate that the composed program is contract-correct;
+anything else names what is still owed.
+
+\paragraph{One operation, two directions.}
+The two quotients are not independent machinery.
+A future condition is an obligation on the trace still to come; a
+precondition is an obligation on the trace already past; and reversing time
+exchanges them.
+Concretely, in the $\RE$ instance the right quotient \emph{is} the left
+quotient conjugated by reversal,
+\[
+  r \rquot s \;=\; \mathrm{rev}\bigl(\mathrm{rev}(r) \lquot \mathrm{rev}(s)\bigr),
+\]
+the same regular expression $\Sigma^* \cdot e \cdot \Sigma^*$ serves as
+``$e$ happened earlier'' in a $\pre$ slot and ``$e$ must happen later'' in a
+$\fut$ slot, and the four right-quotient axioms of \S\ref{sec:monad-laws}
+are the four left-quotient axioms with the direction of composition flipped.
+This symmetry is what makes $\pre$ cheap --- it reuses the machinery
+$\fut$ already needs --- and it also explains the one place the analogy
+stops: monadic bind is \emph{oriented}, composing forward, so the
+backward-facing field cannot satisfy the monad laws in the same
+orientation.
+We return to this in \S\ref{sec:monad-laws}.
 
 The \lstinline{Composable} typeclass abstracts six operations:
 $(\cdot, \sqcap, \varepsilon, \top, \lquot, \rquot)$.
-It admits four independent instances:
+It is closed under products and under pointwise lifting through any
+applicative functor, so instances compose;
+we give four base instances:
 
 \begin{itemize}[wide, labelindent=10pt]
   \item \emph{(Trace protocol, $\RE$)}
         Extended regular expressions over a typed event alphabet, with
-        complement as a first-class constructor.
-        Quotients are implemented via Brzozowski derivatives;
-        LTL$_f$ operators embed directly without automaton construction.
+        complement as a first-class constructor --- possible because
+        $\derives{a}{\neg r} = \neg\,\derives{a}{r}$, so no automaton is
+        ever built.
+        Quotients are computed by Antimirov partial derivatives, which keep
+        intermediate residuals small; the right quotient is obtained by
+        reversal.
+        LTL$_f$ operators embed directly.
 
   \item \emph{(Arithmetic bounds, $\GRE$)}
         Each RE is paired with a Presburger arithmetic predicate over
         heap addresses, checked by Z3 via SBV.
-        One annotation simultaneously enforces a protocol ordering and
-        an arithmetic bound.
+        One annotation simultaneously constrains a protocol ordering and
+        an arithmetic bound --- neither of which the other can express.
 
   \item \emph{(Quantitative obligation, $\WRE$)}
-        Boolean membership is generalised to a semiring weight.
-        The probability semiring captures ``complete with probability $\geq p$'';
-        the tropical semiring gives minimum-cost scheduling obligations.
+        Boolean membership is generalised to a semiring weight, so the
+        residual carries a number rather than a verdict:
+        under the probability semiring it is the likelihood that the
+        outstanding obligations are met, and under the tropical semiring
+        the minimum cost of discharging them ($\infty$ when no path does).
 
   \item \emph{(Heap ownership, $\SL$)}
         Separation-logic heap predicates with separating conjunction as
-        sequential composition and magic wand as quotient.
-        Future conditions describe what heap ownership must hold on completion.
+        sequential composition and the magic wand as quotient.
+        The residual is recorded symbolically; unlike the other three
+        instances it is not yet discharged by a solver
+        (\S\ref{sec:discussion}).
 \end{itemize}
 
 \paragraph{Contributions.}
 \begin{enumerate}
-  \item We define the \lstinline{Pledge} monad transformer
-        (\S\ref{sec:pledge}), parameterised over a \lstinline{Composable}
-        algebra, and verify that the monad laws hold for the
-        $(\ret, \post, \fut)$ triple via a Lean~4 mechanisation from
-        twelve algebraic axioms (\S\ref{sec:monad-laws}).
+  \item \textbf{The \lstinline{Pledge} monad transformer}
+        (\S\ref{sec:pledge}), which makes future conditions first-class
+        Haskell values.
+        A single bind formula propagates all three annotations through
+        arbitrary intervening computation, and the residual it leaves
+        behind is itself an ordinary value the programmer can inspect.
 
-  \item We instantiate the algebra to extended regular expressions with
-        Brzozowski-derivative quotients (\S\ref{sec:re-instance}),
-        embed LTL$_f$ directly (\S\ref{sec:background}), and prove a
-        soundness theorem connecting a fully-discharged residual to
-        trace membership (\S\ref{sec:soundness}).
+  \item \textbf{The \lstinline{Composable} algebra}
+        (\S\ref{sec:composable}): six operations that suffice to state
+        that formula, closed under products and pointwise lifting.
+        We give four instances --- traces
+        (\S\ref{sec:re-instance}), arithmetic-guarded traces
+        (\S\ref{sec:gre-instance}), semiring-weighted obligations
+        (\S\ref{sec:wre-instance}), and heap ownership
+        (\S\ref{sec:sl-instance}) --- differing in what an obligation
+        \emph{is}, but sharing the propagation rule entirely.
 
-  \item We extend the RE instance to Presburger-guarded traces
-        (\S\ref{sec:gre-instance}), semiring-weighted traces
-        (\S\ref{sec:wre-instance}), and separation-logic heap predicates
-        (\S\ref{sec:sl-instance}).
+  \item \textbf{Mechanised metatheory, and its exact boundary}
+        (\S\ref{sec:monad-laws}).
+        We identify twelve algebraic axioms sufficient for the three monad
+        laws on the $(\ret, \post, \fut)$ triple and prove the laws
+        \lstinline{sorry}-free in Lean~4.
+        Mechanising the $\RE$ instance against those axioms then
+        \emph{delimits} them: two hold only when the divisor denotes a
+        non-empty language, and two --- the ones associativity depends on
+        --- hold in one direction only, so associativity in general is an
+        inclusion rather than an equality.
+        We give the counterexample, and then the sufficient condition that
+        restores equality: every postcondition must denote a single word.
+        This is not a restriction in practice, because it is exactly what
+        primitives produce and it is preserved by
+        Equation~\eqref{eq:post-bind}.
 
-  \item We demonstrate the approach on five case studies across all
-        four instances (\S\ref{sec:examples}), showing that protocol
-        violations, arithmetic overflows, quantitative shortfalls, and
-        ownership errors all surface as non-trivial residual annotations.
+  \item \textbf{Two side conditions an annotation must satisfy}
+        (\S\ref{sec:monad-laws}, \S\ref{sec:soundness}), neither of which
+        is apparent from the types.
+        Alongside the single-word condition on $\post$, a precondition must
+        describe the \emph{whole} preceding trace rather than the
+        immediately preceding event: a $\pre$ of the latter kind does not
+        survive composition, collapsing to $\varnothing$ and reporting a
+        violated contract for a program that is in fact correct.
+        We state both conditions, show what goes wrong without them, and
+        give the combinators that maintain them.
+
+  \item \textbf{A soundness theorem} for the $\RE$ instance
+        (\S\ref{sec:soundness}): a fully discharged residual entails that
+        every terminating trace of the program satisfies every obligation
+        its primitives name.
+
+  \item \textbf{Evidence that the design works on real code}
+        (\S\ref{sec:effects}, \S\ref{sec:examples}).
+        We pair a \lstinline{Pledge} specification with a real effect
+        handler built on the \lstinline{effectful} library, so that one
+        \lstinline{do} block drives specification and execution together.
+        Across the case studies every correct program discharges to
+        $\pre = \fut = \univ$, and every incorrect one leaves a residual
+        naming exactly what it got wrong --- an unreleased lock, an
+        unmatched \lstinline{beginTx}, a leaked handle, an arithmetic
+        overflow, a quantitative shortfall, an ownership leak.
 \end{enumerate}
 
 %% =========================================================================
@@ -421,8 +535,12 @@ the residual $\partial_e(r)$ does not cover the entire language.
 \subsection{Embedding LTL\texorpdfstring{$_f$}{f}}
 \label{sec:ltl}
 
-Because complement is a first-class constructor, the standard
-LTL$_f$ operators translate directly into RE without automaton construction.
+LTL over finite traces~\cite{degiacomo2013} is the natural logic for the
+obligations of \S\ref{sec:intro}: a mutex is released, or a handle closed,
+within the run, not somewhere along an infinite one.
+Its standard translation goes through an automaton, but because complement
+is a first-class constructor here, the LTL$_f$ operators translate directly
+into RE with no automaton construction.
 Table~\ref{tab:ltl} gives the full mapping.
 
 \begin{table}[ht]
@@ -630,24 +748,64 @@ residual obligations without requiring a data-dependent
 \lstinline{a -> eff} type for the future field.
 
 %% =========================================================================
-\section{Monad Laws}
+\section{Monad Laws and Their Side Conditions}
 \label{sec:monad-laws}
 %% =========================================================================
 
 Every monad must satisfy three equational laws.
-\lstinline{Pledge}'s four annotation fields do not all satisfy the laws under
-ordinary equality: $\pre$ follows the Hoare-rule discipline of
-Equation~\eqref{eq:pre-bind}, which deliberately departs from left-identity
-when a precondition violation is detected (the violation must remain visible
-after further binding).
-What we prove, and mechanise in Lean~4, is that the triple $(\ret, \post, \fut)$
-satisfies the three laws exactly.
-The $\pre$ field is carried alongside as a separate contract-checking
-annotation, analogous to a writer-monad log that is inspected but not
-required to satisfy the monad laws on its own.
+This section proves that \lstinline{Pledge} does, and is equally precise
+about what that statement excludes.
+There are two exclusions, and neither is visible in the types.
+The first is structural and expected: the $\pre$ field is oriented against
+the direction of bind, and is carried beside the lawful triple rather than
+inside it (\S\ref{sec:orientation}).
+The second is a genuine side condition on how annotations are written, which
+we isolate in \S\ref{sec:boundary}--\S\ref{sec:pre-condition}: the obvious
+way to write a postcondition or a precondition can break the laws, and does
+so silently --- reporting a violated contract for a program that is in fact
+correct.
+
+%% -------------------------------------------------------------------------
+\subsection{Why \texorpdfstring{$\pre$}{pre} sits outside the triple}
+\label{sec:orientation}
+
+Recall from \S\ref{sec:intro} that $\pre$ and $\fut$ are the same notion
+pointing in opposite directions, and $\rquot$ is $\lquot$ conjugated by
+reversal.
+The monad laws break that symmetry, because bind does not respect it:
+$p \mathbin{>\!\!>\!\!=} q$ runs $p$ and \emph{then} $q$, so every law
+equates rearrangements of a forward-composed sequence.
+A field that accumulates forwards can satisfy such laws; a field that
+accumulates backwards cannot be expected to, and $\pre$ does not.
+
+Concretely, left identity requires the annotations of
+$\mathtt{pure}\;x \mathbin{>\!\!>\!\!=} f$ to equal those of $f\,x$.
+For $\fut$ this holds because $\mathtt{pure}$ contributes $\top$ on the
+left, and $\top$ is the unit that $\lquot$ preserves (axiom L2 below).
+For $\pre$ the corresponding step needs $\top \rquot \post(f\,x) = \top$,
+which is axiom R2 --- the \emph{mirror} of L2, and true for exactly the
+same reason.
+So $\pre$ is not lawless; it satisfies the mirror-image laws.
+What it cannot do is satisfy the forward-oriented laws simultaneously with
+$\fut$ under a single equality, because a detected precondition violation
+must stay visible under further binding rather than being normalised away.
+
+We therefore prove the three laws for the triple $(\ret, \post, \fut)$ and
+carry $\pre$ alongside, in the manner of a writer-monad log: inspected,
+propagated by Equation~\eqref{eq:pre-bind}, and not required to satisfy the
+monad laws on its own.
+All four fields \emph{are} covered by the axioms below; the asymmetry is in
+which equations we then ask them to satisfy, not in how they are treated
+algebraically.
+
+%% -------------------------------------------------------------------------
+\subsection{Twelve axioms}
+\label{sec:axioms}
 
 The laws hold assuming the twelve axioms in Table~\ref{tab:axioms},
 which we state abstractly over the \lstinline{Composable} algebra.
+The reversal duality is visible in the table: R1--R4 are L1--L4 with the
+order of composition reversed, and nothing else.
 
 \begin{table}[ht]
 \caption{The twelve \lstinline{Composable} axioms required to prove the
@@ -679,9 +837,18 @@ R4 & $(a \sqcap b) \rquot c = (a \rquot c) \sqcap (b \rquot c)$ & Law 3, pre \\
 \end{tabular}
 \end{table}
 
+\subsection{The three laws}
+\label{sec:three-laws}
+
 We verify all three laws using these axioms.
 In each case we show that both sides of the law produce equal
 $(\ret, \post, \fut)$ triples.
+It is worth noting which axioms each law consumes, because
+\S\ref{sec:boundary} shows that not all twelve are unconditionally
+available:
+left identity uses S1, C3, L2, R1;
+right identity uses S2, C1, C3, L1, R2;
+and associativity uses S3, C2, L3, L4, R3, R4.
 
 \paragraph{Left identity: \lstinline{pure x >>= f = f x}.}
 
@@ -720,15 +887,218 @@ applying L4 then L3 gives:
 which equals the RHS by C2 and L3. $\checkmark$
 For $\pre$, applying R4 then R3 gives the same result on both sides by C2. $\checkmark$
 
-\paragraph{Lean~4 mechanisation.}
-The three law proofs are mechanised in Lean~4 in the file
+%% -------------------------------------------------------------------------
+\subsection{What the \texorpdfstring{$\RE$}{RE} instance actually satisfies}
+\label{sec:boundary}
+
+The proofs above are relative to the twelve axioms.
+Mechanising the $\RE$ instance against them does not merely confirm the
+axioms --- it \emph{delimits} them.
+Eight hold outright; four do not, and Table~\ref{tab:axiom-status} records
+which.
+
+\begin{table}[ht]
+\caption{Status of the twelve axioms for the $\RE$ instance, as mechanised
+         in \texttt{Formalization/REComposableLaws.lean}.}
+\label{tab:axiom-status}
+\small
+\begin{tabular}{lll}
+\toprule
+Axioms & Status & Condition \\
+\midrule
+S1--S3, C1--C3 & hold & --- \\
+L1, L3, R1, R3 & hold & --- \\
+L2, R2         & hold conditionally & $L(\text{divisor}) \neq \varnothing$ \\
+L4, R4         & one inclusion only & $\subseteq$ holds; $\supseteq$ fails \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Why L2 and R2 need a non-empty divisor.}
+$\top \lquot r$ collects every suffix left over after consuming some word of
+$L(r)$.
+If $L(r) = \varnothing$ there is no such word and the quotient is
+$\varnothing$, not $\top$.
+The condition is therefore exactly $L(r) \neq \varnothing$: a postcondition
+denoting the empty language would assert that the action produced an
+impossible trace.
+
+\paragraph{Why L4 and R4 hold in only one direction.}
+Written out, L4 asks
+$(a \sqcap b) \lquot c = (a \lquot c) \sqcap (b \lquot c)$.
+The left-hand side demands \emph{one} word $u \in L(c)$ that works for both
+conjuncts; the right-hand side lets each conjunct choose its own.
+Whenever the two need different witnesses, the sides differ.
+Taking $L(c) = \{a, b\}$, $L(a) = \{a\}$ and $L(b) = \{b\}$:
+on the left, $L(a) \cap L(b) = \varnothing$, so the quotient is
+$\varnothing$;
+on the right, the first conjunct picks $u = a$ and the second picks
+$u = b$, each leaving $\varepsilon$, so the meet is $\{\varepsilon\}$.
+Only $\subseteq$ survives.
+
+\paragraph{Consequence: associativity is an inclusion.}
+Associativity consumes L4 and R4, so in general it holds only as
+\[
+  \fut\bigl((p \mathbin{>\!\!>\!\!=} f) \mathbin{>\!\!>\!\!=} g\bigr)
+  \;\subseteq\;
+  \fut\bigl(p \mathbin{>\!\!>\!\!=} (\lambda x.\, f\,x \mathbin{>\!\!>\!\!=} g)\bigr),
+\]
+and symmetrically for $\pre$.
+The left-nested bracketing yields the \emph{stronger} obligation.
+This is not a vacuous gap: over a pool of nine representative annotations in
+each of the five positions, the two bracketings differ in $902$ of $59{,}049$
+combinations --- and in every one of them the inclusion above is strict in
+the direction stated.
+
+%% -------------------------------------------------------------------------
+\subsection{Single-word postconditions restore equality}
+\label{sec:single-word}
+
+The gap closes under a condition that costs nothing in practice.
+
+\begin{lemma}[Unique witness]
+\label{lem:unique-witness}
+If $L(c)$ is a single word $\{u\}$, then L4 and R4 hold with equality, and
+L2 and R2 hold.
+\end{lemma}
+\begin{proof}
+$\{u\}$ is non-empty, giving L2 and R2.
+For L4, $(a \sqcap b) \lquot \{u\} = \{w \mid uw \in L(a) \cap L(b)\}
+= \{w \mid uw \in L(a)\} \cap \{w \mid uw \in L(b)\}
+= (a \lquot \{u\}) \sqcap (b \lquot \{u\})$;
+the choice of witness is forced, so the two sides cannot diverge.
+R4 is the mirror image.
+\end{proof}
+
+\begin{theorem}[Laws for single-word postconditions]
+\label{thm:single-word}
+If every primitive's $\post$ denotes a single word, then all twelve axioms
+hold for the $\RE$ instance and the three monad laws hold with equality.
+\end{theorem}
+\begin{proof}
+Every $\lquot$ and $\rquot$ in Equations~\eqref{eq:pre-bind}
+and~\eqref{eq:fut-bind} has a $\post$ field as its divisor, so
+Lemma~\ref{lem:unique-witness} applies at every use.
+The remaining eight axioms hold unconditionally.
+\end{proof}
+
+The hypothesis is not a restriction, because it is what the library
+produces anyway and is preserved by composition.
+A primitive emits exactly one event; \lstinline{pure} and
+\lstinline{liftPledge} emit $\varepsilon$; and by
+Equation~\eqref{eq:post-bind} the postcondition of a composite is
+$\post(p) \cdot \post(q)$, a concatenation of two single-word languages and
+hence itself a single word.
+The class is therefore closed under bind, and every $\post$ arising in a
+\lstinline{Pledge} program built from annotated primitives satisfies it by
+construction.
+What the condition rules out is a primitive that advertises a
+\emph{choice} of postconditions --- \lstinline{Or}, \lstinline{Star} or a
+complement in a $\post$ slot.
+Such an annotation is expressible, and silently costs associativity;
+\S\ref{sec:discussion} returns to enforcing the restriction in the API.
+
+%% -------------------------------------------------------------------------
+\subsection{Preconditions must describe the whole past}
+\label{sec:pre-condition}
+
+A second side condition governs $\pre$, and violating it is the more
+insidious failure of the two, because it produces a confident report of a
+contract violation for a correct program.
+
+The natural way to annotate \lstinline{release} is ``an \lstinline{acquire}
+must have happened'', and the natural way to write that is
+$\pre = \{\mathtt{acquire}\}$ --- the singleton language.
+That is wrong, and not for the reason one expects.
+It says the acquire must be the \emph{immediately preceding} event, and
+such a condition does not survive composition.
+Unfolding Equation~\eqref{eq:pre-bind} for
+$p \mathbin{>\!\!>\!\!=} q$ with $\pre(q) = \{e\}$ and $\post(p) = \{e\}$:
+\[
+  \pre(q) \rquot \post(p) \;=\; \{w \mid w \cdot e \in \{e\}\}
+                          \;=\; \{\varepsilon\},
+\]
+so $\pre(p \mathbin{>\!\!>\!\!=} q) = \pre(p) \sqcap \{\varepsilon\}$,
+which is $\varnothing$ whenever $\pre(p)$ does not accept the empty trace.
+The obligation was discharged, and the residual nevertheless reports a
+violation.
+
+The fix is to require preconditions to be closed under extension on the
+left --- properties of the entire preceding trace, not of its last event.
+
+\begin{definition}[Past-closed]
+A language $P$ is \emph{past-closed} if $P = \Sigma^* \cdot P$: whenever
+$w \in P$ and $u \in \Sigma^*$, also $uw \in P$.
+\end{definition}
+
+\begin{proposition}[Closure]
+\label{prop:past-closed}
+Past-closed languages contain $\top$ and are closed under $\sqcap$ and
+under $\rquot$ by an arbitrary divisor.
+Consequently, if every primitive's $\pre$ is past-closed, so is the $\pre$
+of every program composed from them.
+\end{proposition}
+\begin{proof}
+$\top = \Sigma^*$ is past-closed.
+For $\sqcap$: $\Sigma^*(A \cap B) \subseteq \Sigma^*A \cap \Sigma^*B
+= A \cap B$, and the reverse inclusion takes $u = \varepsilon$.
+For $\rquot$: let $w \in P \rquot s$, so $wu \in P$ for some $u \in L(s)$;
+for any $v$, past-closure of $P$ gives $vwu \in P$, hence
+$vw \in P \rquot s$.
+The final claim follows by induction on the structure of the program, since
+Equation~\eqref{eq:pre-bind} builds $\pre$ from $\sqcap$ and $\rquot$ alone.
+\end{proof}
+
+The $\previously{e} = \Sigma^* \cdot e \cdot \Sigma^*$ combinator of
+\S\ref{sec:ltl} is past-closed, and is the intended way to write a
+precondition; the singleton $\{e\}$ is not.
+With it, the collapse above does not occur: $\previously{e} \rquot \{e\}
+= \Sigma^*$, the obligation is discharged to $\top$, and the enclosing
+$\sqcap$ leaves $\pre(p)$ untouched.
+Proposition~\ref{prop:past-closed} guarantees this is stable under further
+composition.
+
+Neither this condition nor Theorem~\ref{thm:single-word} is enforced by the
+type \lstinline{eff}, and both are easy to violate by writing the
+annotation that first comes to mind.
+We regard stating them as part of the contribution: an instance author must
+honour them, and \S\ref{sec:discussion} discusses making them
+unwriteable rather than merely documented.
+
+%% -------------------------------------------------------------------------
+\subsection{Mechanisation and validation}
+\label{sec:mechanisation}
+
+The three law proofs are mechanised in Lean~4 in
 \texttt{Formalization/PledgeMonadLaws.lean}, using an abstract
 \lstinline{Composable} structure parametrised over the twelve axioms of
 Table~\ref{tab:axioms}.
-The Lean file carries no \lstinline{sorry}; all proofs are term-mode
-derivations from the stated axioms.
-A companion file \texttt{Formalization/REComposableLaws.lean} verifies that
-the $\RE$ instance satisfies all twelve axioms.
+The file carries no \lstinline{sorry}; all proofs are term-mode derivations
+from the stated axioms, and depend on Mathlib~\cite{mathlib4} only for
+basic list and set lemmas.
+A companion file, \texttt{Formalization/REComposableLaws.lean}, develops the
+$\RE$ instance at the level of languages: it proves the eight unconditional
+axioms, proves L2 and R2 under the non-emptiness hypothesis, proves the
+$\subseteq$ direction of L4 and R4, and exhibits the counterexample to the
+converse.
+Derivative correctness and \lstinline{nullable} correctness are proved
+there as well; the correspondence between the language-level quotient and
+its implementation by derivatives is assumed, as is standard.
+
+We complement the mechanisation with exhaustive testing over bounded pools,
+which is what first exposed the boundary.
+Quotients are checked against their set-theoretic definition
+$w \in r \lquot s \iff \exists u \in L(s).\, uw \in L(r)$
+over all pairs from a pool of $90$ regular expressions and all words up to
+length two --- $56{,}700$ checks for each quotient, with no discrepancy.
+The axioms are then checked over the same pool, reproducing
+Table~\ref{tab:axiom-status} exactly and independently of the Lean
+development.
+Finally, restricting postconditions to single words as
+Theorem~\ref{thm:single-word} requires, and letting futures and
+preconditions range over $\RE$ terms including complement, star and
+intersection, associativity holds in all $43{,}200$ combinations tested ---
+against the $902$ failures found without the restriction.
 
 %% =========================================================================
 \section{The RE Instance}
@@ -812,31 +1182,97 @@ by the direct derivative clause); the inductive hypothesis on $w'$ and
 $\partial_a(r)$ gives $\nu(\partial_{w'}(\partial_a(r))) = \nu(\partial_w(r))$.
 \end{proof}
 
+Throughout this subsection we assume the single-word condition of
+Theorem~\ref{thm:single-word}: every primitive's $\post$ denotes one word.
+The assumption is what makes the statement below expressible at all.
+Without it, \S\ref{sec:boundary} showed that associativity holds only as an
+inclusion, so ``the residual of $e$'' is not determined by $e$ alone but by
+how its binds are bracketed, and there is nothing well-defined to prove
+sound.
+
+Under the assumption, a program $e$ built from primitives
+$p_1, \dots, p_n$ by \lstinline{pure} and \lstinline{>>=} emits one
+determinate trace: writing $\post(p_i) = \{u_i\}$, Equation~\eqref{eq:post-bind}
+gives $\post(e) = \{u_1 u_2 \cdots u_n\}$.
+Call that word $w$, and write $w_{<i} = u_1 \cdots u_{i-1}$ for the trace
+before $p_i$ runs and $w_{>i} = u_{i+1} \cdots u_n$ for the trace after.
+
 \begin{theorem}[Soundness of $\RE$-residual checking]
 \label{thm:soundness}
-Let $e :: \mathtt{Pledge}\;\RE\;a$ be a specification term built from
-\lstinline{pure} and \lstinline{>>=} over $\RE$-annotated primitives,
-and let $w$ be any finite trace whose event sequence matches the
-\lstinline{post} fields of the invoked primitives in order.
-If $\norm{\fut(e)} = \univ$ and $\norm{\pre(e)} = \univ$, then $w$
-satisfies every future condition and every precondition named by the
-primitives composing $e$.
+Let $e$ be a \lstinline{Pledge m (RE t) a} term built from \lstinline{pure}
+and \lstinline{>>=} over primitives $p_1, \dots, p_n$ whose postconditions
+each denote a single word.
+If $L(\fut(e)) = \Sigma^*$ and $L(\pre(e)) = \Sigma^*$, then for every $i$:
+\[
+  w_{>i} \models \fut(p_i)
+  \qquad\text{and}\qquad
+  w_{<i} \models \pre(p_i).
+\]
+That is, every obligation deferred by a primitive is discharged by what
+follows it, and every condition demanded by a primitive is established by
+what precedes it.
 \end{theorem}
-\begin{proof}[Proof sketch]
-By induction on the structure of $e$.
-For $e = \mathtt{pure}\;x$, both residuals are $\univ$ by construction
-and there are no obligations; the claim holds vacuously.
-For $e = p \mathbin{>\!\!>\!\!=} f$: by Equation~\eqref{eq:fut-bind},
-$\fut(e) = \univ$ iff $(\fut(p) \lquot \post(f\,r)) \sqcap \fut(f\,r) = \univ$,
-i.e.\ $\fut(p) \lquot \post(f\,r) = \univ$ and $\fut(f\,r) = \univ$.
-By Lemma~\ref{lem:deriv-correct}, $\fut(p) \lquot \post(f\,r) = \univ$ means
-that every trace matching $\post(f\,r)$ discharges the entire obligation
-$\fut(p)$; the inductive hypothesis on $p$ and $f\,r$ then gives that the
-corresponding trace segments satisfy their respective obligations.
-The precondition case is symmetric using Equation~\eqref{eq:pre-bind}.
+\begin{proof}
+By induction on $n$.
+For $n = 0$ the program is $\mathtt{pure}\;x$, which names no obligation
+and the claim is vacuous.
+
+For the inductive step write $e = p \mathbin{>\!\!>\!\!=} f$, where $p = p_1$
+and $f$ yields the term $e'$ built from $p_2, \dots, p_n$; note
+$\post(e') = \{u_2 \cdots u_n\} = \{w_{>1}\}$.
+
+\emph{Futures.}
+By Equation~\eqref{eq:fut-bind},
+$\fut(e) = (\fut(p) \lquot \post(e')) \sqcap \fut(e')$.
+Since $\sqcap$ is intersection and $L(\fut(e)) = \Sigma^*$, both conjuncts
+denote $\Sigma^*$.
+From the first, $L(\fut(p) \lquot \{w_{>1}\}) = \Sigma^*$; by definition of
+the quotient this says $w_{>1}\,v \models \fut(p)$ for every $v$, and taking
+$v = \varepsilon$ gives $w_{>1} \models \fut(p)$, which is the claim for
+$i = 1$.
+From the second, $L(\fut(e')) = \Sigma^*$, so the induction hypothesis
+applies to $e'$ and gives the claim for $i \geq 2$ --- noting that the
+trace following $p_i$ within $e'$ is exactly $w_{>i}$.
+
+\emph{Preconditions.}
+Symmetrically, Equation~\eqref{eq:pre-bind} gives
+$\pre(e) = \pre(p) \sqcap (\pre(e') \rquot \post(p))$, so both conjuncts
+denote $\Sigma^*$.
+The first yields $L(\pre(p)) = \Sigma^*$, so $w_{<1} = \varepsilon$
+satisfies it.
+The second gives $L(\pre(e') \rquot \{u_1\}) = \Sigma^*$, i.e.\
+$v\,u_1 \models \pre(e')$ for every $v$; with $v = \varepsilon$ this makes
+$u_1$ a trace establishing $\pre(e')$, and the induction hypothesis on $e'$
+--- whose preceding trace is extended by $u_1$ on the left --- gives the
+claim for $i \geq 2$.
 \end{proof}
 
 \noindent
+Two remarks locate the theorem precisely.
+
+\emph{It is a soundness result only.}
+A discharged residual certifies that the obligations are met; a
+\emph{non}-discharged residual does not by itself certify that they are
+not.
+The converse direction is what the past-closure condition of
+\S\ref{sec:pre-condition} protects: without it a correct program can
+produce $\pre(e) = \varnothing$ and be reported as violating.
+The two side conditions are thus complementary --- single-word
+postconditions make the certificate meaningful, past-closed preconditions
+make its absence meaningful.
+
+\emph{The implementation tests a sufficient syntactic condition.}
+The theorem is stated semantically, in terms of $L(\cdot) = \Sigma^*$.
+What \lstinline{Pledge} computes is $\norm{\cdot}$, a normaliser, and
+reports discharge when the result is syntactically $\univ$.
+Normalisation is sound but incomplete for language universality, so the
+check can fail to recognise a discharged residual --- never the reverse.
+The normaliser accordingly implements the identities that arise in
+practice, among them $\univ \cdot r = \univ$ for nullable $r$, without
+which a residual such as $\Sigma^* \cdot (a \cdot \Sigma^* \vee \varepsilon)$
+would be reported as outstanding despite denoting $\Sigma^*$.
+
+\medskip\noindent
 Theorem~\ref{thm:soundness} applies to the $\RE$ instance because the proof
 relies on derivative correctness for regular languages.
 The $\GRE$ instance inherits soundness for its RE component and requires the
@@ -870,6 +1306,36 @@ A state $(\text{heap},\text{trace})$ satisfies \lstinline{GuardedRE p r} iff
 $\text{heap} \models p$ and $\text{trace} \in L(r)$.
 The two sides are independent: $p$ is a static constraint,
 while $r$ advances through derivatives as events arrive.
+
+\paragraph{What the arithmetic side can and cannot say.}
+That independence is worth dwelling on, because it bounds the instance
+sharply and the bound is easy to overlook.
+Every operation of the algebra conjoins the two predicates and quotients
+only the two REs; the predicate is never advanced by an event.
+A $\GRE$ annotation can therefore express an \emph{invariant} --- a property
+of the heap that holds throughout, such as ``address $a$ is live'' or
+``$0 \le h[a]$'' --- but it cannot express a property that changes as the
+trace proceeds.
+
+Writing one anyway fails silently, and in the wrong direction.
+Suppose \lstinline{init} posts $h[a] = 0$ and \lstinline{dec} requires
+$h[a] > 0$, the natural annotation for a counter.
+Both predicates are about $h[a]$ at \emph{different moments}, but the
+instance has no way to say so: composing the two conjoins them into
+$h[a] = 0 \wedge h[a] > 0$, which is unsatisfiable, so a correct program is
+reported as violating its contract.
+Meanwhile an \lstinline{inc} guarded by $h[a] < \mathit{max}$ never
+contradicts $h[a] = 0$, so a run that overflows is reported as fine.
+The predicate must be read as a single assertion about one heap, and
+annotations that treat it as a sequence of assertions about successive
+heaps invert the verdict.
+
+Expressing state change properly requires indexing values by trace
+position, which is a Presburger encoding of the trace itself rather than a
+predicate alongside it; we have not pursued it.
+The examples of \S\ref{sec:ex-gre-memory} accordingly use $\GRE$ for what it
+supports --- an invariant conjoined with a protocol ordering, where neither
+constraint alone suffices.
 
 Smart constructors lift a pure RE or pure predicate:
 \begin{lstlisting}
@@ -1083,15 +1549,22 @@ or a dedicated SL procedure such as Smallfoot) is identified in
 
 We demonstrate \lstinline{Pledge} across five case studies covering all four
 instances.
-Each example defines primitive operations annotated with
-\lstinline{pre}, \lstinline{post}, and \lstinline{fut},
-composes them in the \lstinline{Pledge} monad, and inspects the residual.
-A $\fut$ of $\univ$ (or \lstinline{wNullable = sone} for $\WRE$)
-and a $\pre$ of $\univ$ together certify temporal correctness
-(Theorem~\ref{thm:soundness} for $\RE$).
-The examples below focus on programs whose future conditions are genuinely
-non-trivial, since a $\top$ future throughout would make no use of the
-propagation machinery.
+Each defines primitive operations annotated with \lstinline{pre},
+\lstinline{post} and \lstinline{fut}, composes them in the
+\lstinline{Pledge} monad, and inspects the residual.
+Every future condition below is non-trivial except in the $\SL$ case, where
+\S\ref{sec:ex-heap} explains why the instance admits none.
+
+How a residual is read varies by instance, and the four cases together are
+the point of the section.
+For $\RE$ and $\GRE$, a $\pre$ and $\fut$ of $\univ$ certify correctness by
+Theorem~\ref{thm:soundness}, $\varnothing$ marks a violation, and a
+residual between the two is a standing constraint on the continuation
+(\S\ref{sec:ex-gre-memory}).
+For $\WRE$ there is no $\univ$ to compare against: one applies $\nu$ and
+reads a cost or a probability (\S\ref{sec:ex-sched}).
+For $\SL$ the residual is recorded but never discharged.
+All figures quoted below are the output of the accompanying artefact.
 
 \subsection{Mutex Lifecycle (\texorpdfstring{$\RE$}{RE} Instance)}
 \label{sec:ex-mutex}
@@ -1112,10 +1585,19 @@ acquire mid = Pledge $ return
 release :: Int -> Pledge IO (RE Term) ()
 release mid = Pledge $ return
     ( ()
-    , Single (Atom "acquire" (List [Num mid]))  -- pre: must have acquired
-    , Single (Atom "release" (List [Num mid]))  -- post
-    , universe )                                -- fut: none
+    , previously (Atom "acquire" (List [Num mid])) -- pre: acquired earlier
+    , Single (Atom "release" (List [Num mid]))     -- post
+    , universe )                                   -- fut: none
 \end{lstlisting}
+
+\noindent
+Note the precondition is \lstinline{previously}, not
+\lstinline{Single}: by \S\ref{sec:pre-condition} it must describe the whole
+preceding trace.
+The tempting \lstinline{Single (Atom "acquire" ...)} --- ``an acquire
+happened'' --- in fact says ``an acquire happened \emph{immediately}
+before'', and \lstinline{nestedLocks} below, where \lstinline{release 2}
+intervenes, would then report a violated contract despite being correct.
 
 \noindent
 The four example programs below and their residuals illustrate the key
@@ -1143,21 +1625,34 @@ Program & Residual $\fut$ & Residual $\pre$ \\
 \lstinline{safeSection}            & $\univ$ & $\univ$ \\
 \lstinline{nestedLocks}            & $\univ$ & $\univ$ \\
 \lstinline{lockLeak}               & $\finally{\mathtt{release}(1)}$ & $\univ$ \\
-\lstinline{releaseWithoutAcquire}  & $\univ$ & $\varnothing$ \\
+\lstinline{releaseWithoutAcquire}  & $\univ$ & $\finally{\mathtt{acquire}(1)}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For \lstinline{lockLeak}, the residual future names lock~1 specifically
-because the future condition of the first \lstinline{acquire} is discharged
-by the \lstinline{release 2} postcondition only for lock~2; lock~1's
-obligation $\finally{\mathtt{release}(1)}$ passes through the left-quotient
-unchanged.
-For \lstinline{releaseWithoutAcquire}, \lstinline{pre} collapses to
-$\varnothing$: the \lstinline{Single(acquire(1))} precondition of
-\lstinline{release} is never posted, so the right-quotient
-$\mathtt{Single}(\mathtt{acquire}(1)) \rquot \varepsilon = \varnothing$.
+The two correct programs discharge completely, and the two incorrect ones
+each leave exactly one residual naming what went wrong.
+For \lstinline{lockLeak} the residual future names lock~1 specifically:
+the future condition of the first \lstinline{acquire} is discharged by the
+\lstinline{release 2} postcondition only for lock~2, so lock~1's obligation
+$\finally{\mathtt{release}(1)}$ passes through the left quotient unchanged.
+For \lstinline{releaseWithoutAcquire} the residual \emph{pre} is
+$\finally{\mathtt{acquire}(1)}$, which reads as an obligation transferred to
+the caller: this fragment is usable only in a context that has already
+acquired lock~1.
+Composing it after \lstinline{acquire 1} discharges the residual to $\univ$,
+which is precisely \lstinline{safeSection}.
+
+\noindent
+\lstinline{nestedLocks} is the case that exercises the propagation
+machinery.
+Two obligations are outstanding when \lstinline{release 2} runs; its
+postcondition discharges one and leaves the other untouched, and the
+subsequent \lstinline{release 1} discharges that.
+Neither a pre/post pair nor a lexically scoped \lstinline{bracket} tracks
+this, because the obligations are released in an order the nesting does not
+determine.
 
 \subsection{Database Transactions (\texorpdfstring{$\RE$}{RE} Instance)}
 \label{sec:ex-tx}
@@ -1177,8 +1672,7 @@ beginTx = Pledge $ return
 commit :: Pledge IO (RE Term) ()
 commit = Pledge $ return
     ( ()
-    , Or (Single (Atom "beginTx" (List [])))
-         (Single (Atom "write"   Wildcard))     -- requires begin or write
+    , previously (Atom "beginTx" (List []))  -- a tx must have begun
     , Single (Atom "commit" (List []))
     , universe )
 
@@ -1206,79 +1700,127 @@ $\finally{\mathtt{commit}} \vee \finally{\mathtt{rollback}}$ as its residual
 future.
 \lstinline{committedTx} and \lstinline{rolledBackTx} fully discharge the
 obligation, yielding $\univ$.
-The disjunction is computed by the left-quotient:
+The disjunction is computed by the left quotient:
 $(\finally{\mathtt{commit}} \vee \finally{\mathtt{rollback}}) \lquot
 \mathtt{Single}(\mathtt{commit})$
 reduces to $\univ$ because $\mathtt{commit}$ advances the
-$\finally{\mathtt{commit}}$ branch to $\univ$.
+$\finally{\mathtt{commit}}$ branch to $\univ$, and a union with $\univ$ is
+$\univ$.
 
-\subsection{Bounded Counter (\texorpdfstring{$\GRE$}{GRE} Instance)}
-\label{sec:ex-counter}
+This is the case a lexically scoped combinator handles least well.
+A transaction may be discharged by either of two events, in a branch chosen
+at run time; \lstinline{bracket} must commit to one cleanup action when the
+scope is written.
+Here the obligation stays a disjunction until an event resolves it, and
+whichever branch runs discharges the whole.
 
-A counter stored at heap address \lstinline{addr} with maximum value
-\lstinline{maxVal} must follow the protocol
-$\mathtt{init} \cdot (\mathtt{inc} \mid \mathtt{dec})^* \cdot \mathtt{snapshot}$.
-Increment is guarded by $h[\mathtt{addr}] < \mathtt{maxVal}$; decrement
-by $h[\mathtt{addr}] > 0$.
-Neither constraint alone suffices: the RE alone would accept overflow
-sequences; the Presburger predicate alone would accept arbitrary event orders.
+\subsection{Heap Liveness and Allocation Order (\texorpdfstring{$\GRE$}{GRE} Instance)}
+\label{sec:ex-gre-memory}
+
+Manual memory management needs two constraints at once, and they are of
+different kinds.
+The \emph{trace} constraint is that a \lstinline{malloc} must precede the
+matching \lstinline{free}, that the \lstinline{free} must eventually happen,
+and that a second \lstinline{free} must not occur before re-allocation.
+The \emph{heap} constraint is that the cell is live, $h[a] > 0$.
+An RE cannot see liveness and a Presburger predicate cannot see ordering, so
+each alone admits programs the other rejects.
+Both are invariants of the run rather than assertions about successive
+states, which is what $\GRE$ supports (\S\ref{sec:gre-instance}).
 
 \begin{lstlisting}
-initCounter :: Addr -> Pledge IO (GuardedRE Term) ()
-initCounter addr = Pledge $ return
-    ( ()
-    , fromRE universe                                    -- pre: none
-    , GuardedRE (PEq (ValAt addr) (Lit 0))
-                (Single (Atom "init" (List [Num addr]))) -- post: heap[addr]=0
-    , fromRE universe )                                  -- fut: none
+malloc :: Addr -> Pledge IO (GuardedRE Term) Addr
+malloc addr = Pledge $ return
+    ( addr                                              -- returns the address
+    , fromRE universe                                   -- pre: none
+    , fromRE (Single (Atom "malloc" (List [Num addr]))) -- post
+    , GuardedRE (PGt (ValAt addr) (Lit 0))              -- fut: live, and
+                (finally (Atom "free" (List [Num addr]))) --   free eventually
+    )
 
-increment :: Addr -> Int -> Pledge IO (GuardedRE Term) ()
-increment addr maxVal = Pledge $ return
+free :: Addr -> Pledge IO (GuardedRE Term) ()
+free addr = Pledge $ return
     ( ()
-    , GuardedRE (PLt (ValAt addr) (Lit maxVal)) universe  -- pre: not at max
-    , fromRE (Single (Atom "inc" (List [Num addr])))
-    , fromPPred (PGe (ValAt addr) (Lit 0)) )              -- fut: stays >= 0
+    , GuardedRE (PGt (ValAt addr) (Lit 0))                -- pre: live, and
+                (previously (Atom "malloc" (List [Num addr]))) -- malloc'd
+    , fromRE (Single (Atom "free" (List [Num addr])))     -- post
+    , fromRE (noUntil (Atom "free"   (List [Num addr]))   -- fut: no double
+                      (Atom "malloc" (List [Num addr])))  --   free until realloc
+    )
 \end{lstlisting}
 
+\noindent
+The future condition here is not $\top$: \lstinline{malloc} defers a real
+obligation, and \lstinline{free} imposes a standing one on everything that
+follows.
+Note also that \lstinline{malloc} \emph{returns} the address and the
+programs below bind it, so the annotation of \lstinline{free} is built from
+a value produced at run time --- the mechanism of \S\ref{sec:effects} in
+miniature.
+
 \begin{lstlisting}
--- Good: init, two increments, one decrement, snapshot
-normalUse = do
-    initCounter 0; increment 0 10; increment 0 10; decrement 0; snapshot 0
+mallocThenFree = do { a <- malloc 1; free a }
+reallocate     = do { a <- malloc 1; free a; a' <- malloc 1; free a' }
 
--- Bad: 11 increments against max 10 -- PLt(h[0], 10) violated on 11th
-overflow = do
-    initCounter 0; replicateM_ 11 (increment 0 10); snapshot 0
-
--- Bad: decrement below zero -- PGt(h[0], 0) violated immediately
-underflow = do { initCounter 0; decrement 0 }
+missingFree       = do { _ <- malloc 1; return () }   -- never freed
+freeWithoutMalloc = free 1                            -- no allocation
+doubleFree        = do { a <- malloc 1; free a; free a }
+wrongFree         = do { a <- malloc 1; free (a + 1) } -- frees the wrong cell
 \end{lstlisting}
 
 \begin{center}
-\begin{tabular}{lll}
+\small
+\begin{tabular}{llll}
 \toprule
-Program & Residual $\pre$ (Presburger) & Residual $\pre$ (RE) \\
+Program & $\pre$ & $\fut$ \\
 \midrule
-\lstinline{normalUse}  & $\mathbf{true}$  & $\univ$ \\
-\lstinline{overflow}   & $\mathbf{false}$ & $\univ$ \\
-\lstinline{underflow}  & $\mathbf{false}$ & $\univ$ \\
+\lstinline{mallocThenFree}    & $[h_1{>}0]\;\univ$
+                              & $[h_1{>}0]\;\noUntil{\mathtt{free}_1}{\mathtt{malloc}_1}$ \\
+\lstinline{reallocate}        & $[h_1{>}0]\;\univ$
+                              & $[h_1{>}0]\;\noUntil{\mathtt{free}_1}{\mathtt{malloc}_1}$ \\
+\midrule
+\lstinline{missingFree}       & $[\mathbf{true}]\;\univ$
+                              & $[h_1{>}0]\;\finally{\mathtt{free}_1}$ \\
+\lstinline{freeWithoutMalloc} & $[h_1{>}0]\;\finally{\mathtt{malloc}_1}$
+                              & $[\mathbf{true}]\;\noUntil{\mathtt{free}_1}{\mathtt{malloc}_1}$ \\
+\lstinline{doubleFree}        & $[h_1{>}0]\;\univ$
+                              & $[h_1{>}0]\;\varnothing$ \\
+\lstinline{wrongFree}         & $[h_2{>}0]\;\finally{\mathtt{malloc}_2}$
+                              & $[h_1{>}0]\;\finally{\mathtt{free}_1} \sqcap
+                                 \noUntil{\mathtt{free}_2}{\mathtt{malloc}_2}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For \lstinline{overflow}, composing eleven increments accumulates the
-conjunction $h[0] < 10 \wedge \neg(h[0] < 10)$, which
-\lstinline{normalizePPred} collapses to \lstinline{PFalse} without any solver
-call, pinpointing the arithmetic violation while the RE component remains
-$\univ$.
+This example shows that ``discharged'' admits three outcomes, not two.
+A residual of $\univ$ owes nothing.
+A residual of $\varnothing$ is a violation: \lstinline{doubleFree} reaches
+it because the second \lstinline{free} must satisfy the
+$\noUntil{\mathtt{free}_1}{\mathtt{malloc}_1}$ that the first one imposed,
+and no trace does.
+Between the two lies a satisfiable residual that is not $\univ$ --- a
+\emph{standing constraint} on whatever runs next.
+\lstinline{mallocThenFree} is correct and still carries
+$\noUntil{\mathtt{free}_1}{\mathtt{malloc}_1}$: it has discharged what it
+owed and, in exchange, constrains its continuation not to free cell~1 again
+before re-allocating.
+\lstinline{reallocate} exercises exactly that, and the second
+\lstinline{malloc} resets the guard.
+
+\lstinline{wrongFree} is the case where both fields carry information.
+Freeing cell~2 leaves cell~1's obligation $\finally{\mathtt{free}_1}$
+outstanding in $\fut$, and simultaneously demands
+$\finally{\mathtt{malloc}_2}$ in $\pre$, since cell~2 was never allocated.
+One residual pair names both the leak and the unmet requirement.
 
 \subsection{Task Scheduling (\texorpdfstring{$\WRE$}{WRE} Tropical Instance)}
 \label{sec:ex-sched}
 
 Under the tropical (min-plus) semiring, weights represent minimum numbers of
 steps.
-Each \lstinline{submit} carries a future condition requiring eventual
-\lstinline{complete}.
+Each \lstinline{submit} carries a future condition requiring the task to be
+resolved.
 
 \begin{lstlisting}
 type TSRE = WRE Tropical Term
@@ -1286,52 +1828,86 @@ type TSRE = WRE Tropical Term
 submit :: Int -> Pledge IO TSRE ()
 submit taskId = Pledge $ return
     ( ()
-    , WEps sone
-    , WSingle (Tropical 1) (Atom "submit" (List [Num taskId]))
-    , wFinally (Tropical 1) (Atom "complete" (List [Num taskId])) )
+    , wTop                                                       -- pre: none
+    , WSingle (Tropical 1) (Atom "submit" (List [Num taskId]))   -- post
+    , WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num taskId])))
+           (wFinally (Tropical 2) (Atom "abort"    (List [Num taskId]))) )
 
 complete :: Int -> Pledge IO TSRE ()
 complete taskId = Pledge $ return
     ( ()
     , wPreviously (Tropical 1) (Atom "submit" (List [Num taskId]))  -- pre
-    , WSingle (Tropical 1) (Atom "complete" (List [Num taskId]))
-    , WEps sone )                                                     -- fut: done
+    , WSingle (Tropical 1) (Atom "complete" (List [Num taskId]))    -- post
+    , wTop )                                                     -- fut: none
+\end{lstlisting}
+
+\noindent
+The identity elements matter here and are easy to get wrong.
+``No precondition'' is \lstinline{wTop}, the unit of $\sqcap$, not
+\lstinline{WEps sone}, which is the unit of $\cdot$ and asserts that the
+preceding trace is \emph{empty}.
+Likewise \lstinline{wFinally} must carry a trailing $\Sigma^*$, as
+\lstinline{finally} does; without it the obligation reads ``the trace ends
+with this event'' and a task resolved anywhere but last is reported unmet.
+
+\noindent
+A submitted task must be \emph{resolved}, and there are two ways to do it.
+The future condition is accordingly a weighted disjunction --- the
+quantitative counterpart of the \lstinline{beginTx} obligation of
+\S\ref{sec:ex-tx} --- with $\oplus = \min$ selecting the cheaper route still
+open:
+
+\begin{lstlisting}
+-- fut of submit: resolve by completing (1 step) or aborting (2 steps)
+WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num taskId])))
+     (wFinally (Tropical 2) (Atom "abort"    (List [Num taskId])))
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: submit and complete two tasks
-twoTasks = do { submit 1; complete 1; submit 2; complete 2 }
+submitAndComplete = do { submit 1; complete 1 }
+submitAndAbort    = do { submit 1; abort 1 }
+twoTasks          = do { submit 1; complete 1; submit 2; complete 2 }
 
--- Good: choose cheaper of complete (cost 1) vs abort (cost 2) via WAdd
-cheapestResolution = Pledge $ return
-    ( (), WEps sone
-    , WSingle (Tropical 1) (Atom "submit" (List [Num 1]))
-    , WAdd (wFinally (Tropical 1) (Atom "complete" (List [Num 1])))
-           (wFinally (Tropical 2) (Atom "abort"    (List [Num 1]))) )
-
--- Bad: task 2 never completed
-missingComplete = do { submit 1; complete 1; submit 2 }
+submitOnly        = submit 1          -- never resolved
 \end{lstlisting}
 
 \begin{center}
-\begin{tabular}{lll}
+\begin{tabular}{ll}
 \toprule
-Program & Residual future & \lstinline{wNullable} \\
+Program & $\nu(\fut)$, the minimum cost to discharge \\
 \midrule
-\lstinline{twoTasks}           & $\mathtt{WEps}\;0$                              & 0 steps \\
-\lstinline{cheapestResolution} & $\mathtt{WAdd}(\ldots)$                         & 1 step \\
-\lstinline{missingComplete}    & $\mathtt{wFinally}\;1\;(\mathtt{complete}(2))$  & $\infty$ \\
+\lstinline{submitAndComplete} & $2$ steps \\
+\lstinline{submitAndAbort}    & $4$ steps \\
+\lstinline{twoTasks}          & $8$ steps \\
+\lstinline{submitOnly}        & $\infty$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For \lstinline{missingComplete}, \lstinline{wNullable} returns
-\lstinline{Tropical infinity}, flagging that no finite trace discharges the
-obligation for task~2.
-For \lstinline{cheapestResolution}, \lstinline{WAdd} takes the minimum weight
-of the two alternatives: completing costs~1, aborting costs~2, so the
-minimum is~1.
+Reading a residual here differs from the $\RE$ case, and this is the point
+of the instance.
+There is no syntactic $\univ$ to compare against; one applies $\nu$ ---
+\lstinline{wNullable}, the weight the residual assigns to the empty
+continuation --- and reads the number.
+A finite weight says the obligations are dischargeable and at what cost;
+$\infty$ is the semiring zero in the tropical case and says no trace discharges
+them at all.
+\lstinline{submitOnly} is the only program of the four that is wrong, and it
+is the only one reporting $\infty$.
+
+The costs of the correct programs are informative rather than merely
+non-infinite.
+\lstinline{submitAndComplete} costs $2$ and \lstinline{submitAndAbort}
+costs~$4$: both resolve the task, and the difference is exactly the extra
+weight the tropical semiring assigns to the more expensive route, accumulated
+by $\otimes = {+}$ along the path.
+Under the probability semiring the same machinery reads differently again:
+the memory example of the accompanying artefact reports a residual weight of
+$94\%$ for a matched \lstinline{malloc}/\lstinline{free} pair and $0\%$ when
+the \lstinline{free} is missing, so the residual quantifies confidence rather
+than cost.
+A Boolean verdict cannot express either reading.
 
 \subsection{Heap Memory (\texorpdfstring{$\SL$}{SL} Instance)}
 \label{sec:ex-heap}
@@ -1352,47 +1928,52 @@ writeCell addr old new = Pledge $ return ((), Cell addr old, Cell addr new, Top)
 \end{lstlisting}
 
 \begin{lstlisting}
--- Good: alloc then immediately free
-allocFree = do { alloc 0 42; free 0 42 }
-
--- Good: two disjoint cells allocated
-allocTwo = do { alloc 0 1; alloc 1 2 }
-
--- Good: alloc, write, free -- full ownership cycle
-fullCycle = do { alloc 0 0; writeCell 0 0 7; free 0 7 }
-
--- Bad: alloc two, free only one -- Cell 1 2 ownership remains in post
-leakOne = do { alloc 0 1; alloc 1 2; free 0 1 }
-
--- Bad: read without ownership -- pre = Cell 0 42, never posted
-readWithoutAlloc = Pledge $ return ((), Cell 0 42, Emp, Top)
+allocTwo  = do { alloc 0 1; alloc 1 2 }            -- two disjoint cells
+allocFree = do { alloc 0 42; free 0 42 }           -- allocate, then release
+leakOne   = do { alloc 0 1; alloc 1 2; free 0 1 }  -- release only one
 \end{lstlisting}
 
-\begin{center}
-\begin{tabular}{llll}
-\toprule
-Program & Residual $\post$ & Residual $\pre$ & Residual $\fut$ \\
-\midrule
-\lstinline{allocFree}        & $\mathbf{emp}$              & $\top$ & $\top$ \\
-\lstinline{allocTwo}         & $\mathtt{Cell}\;0\;1 \sep \mathtt{Cell}\;1\;2$ & $\top$ & $\top$ \\
-\lstinline{fullCycle}        & $\mathbf{emp}$              & $\top$ & $\top$ \\
-\lstinline{leakOne}          & $\mathtt{Cell}\;1\;2$       & $\top$ & $\top$ \\
-\lstinline{readWithoutAlloc} & $\mathbf{emp}$              & $\mathtt{Cell}\;0\;42$ & $\top$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
 \noindent
-For \lstinline{allocTwo}, the combined $\post$ is
-$\mathtt{Cell}\;0\;1 \sep \mathtt{Cell}\;1\;2$: two disjointly owned cells
-composed by separating conjunction, correctly reflecting that the two cells
-reside at distinct addresses.
-For \lstinline{leakOne}, the $\post$ retains $\mathtt{Cell}\;1\;2$, naming
-the unreleased ownership at address~1 precisely.
-Unlike the RE examples where a non-$\top$ $\fut$ is a definite violation,
-in the SL instance the caller inspects $\post$ to decide whether retained
-ownership constitutes a leak; $\fut = \top$ means no future obligation was
-stated, but outstanding $\post$ ownership is still visible.
+\lstinline{allocTwo} behaves as intended: the composed $\post$ is
+$\mathtt{Cell}\;0\;1 \sep \mathtt{Cell}\;1\;2$, two disjointly owned cells
+joined by separating conjunction, which is exactly the reading
+Table~\ref{tab:sl-re-parallel} promises.
+The other two do not, and the reason is worth stating plainly rather than
+presenting a table that suggests otherwise.
+
+\lstinline{allocFree} yields $\post = \mathtt{Cell}\;0\;42$, not
+$\mathbf{emp}$.
+Sequential composition is $\sep$, so the postcondition of a bind is
+$\post(p) \sep \post(q)$; \lstinline{free} posts $\mathbf{emp}$, and
+$\mathtt{Cell}\;0\;42 \sep \mathbf{emp} = \mathtt{Cell}\;0\;42$.
+A release therefore contributes nothing.
+Separating conjunction \emph{accumulates} footprint and has no way to
+retract it, so within this instance an operation cannot express that it
+gives ownership back.
+The consequences compound: \lstinline{leakOne} produces the same $\post$ as
+\lstinline{allocTwo}, making the leak invisible, and
+$\mathtt{alloc}\;0\;0 \mathbin{;} \mathtt{write}\;0\;7 \mathbin{;}
+\mathtt{free}\;0\;7$ produces
+$\mathtt{Cell}\;0\;0 \sep \mathtt{Cell}\;0\;7$, which asserts ownership of
+address~$0$ twice and is unsatisfiable in any heap.
+
+The $\fut$ field is $\top$ throughout, for a related reason: the instance
+provides no test that would discharge an ownership obligation, so there is
+nothing for a non-trivial future condition to be checked against.
+What \S\ref{sec:sl-instance} establishes, then, is that the six operations
+of \lstinline{Composable} have natural separation-logic readings and that
+the types line up --- $\sep$ for $\cdot$, $\mathbf{emp}$ for $\varepsilon$,
+$\wand$ for the quotient.
+What it does not establish is that those readings compose into a usable
+ownership discipline.
+Doing so needs a composition that is frame-aware, subtracting the footprint
+an operation consumes rather than only adding what it produces, together
+with a solver to discharge the resulting $\wand$ obligations
+(\S\ref{sec:discussion}).
+We report $\SL$ as evidence that the algebra generalises beyond traces, and
+not as a working instance; the three instances of
+\S\ref{sec:re-instance}--\S\ref{sec:wre-instance} are the ones that
+discharge obligations.
 
 %% =========================================================================
 \section{Related Work}
@@ -1414,11 +1995,40 @@ Liquid Haskell~\cite{vazou2014} expresses pre/post-conditions as refinement
 types verified by an SMT solver.
 Findler and Felleisen~\cite{findler2002} establish runtime contract discipline
 for higher-order functions.
-Swierstra and Baanen~\cite{swierstra2019} embed Hoare triples as an indexed
-monad, propagating pre/post annotations through monadic bind analogously to
-\lstinline{Pledge}.
 Pledge complements these by adding a temporal future condition without
 requiring type-system extensions.
+
+\paragraph{Specifications as monads.}
+The idea that a specification can itself be monadic structure is the
+closest conceptual neighbour to this work.
+Hoare Type Theory~\cite{nanevski2008htt} indexes a monad by a pre/post
+pair, making Hoare triples types.
+The \emph{Dijkstra monad}~\cite{swamy2013dijkstra} instead indexes
+computations by predicate transformers, so that the weakest precondition of
+a composite is computed by bind;
+\citet{ahman2017dijkstra} derive such monads mechanically from an effect's
+definition, and \citet{maillard2019dijkstra} give the general account in
+which a Dijkstra monad is a monad morphism into a specification monad.
+\citet{swierstra2019} develop the predicate-transformer view for effects in
+a dependently typed setting.
+
+The shared idea is that specifications compose the way programs do; the
+difference is what composition computes.
+A Dijkstra monad propagates \emph{backwards}: bind computes the weakest
+precondition of a sequence from its continuation's, and the result is a
+predicate transformer to be discharged by a verifier.
+\lstinline{Pledge} propagates \emph{forwards} as well, and its $\fut$ field
+has no counterpart in that line of work --- a predicate transformer relates
+two states, whereas a future condition constrains the trace still to come,
+which no pre/post pair over states can express.
+The second difference is one of ambition.
+Dijkstra monads target full functional correctness in a dependently typed
+host and rely on a solver; \lstinline{Pledge} targets temporal obligations
+in plain Haskell, computes a residual rather than a verification condition,
+and is correspondingly weaker and cheaper.
+Reading Equations~\eqref{eq:pre-bind}--\eqref{eq:fut-bind} as a
+specification monad in the sense of \citet{maillard2019dijkstra}, and asking
+what $\lquot$ is in that framework, is a question we leave open.
 
 \paragraph{Parameterised and graded monads.}
 \citet{atkey2009} introduces parameterised monads for Hoare-style state
@@ -1452,41 +2062,139 @@ Pledge is more lightweight: it operates within the standard \lstinline{Monad}
 class, admits quantitative and heap-ownership obligations that session types
 do not, and is applicable beyond message-passing.
 
-\paragraph{Runtime monitoring.}
-Runtime verification~\cite{leucker2009} checks temporal properties by
-instrumenting a concrete execution.
-Pledge propagates obligations in the specification layer before any effectful
-run, without requiring a concrete execution, at the cost of not itself
-catching divergence between the specification and the real code it shadows.
+\paragraph{Typestate.}
+Typestate~\cite{strom1986} attaches a protocol state to a variable's type
+and checks transitions statically; \citet{bierhoff2007} extend this to
+aliased objects with access permissions.
+The obligations are the same ones \lstinline{Pledge} targets --- an opened
+file must be closed, a lock released --- but the mechanism differs in where
+the state lives.
+Typestate puts it in the type, so the checker rejects a bad program and the
+protocol must be fixed before the code is written;
+\lstinline{Pledge} puts it in a value, so a bad program compiles and its
+residual reports what it owes.
 
-\paragraph{Brzozowski derivatives.}
-Derivatives of regular expressions~\cite{brzozowski1964} have found
-application in parsing~\cite{owens2009,might2011} and model checking.
-Equation~\eqref{eq:deriv-not} extends this to complement;
-our left/right-quotient operators are a novel application to
-future-condition propagation in a monadic setting.
+\paragraph{Runtime verification.}
+Runtime verification~\cite{leucker2009} checks temporal properties against a
+concrete execution rather than a model, and is the setting
+\lstinline{Pledge} most resembles.
+\citet{havelund2001rewriting} monitor temporal formulae by rewriting them as
+events arrive --- the residual formula after each event being precisely the
+obligation that remains, which is the same move the quotient makes here.
+MOP~\cite{chen2007mop} generates efficient monitors from a specification
+attached to program points, and Copilot~\cite{pike2010copilot} generates
+hard-real-time C monitors from a Haskell EDSL.
+
+Two things distinguish the present work.
+First, most monitors are automaton- or rewriting-based and report a Boolean
+verdict; here the monitor state \emph{is} the specification, in the same
+algebra the programmer wrote, so a failure names the outstanding obligation
+rather than reporting that a property was violated at some step.
+Second, monitor composition is usually external --- monitors are attached to
+a program, and combining them is a matter of running several at once.
+Here composition is the program's own \lstinline{>>=}, and the algebraic
+laws of \S\ref{sec:monad-laws} are about how obligations combine.
+The cost is that \lstinline{Pledge} observes only what the annotations
+report: it computes the residual for the path actually taken (\S\ref{sec:effects})
+but does not intervene, so a divergence between an annotation and the
+handler it shadows goes unnoticed.
+Closing that gap is the main practical work remaining (\S\ref{sec:discussion}).
+
+\paragraph{Derivatives of regular expressions.}
+Brzozowski derivatives~\cite{brzozowski1964} have found application in
+parsing~\cite{owens2009,might2011} and model checking;
+\citet{antimirov1996} refine them into partial derivatives, whose sets stay
+smaller and which the quotient of \S\ref{sec:re-instance} uses on the
+dividend.
+Equation~\eqref{eq:deriv-not} extends the construction to complement.
+What is new here is not the derivative but the use of a \emph{language}
+quotient --- of one specification by another, rather than by a single event
+--- as the propagation rule of a monadic bind.
 
 %% =========================================================================
 \section{Discussion and Future Work}
 \label{sec:discussion}
 %% =========================================================================
 
-\paragraph{Decidability.}
-Equality of normalised regular expressions is decidable, so the
-left-quotient computation terminates whenever the derivative sequence is
-finite, which holds for the regular languages used in our examples.
+\paragraph{Termination of the quotient.}
+The quotient of \S\ref{sec:re-instance} is solved by a worklist traversal
+over the reachable pairs of derivatives, and terminates because both
+components range over finite sets: Brzozowski derivatives modulo
+associativity, commutativity and idempotence of $\vee$ and $\wedge$, and
+Antimirov partial derivatives outright.
+Cycle detection must therefore compare states modulo those identities;
+comparing them structurally is not enough, and a divisor whose derivative
+does not shrink --- $\Sigma^*$, or any starred language --- makes a naive
+recursion diverge.
+
+The weighted instance is genuinely weaker here, and the reason is
+instructive.
+Modulo-ACI comparison is \emph{unsound} over an arbitrary semiring, because
+neither $\oplus$ nor $\otimes$ need be idempotent: in the probability
+semiring $0.5 \oplus 0.5 = 1.0$.
+Worse, a weighted star has infinitely many distinct derivatives whenever its
+weight fails to stabilise under $\otimes$, as $([0.9]\,a)^*$ generates
+$0.9, 0.81, 0.729, \dots$.
+Termination for $\WRE$ therefore holds for unit weights --- which covers
+\lstinline{wTop}, \lstinline{wGlobally sone}, and the whole Boolean
+semiring, where $\WRE$ collapses to $\RE$ --- and not in general.
+Postconditions in practice are unit-weight event sequences, so the
+restriction is not felt; identifying a semiring condition under which
+weighted derivatives are finite would remove it properly.
 Extending to context-free or $\omega$-regular specifications remains future
-work.
+work; \lstinline{finally} here is a finite-trace operator, and genuine
+liveness over infinite runs is out of scope.
 
 \paragraph{Closing the gap between specification and real effects.}
-The monad transformer structure allows live runtime values to be embedded in
-annotations (as in the file-handle example of \S\ref{sec:effects}), but
-\lstinline{Pledge} itself does not check that the shadow specification
-stays consistent with the real code as it evolves.
-Lifting \lstinline{Pledge} into an effect-handler framework
-(\texttt{effectful} or \texttt{polysemy}), so that a \lstinline{Pledge}
-annotation is attached directly to each operation's real effect handler
-and updated automatically as the effect executes, would close this gap.
+\S\ref{sec:effects} pairs a \lstinline{Pledge} term with a real
+\texttt{effectful} handler, so that one \lstinline{do} block drives both and
+annotations may mention the values the handler produces.
+What that construction does not do is \emph{guarantee} the two stay in
+step: the specification and the implementation are written side by side, and
+nothing prevents them drifting apart as the code evolves.
+The remedy we favour is to stop writing them separately.
+Rather than a \lstinline{Pledge} term shadowing a real API, one can ship
+annotated wrappers --- a \lstinline{Pledge}-flavoured
+\lstinline{Control.Concurrent.MVar}, \lstinline{System.IO}, or resource
+API --- in which each real operation already carries its own annotation.
+A programmer then writes ordinary code against a different import, and the
+specification is a byproduct of running the program rather than a parallel
+artefact to be maintained.
+This also answers the question of who writes annotations: the library
+author, once, rather than every caller.
+
+\paragraph{From reporting to enforcing.}
+As \S\ref{sec:intro} noted, \lstinline{Pledge} names an unmet obligation but
+does not prevent it: a program whose $\pre$ has collapsed to $\varnothing$
+still runs to completion.
+Because the underlying monad is arbitrary, closing this is mechanical ---
+a variant of bind that inspects the residual after each step and fails when
+it reaches $\varnothing$ turns the residual into a runtime guard, at the
+cost of a quotient computation per bind.
+The interesting question is not whether this is possible but what it should
+do on failure, and how much of the residual to recompute incrementally;
+we have not evaluated the cost.
+
+\paragraph{Making the side conditions unwriteable.}
+\S\ref{sec:single-word} and \S\ref{sec:pre-condition} identify two
+conditions an annotation must satisfy --- postconditions denoting a single
+word, preconditions past-closed --- and neither is expressed in the type
+\lstinline{eff}.
+Both are easy to violate by writing the annotation that first comes to
+mind, and the second fails silently, reporting a contract violation for a
+correct program.
+Documentation is a poor defence.
+A better one is to withhold the raw constructors and expose only
+combinators that maintain the invariants: an \lstinline{emits} smart
+constructor building a $\post$ from a list of events, and a
+\lstinline{requires} constructor that wraps its argument as
+$\Sigma^* \cdot r$, so that a non-past-closed precondition cannot be
+written.
+This costs expressiveness --- a primitive could no longer advertise a
+disjunctive postcondition --- and buys a library whose users cannot
+accidentally leave the region where the monad laws hold.
+We think that is the right trade, and it is the main change we would make
+to the API.
 
 \paragraph{Toward solver-backed SL discharge.}
 \S\ref{sec:sl-instance} is explicit that the SL instance's
@@ -1506,14 +2214,31 @@ logic frame rule~\cite{o2007resources}.
 Extending \lstinline{Composable} with a \lstinline{parallel} operation is a
 natural next step.
 
-\paragraph{Closed-world alphabet assumption.}
-The \lstinline{firstWith} function uses
-$\Sigma_0 = \mathit{atoms}(r_1) \cup \mathit{atoms}(r_2)$ as its working
+\paragraph{The event alphabet.}
+Unfolding a complement requires a working alphabet, and
+\lstinline{firstWith} derives one from the operands as
+$\Sigma_0 = \mathit{atoms}(r_1) \cup \mathit{atoms}(r_2) \cup
+\{\mathtt{Wildcard}\}$.
+The \lstinline{Wildcard} element is what makes this open-world: it stands
+for ``some event other than the named ones'', which a specification can
+constrain without ever naming.
+Omitting it is not a conservative simplification but a soundness bug --- a
+pair of operands naming no concrete event at all, such as $\Sigma^*$ or
+$\neg \varepsilon$, then has an empty working alphabet, no successor states
+to explore, and quotients to $\varnothing$ regardless of its actual
+denotation.
+
+A real limitation remains one level down, in the event type rather than the
 alphabet.
-This is sound under the closed-world assumption that every relevant event is
-mentioned in the two operands.
-A fully open-world implementation would accept an explicit $\Sigma$
-declaration.
+An \lstinline{Event} is either \lstinline{Wildcard}, matching everything, or
+an \lstinline{Atom} matching a name \emph{and} a payload exactly.
+There is no pattern between the two, so a specification cannot say ``a
+\lstinline{write} with any arguments'' --- the natural way to describe most
+protocols, and the first thing a user reaches for.
+Adding a name-indexed wildcard, or making the payload a matcher rather than
+a value, would remove the restriction without disturbing the algebra: only
+\lstinline{subsumesEvent} and the derivative's \lstinline{Single} clause
+depend on it.
 
 %% =========================================================================
 \section{Conclusion}

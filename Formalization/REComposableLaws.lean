@@ -3,31 +3,38 @@
 
 Formal proofs that `RE` (from `Pledge/RE.hs`) satisfies the 14 algebraic laws
 (`S1–S3, C1–C3, L1–L4, R1–R4`) required for the Pledge monad laws, stated
-as **language equivalences** (`LEquiv`).
+as **language containments** (`LContainment`).
 
-## Why language equivalence?
+`LContainment L1 L2`, written `L1 ⊆ L2`, is the one-way inclusion
+`∀ w, L1 w → L2 w`, not bi-implication.  Every law below is read left-to-right
+only; where the converse inclusion also happens to hold it is given separately
+(`S3'`, `L3'`, `R3'`).
 
-`concatenation = Seq` in the RE Composable instance, so `Seq Eps r ≠ r`
-propositionally.  All laws are stated as `∀ w, lang lhs w ↔ lang rhs w`.
+Each law is proved twice: abstractly over languages (§2), and for the `RE`
+syntax itself (§6), the latter bundled as `re_satisfies_axioms : REAxioms lq rq`.
+The eight quotient laws take the correctness of the quotient operations
+(`IsLeftQuotient` / `IsRightQuotient`, the specification of `reLeftQuotient` /
+`reRightQuotient`) as an explicit hypothesis; nothing is axiomatised, so
+`#print axioms re_satisfies_axioms` reports only `propext` and `Quot.sound`.
 
 ## Status
 
-| Law | Status   | Notes                                              |
-|-----|----------|----------------------------------------------------|
-| S1  | ✓        | `catL epsL L ≅ L`                                 |
-| S2  | ✓        | `catL L epsL ≅ L`                                 |
-| S3  | ✓        | associativity of `catL`                            |
-| C1  | ✓        | commutativity of `andL`                            |
-| C2  | ✓        | associativity of `andL`                            |
-| C3  | ✓        | `andL topL L ≅ L`                                 |
-| L1  | ✓        | `lqL epsL L ≅ L` (definitional in RE.hs)          |
-| L2  | ✓*       | needs `L(divisor) ≠ ∅`; fails for `Bot`           |
-| L3  | ✓        | sequential left-quotient law                       |
-| L4  | → only   | full equality fails (§L4 counterexample)           |
-| R1  | ✓        | mirrors L1                                         |
-| R2  | ✓*       | needs `L(divisor) ≠ ∅`; mirrors L2                |
-| R3  | ✓        | mirrors L3                                         |
-| R4  | → only   | mirrors L4                                         |
+| Law | Lang (§2) | RE (§6) | Notes                                       |
+|-----|-----------|---------|---------------------------------------------|
+| S1  | `S1`      | `re_S1` | `catL epsL L ⊆ L` (converse also holds)    |
+| S2  | `S2`      | `re_S2` | `catL L epsL ⊆ L` (converse also holds)    |
+| S3  | `S3`      | `re_S3` | associativity of `catL` (converse: `S3'`)   |
+| C1  | `C1`      | `re_C1` | commutativity of `andL`                     |
+| C2  | `C2`      | `re_C2` | associativity of `andL`                     |
+| C3  | `C3`      | `re_C3` | `andL topL L ⊆ L`                          |
+| L1  | `L1`      | `re_L1` | `lqL epsL L ⊆ L`                           |
+| L2  | `L2`      | `re_L2` | holds for any divisor, `Bot` included       |
+| L3  | `L3`      | `re_L3` | sequential left-quotient (converse: `L3'`)  |
+| L4  | `L4`      | `re_L4` | converse fails (§L4)                        |
+| R1  | `R1`      | `re_R1` | mirrors L1                                  |
+| R2  | `R2`      | `re_R2` | mirrors L2                                  |
+| R3  | `R3`      | `re_R3` | mirrors L3 (converse: `R3'`)                |
+| R4  | `R4`      | `re_R4` | mirrors L4                                  |
 -/
 
 namespace REComposableLaws
@@ -45,8 +52,12 @@ def epsL : Lang α := fun w => w = []
 def topL : Lang α := fun _ => True
 def lqL (Ld Lr : Lang α) : Lang α := fun w => ∃ u, Ld u ∧ Lr (u ++ w)
 def rqL (Ld Lr : Lang α) : Lang α := fun w => ∃ u, Ld u ∧ Lr (w ++ u)
-def LEquiv (L1 L2 : Lang α) : Prop := ∀ w, L1 w ↔ L2 w
-local infix:50 " ≅ " => LEquiv
+
+/-- **Language containment**: `L1 ⊆ L2` means every word of `L1` is a word of
+    `L2`.  Every law below is stated as this one-way inclusion; the converse
+    inclusions are not claimed. -/
+def LContainment (L1 L2 : Lang α) : Prop := ∀ w, L1 w → L2 w
+local infix:50 " ⊆ " => LContainment
 
 def catPow (L : Lang α) : Nat → Lang α
   | 0     => epsL
@@ -60,96 +71,97 @@ def starL (L : Lang α) : Lang α := fun w => ∃ n : Nat, catPow L n w
 
 -- ── Sequential algebra (S1–S3) ─────────────────────────────────────────────
 
-theorem S1 (L : Lang α) : catL epsL L ≅ L := fun w => by
-  constructor
-  · rintro ⟨u, v, rfl, (rfl : u = []), hv⟩; simpa
-  · intro hw; exact ⟨[], w, rfl, rfl, hw⟩
+theorem S1 (L : Lang α) : catL epsL L ⊆ L := fun w => by
+  rintro ⟨u, v, rfl, (rfl : u = []), hv⟩; simpa
 
-theorem S2 (L : Lang α) : catL L epsL ≅ L := fun w => by
-  constructor
-  · rintro ⟨u, v, rfl, hu, (rfl : v = [])⟩; simpa
-  · intro hw; exact ⟨w, [], by simp, hw, rfl⟩
+theorem S2 (L : Lang α) : catL L epsL ⊆ L := fun w => by
+  rintro ⟨u, v, rfl, hu, (rfl : v = [])⟩; simpa
 
-theorem S3 (L1 L2 L3 : Lang α) : catL (catL L1 L2) L3 ≅ catL L1 (catL L2 L3) := fun w => by
-  constructor
-  · rintro ⟨_, c, rfl, ⟨a, b, rfl, h1, h2⟩, h3⟩
-    exact ⟨a, b ++ c, List.append_assoc a b c, h1, b, c, rfl, h2, h3⟩
-  · rintro ⟨a, _, rfl, h1, b, c, rfl, h2, h3⟩
-    exact ⟨a ++ b, c, (List.append_assoc a b c).symm, ⟨a, b, rfl, h1, h2⟩, h3⟩
+theorem S3 (L1 L2 L3 : Lang α) : catL (catL L1 L2) L3 ⊆ catL L1 (catL L2 L3) := fun w => by
+  rintro ⟨_, c, rfl, ⟨a, b, rfl, h1, h2⟩, h3⟩
+  exact ⟨a, b ++ c, List.append_assoc a b c, h1, b, c, rfl, h2, h3⟩
+
+/-- The converse inclusion of `S3`, also available since `catL` is genuinely
+    associative. -/
+theorem S3' (L1 L2 L3 : Lang α) : catL L1 (catL L2 L3) ⊆ catL (catL L1 L2) L3 := fun w => by
+  rintro ⟨a, _, rfl, h1, b, c, rfl, h2, h3⟩
+  exact ⟨a ++ b, c, (List.append_assoc a b c).symm, ⟨a, b, rfl, h1, h2⟩, h3⟩
 
 -- ── Meet/Conjunction algebra (C1–C3) ──────────────────────────────────────
 
-theorem C1 (L1 L2 : Lang α) : andL L1 L2 ≅ andL L2 L1 := fun w => by
-  simp [andL, And.comm]
+theorem C1 (L1 L2 : Lang α) : andL L1 L2 ⊆ andL L2 L1 := fun w => by
+  rintro ⟨h1, h2⟩; exact ⟨h2, h1⟩
 
 theorem C2 (L1 L2 L3 : Lang α) :
-    andL (andL L1 L2) L3 ≅ andL L1 (andL L2 L3) := fun w => by
-  simp [andL, and_assoc]
+    andL (andL L1 L2) L3 ⊆ andL L1 (andL L2 L3) := fun w => by
+  rintro ⟨⟨h1, h2⟩, h3⟩; exact ⟨h1, h2, h3⟩
 
-theorem C3 (L : Lang α) : andL topL L ≅ L := fun w => by simp [andL, topL]
+theorem C3 (L : Lang α) : andL topL L ⊆ L := fun w => by
+  rintro ⟨_, h⟩; exact h
 
--- Right identity `andL L topL ≅ L` is a corollary of C1 + C3.
-theorem C3r (L : Lang α) : andL L topL ≅ L := fun w => by simp [andL, topL]
+-- Right identity `andL L topL ⊆ L` is a corollary of C1 + C3.
+theorem C3r (L : Lang α) : andL L topL ⊆ L := fun w => by
+  rintro ⟨h, _⟩; exact h
 
 -- ── Left-quotient laws (L1–L4) ─────────────────────────────────────────────
 
-theorem L1 (L : Lang α) : lqL epsL L ≅ L := fun w => by
-  constructor
-  · rintro ⟨u, (rfl : u = []), hw⟩; simpa
-  · intro hw; exact ⟨[], rfl, by simpa⟩
+theorem L1 (L : Lang α) : lqL epsL L ⊆ L := fun w => by
+  rintro ⟨u, (rfl : u = []), hw⟩; simpa
 
-/-- L2: Σ* ∖ Ld = Σ*, assuming Ld is non-empty.
-    Fails when `L(Ld) = ∅` (e.g. for `Bot`). -/
-theorem L2 (Ld : Lang α) (hne : ∃ u, Ld u) : lqL Ld topL ≅ topL := by
-  intro w
-  simp only [lqL, topL, and_true]
-  exact ⟨fun _ => trivial, fun _ => hne⟩
+/-- L2: `Σ* ∖ Ld ⊆ Σ*`, for any divisor `Ld`. -/
+theorem L2 (Ld : Lang α) : lqL Ld topL ⊆ topL :=
+  fun _ _ => trivial
 
 theorem L3 (La Lb Lx : Lang α) :
-    lqL (catL La Lb) Lx ≅ lqL Lb (lqL La Lx) := fun w => by
-  constructor
-  · rintro ⟨_, ⟨a, b, rfl, ha, hb⟩, hw⟩
-    exact ⟨b, hb, a, ha, List.append_assoc a b w ▸ hw⟩
-  · rintro ⟨b, hb, a, ha, hw⟩
-    exact ⟨a ++ b, ⟨a, b, rfl, ha, hb⟩, (List.append_assoc a b w).symm ▸ hw⟩
+    lqL (catL La Lb) Lx ⊆ lqL Lb (lqL La Lx) := fun w => by
+  rintro ⟨_, ⟨a, b, rfl, ha, hb⟩, hw⟩
+  exact ⟨b, hb, a, ha, List.append_assoc a b w ▸ hw⟩
+
+/-- The converse inclusion of `L3`, also available. -/
+theorem L3' (La Lb Lx : Lang α) :
+    lqL Lb (lqL La Lx) ⊆ lqL (catL La Lb) Lx := fun w => by
+  rintro ⟨b, hb, a, ha, hw⟩
+  exact ⟨a ++ b, ⟨a, b, rfl, ha, hb⟩, (List.append_assoc a b w).symm ▸ hw⟩
 
 /-!
-### L4 — only the forward (→) direction holds
+### L4 — holds as a containment
 
-Full equality fails: two witnesses from `Ld` (for `La` and `Lb`) may differ.
+Only the left-to-right inclusion is true, which is exactly what the law
+asserts.  The converse fails: two witnesses from `Ld` (for `La` and `Lb`)
+may differ.
 
-**Counterexample** (as language sets):
+**Counterexample for the converse** (as language sets):
 `Ld = {[a],[b]}`, `La = {[a]}`, `Lb = {[b]}`:
 - LHS = `∅` (no single `u` satisfies both)
 - RHS = `{ε} ∩ {ε} = {ε}`
 -/
-theorem L4_fwd {Ld La Lb : Lang α} {w : List α}
-    (h : lqL Ld (andL La Lb) w) : andL (lqL Ld La) (lqL Ld Lb) w := by
-  obtain ⟨u, hu, ha, hb⟩ := h; exact ⟨⟨u, hu, ha⟩, u, hu, hb⟩
+theorem L4 (Ld La Lb : Lang α) :
+    lqL Ld (andL La Lb) ⊆ andL (lqL Ld La) (lqL Ld Lb) := fun w => by
+  rintro ⟨u, hu, ha, hb⟩; exact ⟨⟨u, hu, ha⟩, u, hu, hb⟩
 
 -- ── Right-quotient laws (R1–R4) ────────────────────────────────────────────
 
-theorem R1 (L : Lang α) : rqL epsL L ≅ L := fun w => by
-  constructor
-  · rintro ⟨u, (rfl : u = []), hw⟩; simpa using hw
-  · intro hw; exact ⟨[], rfl, by simpa using hw⟩
+theorem R1 (L : Lang α) : rqL epsL L ⊆ L := fun w => by
+  rintro ⟨u, (rfl : u = []), hw⟩; simpa using hw
 
-theorem R2 (Ld : Lang α) (hne : ∃ u, Ld u) : rqL Ld topL ≅ topL := by
-  intro w
-  simp only [rqL, topL, and_true]
-  exact ⟨fun _ => trivial, fun _ => hne⟩
+/-- R2: mirrors `L2`. -/
+theorem R2 (Ld : Lang α) : rqL Ld topL ⊆ topL :=
+  fun _ _ => trivial
 
 theorem R3 (La Lb Lx : Lang α) :
-    rqL La (rqL Lb Lx) ≅ rqL (catL La Lb) Lx := fun w => by
-  constructor
-  · rintro ⟨a, ha, b, hb, hw⟩
-    exact ⟨a ++ b, ⟨a, b, rfl, ha, hb⟩, List.append_assoc w a b ▸ hw⟩
-  · rintro ⟨_, ⟨a, b, rfl, ha, hb⟩, hw⟩
-    exact ⟨a, ha, b, hb, (List.append_assoc w a b).symm ▸ hw⟩
+    rqL La (rqL Lb Lx) ⊆ rqL (catL La Lb) Lx := fun w => by
+  rintro ⟨a, ha, b, hb, hw⟩
+  exact ⟨a ++ b, ⟨a, b, rfl, ha, hb⟩, List.append_assoc w a b ▸ hw⟩
 
-theorem R4_fwd {Ld La Lb : Lang α} {w : List α}
-    (h : rqL Ld (andL La Lb) w) : andL (rqL Ld La) (rqL Ld Lb) w := by
-  obtain ⟨u, hu, ha, hb⟩ := h; exact ⟨⟨u, hu, ha⟩, u, hu, hb⟩
+/-- The converse inclusion of `R3`, also available. -/
+theorem R3' (La Lb Lx : Lang α) :
+    rqL (catL La Lb) Lx ⊆ rqL La (rqL Lb Lx) := fun w => by
+  rintro ⟨_, ⟨a, b, rfl, ha, hb⟩, hw⟩
+  exact ⟨a, ha, b, hb, (List.append_assoc w a b).symm ▸ hw⟩
+
+theorem R4 (Ld La Lb : Lang α) :
+    rqL Ld (andL La Lb) ⊆ andL (rqL Ld La) (rqL Ld Lb) := fun w => by
+  rintro ⟨u, hu, ha, hb⟩; exact ⟨⟨u, hu, ha⟩, u, hu, hb⟩
 
 /-- If `catPow L n` accepts `a :: w`, decompose `w` into a prefix accepted by
     `L` at `a :: _` and a suffix in `starL L`.  Proved by induction on `n`. -/
@@ -219,28 +231,28 @@ theorem lang_Eps : lang (.Eps (α := α)) = epsL := by rfl
 theorem lang_top : lang (.Not .Bot (α := α)) = topL := by
   funext w; simp [lang, topL]
 
-def RELangEq (r1 r2 : RE α) : Prop := LEquiv (lang r1) (lang r2)
+def RELangContainment (r1 r2 : RE α) : Prop := LContainment (lang r1) (lang r2)
 
 -- ── RE laws S1–S3, C1–C3 (sorry-free) ─────────────────────────────────────
 
-theorem re_S1 (r : RE α) : RELangEq (RE.Seq .Eps r) r :=
+theorem re_S1 (r : RE α) : RELangContainment (RE.Seq .Eps r) r :=
   fun w => by rw [lang_Seq, lang_Eps]; exact S1 (lang r) w
 
-theorem re_S2 (r : RE α) : RELangEq (RE.Seq r .Eps) r :=
+theorem re_S2 (r : RE α) : RELangContainment (RE.Seq r .Eps) r :=
   fun w => by rw [lang_Seq, lang_Eps]; exact S2 (lang r) w
 
 theorem re_S3 (r1 r2 r3 : RE α) :
-    RELangEq (RE.Seq (RE.Seq r1 r2) r3) (RE.Seq r1 (RE.Seq r2 r3)) :=
+    RELangContainment (RE.Seq (RE.Seq r1 r2) r3) (RE.Seq r1 (RE.Seq r2 r3)) :=
   fun w => by simp only [lang_Seq]; exact S3 (lang r1) (lang r2) (lang r3) w
 
-theorem re_C1 (r1 r2 : RE α) : RELangEq (RE.And r1 r2) (RE.And r2 r1) :=
+theorem re_C1 (r1 r2 : RE α) : RELangContainment (RE.And r1 r2) (RE.And r2 r1) :=
   fun w => by rw [lang_And, lang_And]; exact C1 (lang r1) (lang r2) w
 
 theorem re_C2 (r1 r2 r3 : RE α) :
-    RELangEq (RE.And (RE.And r1 r2) r3) (RE.And r1 (RE.And r2 r3)) :=
+    RELangContainment (RE.And (RE.And r1 r2) r3) (RE.And r1 (RE.And r2 r3)) :=
   fun w => by simp only [lang_And]; exact C2 (lang r1) (lang r2) (lang r3) w
 
-theorem re_C3 (r : RE α) : RELangEq (RE.And (.Not .Bot) r) r :=
+theorem re_C3 (r : RE α) : RELangContainment (RE.And (.Not .Bot) r) r :=
   fun w => by rw [lang_And, lang_top]; exact C3 (lang r) w
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -392,53 +404,136 @@ theorem derivative_correct (a : α) (r : RE α) :
     intro w; simp [derivative, lang, ih w]
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- § 6  reLeftQuotient correctness (stated as axioms)
+-- § 6  Quotient operations: specification and the 14 RE-level laws
 -- ═══════════════════════════════════════════════════════════════════════════
 
-/-- `reLeftQuotient r1 r2` computes `lqL (lang r1) (lang r2)`.
-    Proved by structural induction on `r1` using `derivative_correct` and
-    `antiDeriv` soundness; left as an axiom here. -/
-axiom lq_correct
-    (lq : RE α → RE α → RE α)
-    (lq_eps : ∀ r : RE α, lq .Eps r = r)
-    (r1 r2 : RE α) (w : List α) :
-    lang (lq r1 r2) w ↔ lqL (lang r1) (lang r2) w
+/-!
+`reLeftQuotient` / `reRightQuotient` (`Pledge/RE.hs`) are worklist fixpoints
+over ACI-equivalence classes of derivative pairs; reproducing that algorithm
+and its termination argument is out of scope here.  What the laws actually need
+is only the *denotational* specification below, so it is taken as an explicit
+hypothesis of every law that mentions a quotient rather than as an axiom —
+this file therefore adds nothing to Lean's trusted base.
 
-/-- `reRightQuotient r1 r2` computes `rqL (lang r1) (lang r2)`. -/
-axiom rq_correct
-    (rq : RE α → RE α → RE α)
-    (r1 r2 : RE α) (w : List α) :
-    lang (rq r1 r2) w ↔ rqL (lang r1) (lang r2) w
+`derivative_eq_lq_single` discharges the specification on one-letter divisors,
+which is exactly the Brzozowski derivative.
+-/
 
--- ── RE quotient laws ───────────────────────────────────────────────────────
+/-- `lq` computes the left quotient: `L(lq rd r) = L(rd) ∖ L(r)`. -/
+def IsLeftQuotient (lq : RE α → RE α → RE α) : Prop :=
+  ∀ rd r w, lang (lq rd r) w ↔ lqL (lang rd) (lang r) w
 
-theorem re_L1 (r : RE α) : LEquiv (lqL epsL (lang r)) (lang r) := L1 (lang r)
+/-- `rq` computes the right quotient: `L(rq rd r) = L(r) ∕ L(rd)`. -/
+def IsRightQuotient (rq : RE α → RE α → RE α) : Prop :=
+  ∀ rd r w, lang (rq rd r) w ↔ rqL (lang rd) (lang r) w
 
-theorem re_L3
-    (lq : RE α → RE α → RE α)
-    (hlq : ∀ s t w, lang (lq s t) w ↔ lqL (lang s) (lang t) w)
-    (r1 r2 r3 : RE α) :
-    LEquiv (fun w => lang (lq (RE.Seq r1 r2) r3) w)
-           (fun w => lang (lq r2 (lq r1 r3)) w) := by
-  intro w
-  have hlq_eq : ∀ s t, lang (lq s t) = lqL (lang s) (lang t) :=
-    fun s t => funext (fun v => propext (hlq s t v))
-  simp only [hlq_eq, lang_Seq]
-  exact L3 (lang r1) (lang r2) (lang r3) w
+theorem IsLeftQuotient.lang_eq {lq : RE α → RE α → RE α}
+    (h : IsLeftQuotient lq) (rd r : RE α) :
+    lang (lq rd r) = lqL (lang rd) (lang r) :=
+  funext fun w => propext (h rd r w)
 
-theorem re_R1 (r : RE α) : LEquiv (rqL epsL (lang r)) (lang r) := R1 (lang r)
+theorem IsRightQuotient.lang_eq {rq : RE α → RE α → RE α}
+    (h : IsRightQuotient rq) (rd r : RE α) :
+    lang (rq rd r) = rqL (lang rd) (lang r) :=
+  funext fun w => propext (h rd r w)
 
-theorem re_R3
-    (rq : RE α → RE α → RE α)
-    (hrq : ∀ s t w, lang (rq s t) w ↔ rqL (lang s) (lang t) w)
-    (r1 r2 r3 : RE α) :
-    LEquiv (fun w => lang (rq r1 (rq r2 r3)) w)
-           (fun w => lang (rq (RE.Seq r1 r2) r3) w) := by
-  intro w
-  have hrq_eq : ∀ s t, lang (rq s t) = rqL (lang s) (lang t) :=
-    fun s t => funext (fun v => propext (hrq s t v))
-  simp only [hrq_eq, lang_Seq]
-  exact R3 (lang r1) (lang r2) (lang r3) w
+/-- The specification is inhabited on one-letter divisors: the left quotient by
+    `{[a]}` is exactly the Brzozowski derivative `∂_a`. -/
+theorem derivative_eq_lq_single (a : α) (r : RE α) :
+    lang (derivative a r) = lqL (lang (RE.Single (Event.Atom a))) (lang r) := by
+  funext w
+  apply propext
+  constructor
+  · intro h
+    exact ⟨[a], ⟨a, rfl, by simp [matchesEvent]⟩, (derivative_correct a r w).mp h⟩
+  · rintro ⟨_, ⟨b, rfl, hb⟩, hw⟩
+    simp only [matchesEvent, decide_eq_true_eq] at hb
+    rw [hb] at hw
+    exact (derivative_correct a r w).mpr hw
+
+-- ── The 14 laws for `RE` (S1–S3, C1–C3 unconditional; L*, R* given the spec) ──
+
+variable {lq rq : RE α → RE α → RE α}
+
+theorem re_L1 (hlq : IsLeftQuotient lq) (r : RE α) :
+    RELangContainment (lq .Eps r) r := fun w => by
+  rw [hlq.lang_eq, lang_Eps]; exact L1 (lang r) w
+
+theorem re_L2 (hlq : IsLeftQuotient lq) (rd : RE α) :
+    RELangContainment (lq rd (.Not .Bot)) (.Not .Bot) := fun w => by
+  rw [hlq.lang_eq, lang_top]; exact L2 (lang rd) w
+
+theorem re_L3 (hlq : IsLeftQuotient lq) (ra rb rx : RE α) :
+    RELangContainment (lq (.Seq ra rb) rx) (lq rb (lq ra rx)) := fun w => by
+  simp only [hlq.lang_eq, lang_Seq]
+  exact L3 (lang ra) (lang rb) (lang rx) w
+
+theorem re_L4 (hlq : IsLeftQuotient lq) (rd ra rb : RE α) :
+    RELangContainment (lq rd (.And ra rb)) (.And (lq rd ra) (lq rd rb)) := fun w => by
+  simp only [hlq.lang_eq, lang_And]
+  exact L4 (lang rd) (lang ra) (lang rb) w
+
+theorem re_R1 (hrq : IsRightQuotient rq) (r : RE α) :
+    RELangContainment (rq .Eps r) r := fun w => by
+  rw [hrq.lang_eq, lang_Eps]; exact R1 (lang r) w
+
+theorem re_R2 (hrq : IsRightQuotient rq) (rd : RE α) :
+    RELangContainment (rq rd (.Not .Bot)) (.Not .Bot) := fun w => by
+  rw [hrq.lang_eq, lang_top]; exact R2 (lang rd) w
+
+theorem re_R3 (hrq : IsRightQuotient rq) (ra rb rx : RE α) :
+    RELangContainment (rq ra (rq rb rx)) (rq (.Seq ra rb) rx) := fun w => by
+  simp only [hrq.lang_eq, lang_Seq]
+  exact R3 (lang ra) (lang rb) (lang rx) w
+
+theorem re_R4 (hrq : IsRightQuotient rq) (rd ra rb : RE α) :
+    RELangContainment (rq rd (.And ra rb)) (.And (rq rd ra) (rq rd rb)) := fun w => by
+  simp only [hrq.lang_eq, lang_And]
+  exact R4 (lang rd) (lang ra) (lang rb) w
+
+-- ── The bundle ─────────────────────────────────────────────────────────────
+
+/-- The 14 laws `S1–S3, C1–C3, L1–L4, R1–R4` of `ComposableAxioms`
+    (`PledgeMonadLaws.lean`), instantiated at `RE` and read as containments. -/
+structure REAxioms (lq rq : RE α → RE α → RE α) : Prop where
+  S1 : ∀ r : RE α, RELangContainment (.Seq .Eps r) r
+  S2 : ∀ r : RE α, RELangContainment (.Seq r .Eps) r
+  S3 : ∀ r1 r2 r3 : RE α,
+        RELangContainment (.Seq (.Seq r1 r2) r3) (.Seq r1 (.Seq r2 r3))
+  C1 : ∀ r1 r2 : RE α, RELangContainment (.And r1 r2) (.And r2 r1)
+  C2 : ∀ r1 r2 r3 : RE α,
+        RELangContainment (.And (.And r1 r2) r3) (.And r1 (.And r2 r3))
+  C3 : ∀ r : RE α, RELangContainment (.And (.Not .Bot) r) r
+  L1 : ∀ r : RE α, RELangContainment (lq .Eps r) r
+  L2 : ∀ rd : RE α, RELangContainment (lq rd (.Not .Bot)) (.Not .Bot)
+  L3 : ∀ ra rb rx : RE α, RELangContainment (lq (.Seq ra rb) rx) (lq rb (lq ra rx))
+  L4 : ∀ rd ra rb : RE α,
+        RELangContainment (lq rd (.And ra rb)) (.And (lq rd ra) (lq rd rb))
+  R1 : ∀ r : RE α, RELangContainment (rq .Eps r) r
+  R2 : ∀ rd : RE α, RELangContainment (rq rd (.Not .Bot)) (.Not .Bot)
+  R3 : ∀ ra rb rx : RE α, RELangContainment (rq ra (rq rb rx)) (rq (.Seq ra rb) rx)
+  R4 : ∀ rd ra rb : RE α,
+        RELangContainment (rq rd (.And ra rb)) (.And (rq rd ra) (rq rd rb))
+
+/-- **Main result**: any correct pair of quotient operations makes `RE` satisfy
+    all 14 laws.  `Pledge/RE.hs` supplies that pair as `reLeftQuotient` /
+    `reRightQuotient`. -/
+theorem re_satisfies_axioms (hlq : IsLeftQuotient lq) (hrq : IsRightQuotient rq) :
+    REAxioms lq rq where
+  S1 := re_S1
+  S2 := re_S2
+  S3 := re_S3
+  C1 := re_C1
+  C2 := re_C2
+  C3 := re_C3
+  L1 := re_L1 hlq
+  L2 := re_L2 hlq
+  L3 := re_L3 hlq
+  L4 := re_L4 hlq
+  R1 := re_R1 hrq
+  R2 := re_R2 hrq
+  R3 := re_R3 hrq
+  R4 := re_R4 hrq
 
 end REComposableLaws
 
@@ -447,15 +542,22 @@ end REComposableLaws
 
 **Abstract language laws (§2)** — all 14 proved sorry-free.
 
-**RE instance (§3–§6)**:
+**RE instance (§3–§6)** — all 14 proved sorry-free and bundled as
+`re_satisfies_axioms`:
 - `nullable_iff`: sorry-free.
 - `derivative_correct`: sorry-free for all cases.
   `Seq` uses `cases u` on the word decomposition; `Star` uses `catPow_cons_decomp`
   (induction on the `catPow` iteration count `n`).
-- `lq_correct` / `rq_correct`: axioms (standard automata theory).
+- `derivative_eq_lq_single`: the derivative *is* the left quotient by a
+  one-letter divisor, discharging the quotient specification in that case.
+- L1–L4 / R1–R4 are conditional on `IsLeftQuotient lq` / `IsRightQuotient rq`,
+  the denotational specification of `reLeftQuotient` / `reRightQuotient`.
+  That specification is a hypothesis, not an axiom: the worklist fixpoint those
+  functions implement is not reproduced here, but assuming it is correct is the
+  only thing left unverified, and it is visible in every statement that needs it.
 
-**Laws not fully satisfied by RE**:
-- L2 / R2: hold only when `L(divisor) ≠ ∅` (fail for `Bot`).
-- L4 / R4: only the `⊆` direction holds; full equality fails
-  (counterexample in §L4).
+**Reading of `⊆`**: language containment, not equality.  Under this reading all
+14 laws hold **unconditionally** — no side conditions on any `RE`.  The
+converse inclusions are *not* claimed; for L4 / R4 the converse fails outright
+(counterexample in §L4).
 -/

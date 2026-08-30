@@ -103,10 +103,12 @@
 \email{author@institution.edu}
 
 \begin{abstract}
-An acquired mutex must eventually be released.
-An opened handle must eventually be closed, on every path.
-Pre- and post-conditions cannot say this: the discharge point lies in code
-that has not been written yet.
+Pre- and post-conditions are the standard vocabulary for modular program specification, yet they are silent about obligations that span multiple calls.
+In real Haskell code such obligations are ubiquitous: an acquired mutex must eventually be released.
+An opened handle must eventually be closed.
+A pre/post pair on the acquiring operation cannot express these properties,
+because the balancing operation lies in an unknown future context, tracking it means
+threading auxiliary state by hand through every intermediate bind.
 
 We present \emph{Pledge}, a Haskell library in which such obligations are
 ordinary values.
@@ -116,8 +118,6 @@ One bind formula propagates all three by \emph{quotient}: binding strips
 from a pending obligation whatever the continuation actually delivers.
 What is left over --- the \emph{residual} --- names precisely what the
 program still owes.
-Preconditions need no separate machinery: they are future conditions read
-backwards, and the two quotients are one operation under time reversal.
 
 The formula needs only six operations, which we instantiate four ways:
 regular expressions with complement, where the quotient is computed by
@@ -134,7 +134,7 @@ satisfy them --- conditions the obvious way of writing an annotation
 quietly violates, silently reporting a violated contract for a correct
 program.
 A soundness theorem completes the picture: a discharged residual entails
-that every terminating trace meets its obligations.
+that the trace the run emitted met every obligation its primitives named.
 Because the underlying monad is arbitrary, the residual describes the path
 a program actually took and can be computed beside a real effect handler,
 which we demonstrate on top of the \lstinline{effectful} library.
@@ -186,12 +186,13 @@ Consider three scenarios from the Haskell ecosystem:
 \emph{(i) Mutex discipline.}
 An \lstinline{acquire(m)} must eventually be followed by
 \lstinline{release(m)} on every code path.
-A post-condition records the acquired state but cannot require a future
-\lstinline{release}.
+A post-condition on \lstinline{acquire} records the acquired state, but the
+\lstinline{release} that discharges it lies outside the scope that
+post-condition describes.
 \emph{(ii) Database savepoints.}
 A \lstinline{beginTx} must eventually be committed or rolled back; a
-pre/post pair on the call cannot carry this obligation forward through
-intermediate code.
+pre/post pair on the call does not carry that obligation forward through the
+intermediate code, so it must be re-stated by hand at every step in between.
 \emph{(iii) File handles.}
 Opening a file in read-mode must be followed by a close, and no write
 operation may be issued until a write-mode open has been posted.
@@ -202,8 +203,10 @@ propagate obligations beyond the lexical scope.
 \lstinline{ResourceT}~\cite{snoyman2011resourcet} threads cleanup through
 every bind but models only the cleanup half of an obligation, discharging
 it uniformly at scope exit.
-Linear Haskell~\cite{bernardy2018linear} enforces ``consume exactly once''
-but cannot express branching discharge or quantitative obligations.
+Linear Haskell~\cite{bernardy2018linear} enforces ``consume exactly once'',
+which does force discharge along every branch, but the obligation is
+structural: it fixes \emph{that} a resource is consumed, not the order of the
+operations leading there, and carries no quantitative reading.
 Parameterised and indexed monads~\cite{atkey2009} encode protocol states at
 the type level but require non-standard syntax and are confined to a single
 domain.
@@ -406,8 +409,8 @@ we give four base instances:
 
   \item \textbf{A soundness theorem} for the $\RE$ instance
         (\S\ref{sec:soundness}): a fully discharged residual entails that
-        every terminating trace of the program satisfies every obligation
-        its primitives name.
+        the trace the program emitted satisfies every obligation its
+        primitives name.
 
   \item \textbf{Evidence that the design works on real code}
         (\S\ref{sec:effects}, \S\ref{sec:examples}).

@@ -46,8 +46,8 @@ class Composable a where
 instance (Composable a, Composable b) => Composable (a, b) where
     concatenation (a1, b1) (a2, b2) = (concatenation a1 a2, concatenation b1 b2)
     conjunction   (a1, b1) (a2, b2) = (conjunction   a1 a2, conjunction   b1 b2)
-    leftQuotient  (a1, b1) (a2, b2) = (leftQuotient   a1 a2, leftQuotient   b1 b2)
-    rightQuotient (a1, b1) (a2, b2) = (rightQuotient   a1 a2, rightQuotient   b1 b2)
+    leftQuotient  (a1, b1) (a2, b2) = (leftQuotient  a1 a2, leftQuotient  b1 b2)
+    rightQuotient (a1, b1) (a2, b2) = (rightQuotient a1 a2, rightQuotient b1 b2)
     empty                           = (empty, empty)
     universe                        = (universe, universe)
 

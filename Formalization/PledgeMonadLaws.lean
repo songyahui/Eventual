@@ -134,8 +134,12 @@ structure Pledge (eff : Type) [Composable eff] (α : Type) : Type where
 
 @[ext]
 theorem Pledge.ext [Composable eff] {p q : Pledge eff α}
-    (hr : p.ret = q.ret) (hp : p.pre = q.pre)
-    (hq : p.post = q.post) (hf : p.future = q.future) : p = q := by
+    (hr : p.ret = q.ret)
+    (hp : p.pre = q.pre)
+    (hq : p.post = q.post)
+    (hf : p.future = q.future) :
+    p = q
+    := by
   cases p; cases q; simp_all
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -189,9 +193,9 @@ Let `p = (a, P, Q, F)`.
 
 | component | expression              | steps                                  |
 |-----------|-------------------------|----------------------------------------|
-| pre       | `P ∧ (⊤ ∕ Q)`          | `= P ∧ ⊤ = ⊤ ∧ P = P`   R2, C1, C3   |
-| post      | `Q ⋄ ε`                | `= Q`                    S2            |
-| future    | `(F ∖ ε) ∧ ⊤`          | `= F ∧ ⊤ = ⊤ ∧ F = F`   L1, C1, C3   |
+| pre       | `P ∧ (⊤ ∕ Q)`           | `= P ∧ ⊤ = ⊤ ∧ P = P`   R2, C1, C3   |
+| post      | `Q ⋄ ε`                 | `= Q`                    S2            |
+| future    | `(F ∖ ε) ∧ ⊤`           | `= F ∧ ⊤ = ⊤ ∧ F = F`   L1, C1, C3   |
 -/
 theorem pledge_right_id (ax : ComposableAxioms eff) (p : Pledge eff α) :
     Pledge.bind p Pledge.pure = p := by
@@ -271,20 +275,8 @@ theorem pledge_assoc
 | `pledge_right_id`  | ✓           | S2, C1, C3, L1, R2           |
 | `pledge_assoc`     | ✓           | S3, C2, L3, L4, R3, R4       |
 
-All three proofs are `sorry`-free.  `Ccomm` is not required: the corrected
-L3 (`x ∖ (a⋄b) = (x∖a) ∖ b`) handles the `future` associativity step directly.
+All three proofs are `sorry`-free.
 
-## Changes from previous version
-
-- `res` renamed to `lq` (left-quotient); `rqOp` added (right-quotient).
-- Notation convention: `r ∖ s` has dividend `r` on the left (matches Core.hs `a ∖ b = leftQuotient b a`).
-- Bind `future` updated to `p.future ∖ gp.post` (dividend first); `pre` uses `∕` (right-quotient).
-- L1–L4 restated in dividend-left form: `a ∖ emp`, `univ ∖ r`, `x ∖ (a⋄b) = (x∖a)∖b`, `(a∧b)∖c`.
-- L3 corrected to `x ∖ (a⋄b) = (x∖a) ∖ b` (left-quotient sequential law).
-- `Ccomm` axiom removed (was only needed to paper over the wrong L3 direction).
-- R1–R4 axioms added for the right-quotient `∕`.
-- Law 1/2 pre proofs now cite R1/R2 instead of L1/L2.
-- Axioms regrouped: S1–S3 (sequential), C1–C3 (meet), L1–L4 (left-quotient), R1–R4 (right-quotient).
 -/
 
 end PledgeMonad

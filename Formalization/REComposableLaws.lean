@@ -1,21 +1,33 @@
 /-!
 # REComposableLaws.lean
 
-Formal proofs that `RE` (from `Pledge/RE.hs`) satisfies the 14 algebraic laws
-(`S1–S3, C1–C3, L1–L4, R1–R4`) required for the Pledge monad laws, stated
-as **language containments** (`LContainment`).
+Companion to `PledgeMonadLaws.lean`: that file proves the Pledge monad laws
+from 14 *abstract* `ComposableAxioms` over an opaque `eff`; this file discharges
+those 14 for the concrete `instance Composable (RE t)` of `Pledge/RE.hs`
+(`concatenation = Seq`, `conjunction = And`, `empty = Epsilon`,
+`universe = top`, `leftQuotient = reLeftQuotient`,
+`rightQuotient = reRightQuotient`).
 
-`LContainment L1 L2`, written `L1 ⊆ L2`, is the one-way inclusion
-`∀ w, L1 w → L2 w`, not bi-implication.  Every law below is read left-to-right
-only; where the converse inclusion also happens to hold it is given separately
-(`S3'`, `L3'`, `R3'`).
+Two readings of each law are given:
 
-Each law is proved twice: abstractly over languages (§2), and for the `RE`
-syntax itself (§6), the latter bundled as `re_satisfies_axioms : REAxioms lq rq`.
-The eight quotient laws take the correctness of the quotient operations
-(`IsLeftQuotient` / `IsRightQuotient`, the specification of `reLeftQuotient` /
-`reRightQuotient`) as an explicit hypothesis; nothing is axiomatised, so
-`#print axioms re_satisfies_axioms` reports only `propext` and `Quot.sound`.
+* **§2, §6 — containment** (`LContainment`, written `L1 ⊆ L2`, the one-way
+  `∀ w, L1 w → L2 w`).  Under this reading all 14 hold *unconditionally*,
+  bundled as `re_satisfies_axioms : REAxioms lq rq`.  The quotient laws take
+  the spec of `reLeftQuotient` / `reRightQuotient` (`IsLeftQuotient` /
+  `IsRightQuotient`) as an explicit hypothesis — nothing is axiomatised.
+
+* **§7 — equality** (`RELEq`, language equality, `∀ w, L1 w ↔ L2 w`).  This is
+  the reading `ComposableAxioms` actually demands (`PledgeMonadLaws` `rw`s with
+  each law).  Bundled as `Eq7.re_equality_laws : Eq7.REEqualityLaws lq rq`.
+  **Here the RE implementation does *not* give every law for free**:
+  `L2 R2` fail unless the divisor is satisfiable, `L4 R4` fail unless the
+  divisor denotes a single word — each shipped with an explicit
+  `Eq7.re_*_not_equality` counterexample and an `iff` / side-condition
+  characterisation.  Only `L1` (and `R1`, modulo `revRE` involution) is
+  syntactic; `S3 C1 C2` need the language reading; `L3 R3` additionally need
+  the quotient spec.
+
+`#print axioms` reports only `propext`, `Quot.sound` throughout.
 
 ## Status
 
@@ -35,6 +47,18 @@ The eight quotient laws take the correctness of the quotient operations
 | R2  | `R2`      | `re_R2` | mirrors L2                                  |
 | R3  | `R3`      | `re_R3` | mirrors L3 (converse: `R3'`)                |
 | R4  | `R4`      | `re_R4` | mirrors L4                                  |
+
+§7 (equality reading) — which laws are *not* free from `Pledge/RE.hs`:
+
+| Law         | §7 result                            | free? |
+|-------------|--------------------------------------|-------|
+| `L1`        | `re_L1_structural` (`lq Epsilon = id`)| syntactic |
+| `R1`        | `re_R1_structural` (`revRE_involutive`)| syntactic |
+| `S1 S2 C3`  | `re_{S1,S2,C3}_eq`                    | language eq; `normalize` recovers it |
+| `S3 C1 C2`  | `re_{S3,C1,C2}_eq`                    | language eq only — `normalize` does not |
+| `L3 R3`     | `re_{L3,R3}_eq`                       | + needs `IsLeftQuotient`/`IsRightQuotient` |
+| `L2 R2`     | `re_L2_iff` / `re_L2_not_equality`   | **no** — needs `∃ w, lang divisor w` |
+| `L4 R4`     | `re_L4_of_subsingleton` / `re_L4_not_equality` | **no** — needs divisor ⊨ ≤ 1 word |
 -/
 
 namespace REComposableLaws
@@ -535,6 +559,300 @@ theorem re_satisfies_axioms (hlq : IsLeftQuotient lq) (hrq : IsRightQuotient rq)
   R3 := re_R3 hrq
   R4 := re_R4 hrq
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- § 7  Equality vs containment — which axioms hold "for free"
+-- ═══════════════════════════════════════════════════════════════════════════
+
+/-!
+`ComposableAxioms` in `PledgeMonadLaws.lean` states every law as a Lean
+**equality** `a = b` on the effect type, and the monad-law proofs `rw` with
+them.  Containment (§2, §6) is therefore *not sufficient on its own*: the
+Pledge monad laws hold for `eff = RE t` exactly as strongly as the 14 laws
+hold **as equalities**.
+
+This section pins that strength down, law by law, against the concrete
+`instance Composable (RE t)` in `Pledge/RE.hs`
+(`concatenation = Seq`, `conjunction = And`, `empty = Epsilon`,
+`universe = top = Not Bot`, `leftQuotient = reLeftQuotient`,
+`rightQuotient = reRightQuotient`).  Four tiers appear:
+
+| tier | laws | meaning |
+|------|------|---------|
+| **structural**    | `L1`, `R1`                 | syntactic identity of the `RE` value the Haskell returns — holds for the derived `Eq` |
+| **denotational**  | `S1 S2 S3 C1 C2 C3`        | both sides denote the same language (`RELEq`) but are different `RE` values; `normalize` closes the gap for `S1 S2 C3` only |
+| **conditional**   | `L3 R3`                    | equality of languages, *provided* `reLeftQuotient`/`reRightQuotient` compute the true quotient (`IsLeftQuotient`/`IsRightQuotient`) |
+| **fails in general** | `L2 R2 L4 R4`           | **not** equalities — only containments; each recovers equality only under an extra side condition, made explicit below |
+
+The `Pledge`-level consequence: after a `>>=` the `pre`/`post`/`fut` fields of
+`Pledge m (RE t) a` are only *language-equivalent* to the monad-law RHS, never
+equal `RE` values (`S3 C1 C2`), and for `L2 R2 L4 R4` they agree only when the
+postcondition acting as divisor is a *satisfiable, single* event trace — which
+is what `Pledge/RE.hs` in fact produces (`post` starts at `ε` and grows by
+`Seq` over concrete emitted events), but which is not forced by the types.
+-/
+
+namespace Eq7
+
+set_option linter.unusedSectionVars false
+
+variable {α : Type} [DecidableEq α]
+open REComposableLaws
+
+/-- Language equality — the reading of `=` under which the Pledge laws hold. -/
+def RELEq (r1 r2 : RE α) : Prop := ∀ w, lang r1 w ↔ lang r2 w
+
+-- ── Denotational tier: S1–S3, C1–C3 hold as full language equalities ───────
+
+theorem re_S1_eq (r : RE α) : RELEq (.Seq .Eps r) r := by
+  intro w; rw [lang_Seq, lang_Eps]
+  exact ⟨S1 (lang r) w, fun hw => ⟨[], w, rfl, rfl, hw⟩⟩
+
+theorem re_S2_eq (r : RE α) : RELEq (.Seq r .Eps) r := by
+  intro w; rw [lang_Seq, lang_Eps]
+  exact ⟨S2 (lang r) w, fun hw => ⟨w, [], (List.append_nil w).symm, hw, rfl⟩⟩
+
+theorem re_S3_eq (r1 r2 r3 : RE α) :
+    RELEq (.Seq (.Seq r1 r2) r3) (.Seq r1 (.Seq r2 r3)) := by
+  intro w; simp only [lang_Seq]
+  exact ⟨S3 (lang r1) (lang r2) (lang r3) w, S3' (lang r1) (lang r2) (lang r3) w⟩
+
+theorem re_C1_eq (r1 r2 : RE α) : RELEq (.And r1 r2) (.And r2 r1) := by
+  intro w; simp only [lang_And, andL]
+  exact ⟨fun h => ⟨h.2, h.1⟩, fun h => ⟨h.2, h.1⟩⟩
+
+theorem re_C2_eq (r1 r2 r3 : RE α) :
+    RELEq (.And (.And r1 r2) r3) (.And r1 (.And r2 r3)) := by
+  intro w; simp only [lang_And, andL]
+  exact ⟨fun h => ⟨h.1.1, h.1.2, h.2⟩, fun h => ⟨⟨h.1, h.2.1⟩, h.2.2⟩⟩
+
+theorem re_C3_eq (r : RE α) : RELEq (.And (.Not .Bot) r) r := by
+  intro w; simp only [lang_And, lang_top, andL, topL, true_and]
+
+/-- `S3 C1 C2` are *not* syntactic even after `normalize`: it neither
+    reassociates `Seq` nor reorders `And`.  Illustration for `C1` / `S1`. -/
+example : (RE.Seq RE.Eps (RE.Single (Event.Atom 0)) : RE Nat)
+            ≠ RE.Single (Event.Atom 0) := by decide
+example : (RE.And (RE.Single (Event.Atom 0)) (RE.Single (Event.Atom 1)) : RE Nat)
+            ≠ RE.And (RE.Single (Event.Atom 1)) (RE.Single (Event.Atom 0)) := by decide
+
+-- ── Structural tier: L1 (definitional), R1 (via `revRE` involution) ────────
+
+/-- The first defining equation of `reLeftQuotient` (`Pledge/RE.hs`):
+    `reLeftQuotient Epsilon r2 = r2`. -/
+def LeftQuotientEpsId (lq : RE α → RE α → RE α) : Prop := ∀ r, lq .Eps r = r
+
+/-- Model of `revRE` from `Pledge/RE.hs`. -/
+def revRE : RE α → RE α
+  | .Bot        => .Bot
+  | .Eps        => .Eps
+  | .Single e   => .Single e
+  | .Seq r1 r2  => .Seq (revRE r2) (revRE r1)
+  | .Or  r1 r2  => .Or  (revRE r1) (revRE r2)
+  | .And r1 r2  => .And (revRE r1) (revRE r2)
+  | .Star r     => .Star (revRE r)
+  | .Not r      => .Not (revRE r)
+
+/-- `reRightQuotient r1 r2 = revRE (reLeftQuotient (revRE r1) (revRE r2))`
+    (`Pledge/RE.hs`). -/
+def RightQuotientViaRev (rq lq : RE α → RE α → RE α) : Prop :=
+  ∀ r1 r2, rq r1 r2 = revRE (lq (revRE r1) (revRE r2))
+
+theorem revRE_involutive : ∀ r : RE α, revRE (revRE r) = r := by
+  intro r
+  induction r with
+  | Bot => rfl
+  | Eps => rfl
+  | Single e => rfl
+  | Seq r1 r2 ih1 ih2 => simp only [revRE, ih1, ih2]
+  | Or  r1 r2 ih1 ih2 => simp only [revRE, ih1, ih2]
+  | And r1 r2 ih1 ih2 => simp only [revRE, ih1, ih2]
+  | Star r ih => simp only [revRE, ih]
+  | Not  r ih => simp only [revRE, ih]
+
+/-- **L1 is structural**: `reLeftQuotient Epsilon r = r` on the nose. -/
+theorem re_L1_structural {lq : RE α → RE α → RE α}
+    (heps : LeftQuotientEpsId lq) (r : RE α) : lq .Eps r = r := heps r
+
+/-- **R1 is structural** modulo the (proved) involution `revRE ∘ revRE = id`. -/
+theorem re_R1_structural {lq rq : RE α → RE α → RE α}
+    (hrev : RightQuotientViaRev rq lq) (heps : LeftQuotientEpsId lq) (r : RE α) :
+    rq .Eps r = r := by
+  have h0 : revRE (.Eps : RE α) = .Eps := rfl
+  rw [hrev .Eps r, h0, heps (revRE r), revRE_involutive]
+
+-- ── Conditional tier: L3, R3 are language equalities given the quotient spec ─
+
+theorem re_L3_eq {lq : RE α → RE α → RE α} (hlq : IsLeftQuotient lq)
+    (ra rb rx : RE α) : RELEq (lq (.Seq ra rb) rx) (lq rb (lq ra rx)) := by
+  intro w; simp only [hlq.lang_eq, lang_Seq]
+  exact ⟨L3 (lang ra) (lang rb) (lang rx) w, L3' (lang ra) (lang rb) (lang rx) w⟩
+
+theorem re_R3_eq {rq : RE α → RE α → RE α} (hrq : IsRightQuotient rq)
+    (ra rb rx : RE α) : RELEq (rq ra (rq rb rx)) (rq (.Seq ra rb) rx) := by
+  intro w; simp only [hrq.lang_eq, lang_Seq]
+  exact ⟨R3 (lang ra) (lang rb) (lang rx) w, R3' (lang ra) (lang rb) (lang rx) w⟩
+
+-- ── Failing tier: L2 / R2 need a satisfiable divisor ──────────────────────
+
+/-- **L2 as an equality holds *iff* the divisor's language is non-empty.**
+    `universe ∖ r = universe` says "some prefix in `L(r)` can be stripped";
+    with `L(r) = ∅` there is none and the quotient collapses to `∅`. -/
+theorem re_L2_iff {lq : RE α → RE α → RE α} (hlq : IsLeftQuotient lq) (rd : RE α) :
+    RELEq (lq rd (.Not .Bot)) (.Not .Bot) ↔ ∃ w, lang rd w := by
+  constructor
+  · intro h
+    have hx := (h []).mpr (by rw [lang_top]; trivial)
+    rw [hlq.lang_eq] at hx
+    obtain ⟨u, hu, _⟩ := hx
+    exact ⟨u, hu⟩
+  · rintro ⟨v, hv⟩ w
+    rw [hlq.lang_eq, lang_top]
+    exact ⟨fun _ => trivial, fun _ => ⟨v, hv, trivial⟩⟩
+
+/-- Concrete failure of `L2` as an equality: `reLeftQuotient ∅ Σ* = ∅ ≠ Σ*`. -/
+theorem re_L2_not_equality {lq : RE α → RE α → RE α} (hlq : IsLeftQuotient lq) :
+    ¬ RELEq (lq (.Bot : RE α) (.Not .Bot)) (.Not .Bot) := by
+  rw [re_L2_iff hlq]; rintro ⟨w, hw⟩; exact hw
+
+/-- **R2** mirrors **L2**: equality iff the divisor is satisfiable. -/
+theorem re_R2_iff {rq : RE α → RE α → RE α} (hrq : IsRightQuotient rq) (rd : RE α) :
+    RELEq (rq rd (.Not .Bot)) (.Not .Bot) ↔ ∃ w, lang rd w := by
+  constructor
+  · intro h
+    have hx := (h []).mpr (by rw [lang_top]; trivial)
+    rw [hrq.lang_eq] at hx
+    obtain ⟨u, hu, _⟩ := hx
+    exact ⟨u, hu⟩
+  · rintro ⟨v, hv⟩ w
+    rw [hrq.lang_eq, lang_top]
+    exact ⟨fun _ => trivial, fun _ => ⟨v, hv, trivial⟩⟩
+
+theorem re_R2_not_equality {rq : RE α → RE α → RE α} (hrq : IsRightQuotient rq) :
+    ¬ RELEq (rq (.Bot : RE α) (.Not .Bot)) (.Not .Bot) := by
+  rw [re_R2_iff hrq]; rintro ⟨w, hw⟩; exact hw
+
+-- ── Failing tier: L4 / R4 need a deterministic (≤ 1 word) divisor ──────────
+
+/-- **L4 as an equality holds when the divisor denotes at most one word.**
+    This is exactly the shape of a `Pledge` postcondition — an exact trace of
+    emitted events — so `L4` is available *in practice* though not from the
+    type. -/
+theorem re_L4_of_subsingleton {lq : RE α → RE α → RE α} (hlq : IsLeftQuotient lq)
+    (rd ra rb : RE α) (hdet : ∀ u u', lang rd u → lang rd u' → u = u') :
+    RELEq (lq rd (.And ra rb)) (.And (lq rd ra) (lq rd rb)) := by
+  intro w; simp only [hlq.lang_eq, lang_And, lqL, andL]
+  constructor
+  · rintro ⟨u, hu, ha, hb⟩; exact ⟨⟨u, hu, ha⟩, ⟨u, hu, hb⟩⟩
+  · rintro ⟨⟨u, hu, ha⟩, ⟨u', hu', hb⟩⟩
+    obtain rfl := hdet u u' hu hu'
+    exact ⟨u, hu, ha, hb⟩
+
+/-- Concrete failure of `L4` as an equality.  Divisor `{[0],[1]}` branches:
+    `{[0],[1]} ∖ ({[0]} ∩ {[1]}) = ∅`, but
+    `({[0],[1]} ∖ {[0]}) ∩ ({[0],[1]} ∖ {[1]}) = {ε} ∩ {ε} = {ε}`. -/
+theorem re_L4_not_equality {lq : RE Nat → RE Nat → RE Nat} (hlq : IsLeftQuotient lq) :
+    ¬ (∀ rd ra rb : RE Nat,
+        RELEq (lq rd (.And ra rb)) (.And (lq rd ra) (lq rd rb))) := by
+  intro h
+  have hR : lang (RE.And
+      (lq (.Or (.Single (.Atom 0)) (.Single (.Atom 1))) (.Single (.Atom 0)))
+      (lq (.Or (.Single (.Atom 0)) (.Single (.Atom 1))) (.Single (.Atom 1)))) [] := by
+    simp only [lang_And, hlq.lang_eq, andL, lqL]
+    exact ⟨⟨[0], Or.inl ⟨0, rfl, rfl⟩, ⟨0, rfl, rfl⟩⟩,
+           ⟨[1], Or.inr ⟨1, rfl, rfl⟩, ⟨1, rfl, rfl⟩⟩⟩
+  have hL := (h _ _ _ []).mpr hR
+  rw [hlq.lang_eq] at hL
+  simp only [lang_And, andL, lqL] at hL
+  obtain ⟨u, _, ha, hb⟩ := hL
+  obtain ⟨x, hx, hx0⟩ := ha
+  obtain ⟨y, hy, hy1⟩ := hb
+  rw [hx] at hy; injection hy with hxy; subst hxy
+  simp only [matchesEvent, decide_eq_true_eq] at hx0 hy1
+  omega
+
+/-- **R4** mirrors **L4**. -/
+theorem re_R4_of_subsingleton {rq : RE α → RE α → RE α} (hrq : IsRightQuotient rq)
+    (rd ra rb : RE α) (hdet : ∀ u u', lang rd u → lang rd u' → u = u') :
+    RELEq (rq rd (.And ra rb)) (.And (rq rd ra) (rq rd rb)) := by
+  intro w; simp only [hrq.lang_eq, lang_And, rqL, andL]
+  constructor
+  · rintro ⟨u, hu, ha, hb⟩; exact ⟨⟨u, hu, ha⟩, ⟨u, hu, hb⟩⟩
+  · rintro ⟨⟨u, hu, ha⟩, ⟨u', hu', hb⟩⟩
+    obtain rfl := hdet u u' hu hu'
+    exact ⟨u, hu, ha, hb⟩
+
+theorem re_R4_not_equality {rq : RE Nat → RE Nat → RE Nat} (hrq : IsRightQuotient rq) :
+    ¬ (∀ rd ra rb : RE Nat,
+        RELEq (rq rd (.And ra rb)) (.And (rq rd ra) (rq rd rb))) := by
+  intro h
+  have hR : lang (RE.And
+      (rq (.Or (.Single (.Atom 0)) (.Single (.Atom 1))) (.Single (.Atom 0)))
+      (rq (.Or (.Single (.Atom 0)) (.Single (.Atom 1))) (.Single (.Atom 1)))) [] := by
+    simp only [lang_And, hrq.lang_eq, andL, rqL]
+    exact ⟨⟨[0], Or.inl ⟨0, rfl, rfl⟩, ⟨0, rfl, rfl⟩⟩,
+           ⟨[1], Or.inr ⟨1, rfl, rfl⟩, ⟨1, rfl, rfl⟩⟩⟩
+  have hL := (h _ _ _ []).mpr hR
+  rw [hrq.lang_eq] at hL
+  simp only [lang_And, andL, rqL] at hL
+  obtain ⟨u, _, ha, hb⟩ := hL
+  obtain ⟨x, hx, hx0⟩ := ha
+  obtain ⟨y, hy, hy1⟩ := hb
+  rw [hx] at hy; injection hy with hxy; subst hxy
+  simp only [matchesEvent, decide_eq_true_eq] at hx0 hy1
+  omega
+
+-- ── The honest bundle ─────────────────────────────────────────────────────
+
+/-- The 14 `ComposableAxioms` laws, instantiated at `RE` and read with `=` as
+    **language equality**, with the side conditions that `Pledge/RE.hs` cannot
+    discharge from the types made explicit as hypotheses on `L2 R2 L4 R4`.
+    `S1–S3 C1–C3` are unconditional; `L1 R1` are syntactic; `L3 R3` need only
+    the quotient specification. -/
+structure REEqualityLaws (lq rq : RE α → RE α → RE α) : Prop where
+  S1 : ∀ r : RE α, RELEq (.Seq .Eps r) r
+  S2 : ∀ r : RE α, RELEq (.Seq r .Eps) r
+  S3 : ∀ r1 r2 r3 : RE α, RELEq (.Seq (.Seq r1 r2) r3) (.Seq r1 (.Seq r2 r3))
+  C1 : ∀ r1 r2 : RE α, RELEq (.And r1 r2) (.And r2 r1)
+  C2 : ∀ r1 r2 r3 : RE α, RELEq (.And (.And r1 r2) r3) (.And r1 (.And r2 r3))
+  C3 : ∀ r : RE α, RELEq (.And (.Not .Bot) r) r
+  L1 : ∀ r : RE α, lq .Eps r = r
+  L2 : ∀ rd : RE α, (∃ w, lang rd w) → RELEq (lq rd (.Not .Bot)) (.Not .Bot)
+  L3 : ∀ ra rb rx : RE α, RELEq (lq (.Seq ra rb) rx) (lq rb (lq ra rx))
+  L4 : ∀ rd ra rb : RE α, (∀ u u', lang rd u → lang rd u' → u = u') →
+         RELEq (lq rd (.And ra rb)) (.And (lq rd ra) (lq rd rb))
+  R1 : ∀ r : RE α, rq .Eps r = r
+  R2 : ∀ rd : RE α, (∃ w, lang rd w) → RELEq (rq rd (.Not .Bot)) (.Not .Bot)
+  R3 : ∀ ra rb rx : RE α, RELEq (rq ra (rq rb rx)) (rq (.Seq ra rb) rx)
+  R4 : ∀ rd ra rb : RE α, (∀ u u', lang rd u → lang rd u' → u = u') →
+         RELEq (rq rd (.And ra rb)) (.And (rq rd ra) (rq rd rb))
+
+/-- **Main result of §7.**  Given a correct quotient pair (`IsLeftQuotient` /
+    `IsRightQuotient`) with the two defining equations `Pledge/RE.hs` supplies
+    for free (`lq Epsilon = id`, `rq = revRE ∘ lq ∘ revRE`), `RE` satisfies all
+    14 laws as equalities — under the stated side conditions for `L2 R2 L4 R4`,
+    which are exactly the cases where the RE implementation does *not* give the
+    axiom for free. -/
+theorem re_equality_laws {lq rq : RE α → RE α → RE α}
+    (hlq : IsLeftQuotient lq) (hrq : IsRightQuotient rq)
+    (heps : LeftQuotientEpsId lq) (hrev : RightQuotientViaRev rq lq) :
+    REEqualityLaws lq rq where
+  S1 := re_S1_eq
+  S2 := re_S2_eq
+  S3 := re_S3_eq
+  C1 := re_C1_eq
+  C2 := re_C2_eq
+  C3 := re_C3_eq
+  L1 := heps
+  L2 := fun rd hne => (re_L2_iff hlq rd).mpr hne
+  L3 := re_L3_eq hlq
+  L4 := fun rd ra rb hdet => re_L4_of_subsingleton hlq rd ra rb hdet
+  R1 := fun r => re_R1_structural hrev heps r
+  R2 := fun rd hne => (re_R2_iff hrq rd).mpr hne
+  R3 := re_R3_eq hrq
+  R4 := fun rd ra rb hdet => re_R4_of_subsingleton hrq rd ra rb hdet
+
+end Eq7
+
 end REComposableLaws
 
 /-!
@@ -560,4 +878,23 @@ end REComposableLaws
 14 laws hold **unconditionally** — no side conditions on any `RE`.  The
 converse inclusions are *not* claimed; for L4 / R4 the converse fails outright
 (counterexample in §L4).
+
+**§7 — the equality reading demanded by `ComposableAxioms`.**  `PledgeMonadLaws`
+`rw`s with each law as an `=`, so the Pledge monad laws hold for `eff = RE t`
+only as strongly as the 14 laws hold *as equalities*.  Bundled as
+`Eq7.re_equality_laws : REEqualityLaws lq rq`, with `=` read as language
+equality `RELEq`:
+
+| law | strength for `RE` | what is *not* free |
+|-----|-------------------|--------------------|
+| `L1` | **structural** (`lq Epsilon r = r`) | — |
+| `R1` | **structural** modulo `revRE_involutive` (proved) | — |
+| `S1 S2 C3` | language eq; also syntactic after `normalize` | `RE` values differ pre-`normalize` |
+| `S3 C1 C2` | language eq only | `normalize` does *not* reassociate `Seq` / reorder `And`; monad-law RHS is only language-equivalent |
+| `L3 R3` | language eq **given `IsLeftQuotient`/`IsRightQuotient`** | correctness of the `reLeftQuotient` worklist fixpoint + ACI cycle test + the `firstWith`/`Wildcard` finite-alphabet approximation for `Not` — not verified here |
+| `L2 R2` | **fails**; equality iff `∃ w, lang divisor w` (`re_L2_iff`) | `reLeftQuotient ∅ Σ* = ∅ ≠ Σ*` (`re_L2_not_equality`): an unsatisfiable postcondition breaks left identity's `fut` |
+| `L4 R4` | **fails**; only `⊆`. Equality iff the divisor denotes ≤ 1 word (`re_L4_of_subsingleton`) | `re_L4_not_equality`: a branching postcondition (`{[0],[1]}`) makes `(a⊓b)∖c` and `(a∖c)⊓(b∖c)` differ. Holds in practice only because `Pledge/RE.hs` builds `post` as an exact event trace. |
+
+`Eq7.re_equality_laws` and the `re_*_not_equality` theorems depend only on
+`propext`, `Quot.sound` — no `sorry`, no `Classical.choice`.
 -/

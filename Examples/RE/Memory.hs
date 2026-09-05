@@ -10,11 +10,12 @@ type RETerm = (RE Term)
 
 malloc :: Pledge IO (RE Term) Addr
 malloc = Pledge $ do
-    addr <- randomRIO (1, 1000)
+    addr <- randomRIO (0, 5)
     return (addr,
             universe,
-            Single (Atom "malloc" (List [Num addr])),
-            finally (Atom "free" (List [Num addr])))
+            if addr > 0 then Single (Atom "malloc" (List [Num addr])) else Epsilon,
+            if addr > 0 then finally (Atom "free" (List [Num addr]))
+                        else never (Usage (List [Num addr])))
 
 free :: Addr -> Pledge IO (RE Term) ()
 -- noUntil free malloc: free(addr) must not occur again until malloc(addr)
@@ -23,9 +24,12 @@ free :: Addr -> Pledge IO (RE Term) ()
 --   free → malloc → free is allowed    (re-allocation is valid)
 free addr = Pledge $ return
     ((),
-     previously (Atom "malloc" (List [Num addr])),
+     if addr > 0 then previously (Atom "malloc" (List [Num addr])) else universe,
      Single (Atom "free" (List [Num addr])),
-     noUntil (Atom "free" (List [Num addr])) (Atom "malloc" (List [Num addr])))
+     if addr > 0 then noUntil (Atom "free" (List [Num addr]))
+                              (Atom "malloc" (List [Num addr]))
+                 else universe
+    )
 
 -- Good: malloc uses the returned address to parameterise the free obligation.
 -- Demonstrates data-dependent future: future = \a -> finally(free(a)).
@@ -109,13 +113,6 @@ allocReturnAddr = malloc
 allocTwoReturnPair :: Pledge IO RETerm (Addr, Addr)
 allocTwoReturnPair = (,) <$> malloc <*> malloc
 
--- Good: allocate, free, and return the freed address.
--- ret = 1; future = noUntil(free(1), malloc(1)) — guard active, no pending finally.
-allocFreeReturnAddr :: Pledge IO RETerm Addr
-allocFreeReturnAddr = Pledge $ do
-    (addr, preA, postA, futA) <- runPledge malloc
-    (_, preB, postB, futB) <- runPledge (free addr)
-    return (addr, preA /\ (preB \\ postA), postA · postB, (futA \\ postB) /\ futB)
 
 main :: IO ()
 main = do
@@ -131,5 +128,4 @@ main = do
     printOfPledgeRE "mallocFreeReallocFree"    mallocFreeReallocFree
     printOfPledgeRE "allocReturnAddr"          allocReturnAddr
     printOfPledgeRE "allocTwoReturnPair"       allocTwoReturnPair
-    printOfPledgeRE "allocFreeReturnAddr"      allocFreeReturnAddr
     return ()

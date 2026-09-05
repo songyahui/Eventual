@@ -2,6 +2,7 @@ module Examples.GuardedRE.BoundedCounter where
 
 import Prelude hiding ((<>))
 import Control.Monad (replicateM_)
+import Data.List (intercalate)
 import Pledge
 import Pledge.GuardedRE
 
@@ -42,8 +43,9 @@ initCounter :: Addr -> Pledge IO (GuardedRE Term) ()
 initCounter addr = Pledge $ return
     ( ()
     , fromRE universe                                   -- pre: no precondition
-    , GuardedRE (PEq (ValAt addr) (Lit 0))              -- post: heap starts at zero
-                (Single (Atom "init" (List [Num addr])))
+    , [ ( PEq (ValAt addr) (Lit 0)                      -- post: heap starts at zero
+        , Single (Atom "init" (List [Num addr]))
+        ) ]
     , fromRE universe                                   -- future: no obligation
     )
 
@@ -51,7 +53,7 @@ increment :: Addr -> Int -> Pledge IO (GuardedRE Term) ()
 increment addr maxVal = Pledge $ return
     ( ()
       -- pre: must not already be at the maximum
-    , GuardedRE (PLt (ValAt addr) (Lit maxVal)) universe
+    , [ (PLt (ValAt addr) (Lit maxVal), universe) ]
     , fromRE (Single (Atom "inc" (List [Num addr])))    -- post
       -- future: value stays non-negative
     , fromPPred (PGe (ValAt addr) (Lit 0))
@@ -61,7 +63,7 @@ decrement :: Addr -> Pledge IO (GuardedRE Term) ()
 decrement addr = Pledge $ return
     ( ()
       -- pre: must not already be at zero
-    , GuardedRE (PGt (ValAt addr) (Lit 0)) universe
+    , [ (PGt (ValAt addr) (Lit 0), universe) ]
     , fromRE (Single (Atom "dec" (List [Num addr])))    -- post
       -- future: value stays non-negative
     , fromPPred (PGe (ValAt addr) (Lit 0))
@@ -71,7 +73,7 @@ snapshot :: Addr -> Pledge IO (GuardedRE Term) ()
 snapshot addr = Pledge $ return
     ( ()
     , fromRE universe                                   -- pre: no precondition
-    , GuardedRE PTrue (Single (Atom "snapshot" (List [Num addr])))
+    , fromRE (Single (Atom "snapshot" (List [Num addr])))
     , fromRE universe                                   -- future: no obligation
     )
 
@@ -132,13 +134,13 @@ printResult :: String -> Pledge IO (GuardedRE Term) () -> IO ()
 printResult name prog = do
     putStrLn $ "=== " ++ name ++ " ==="
     (_, preC, postC, futC) <- runPledge prog
-    let GuardedRE prePred  preRE  = preC
-        GuardedRE postPred postRE = postC
-        GuardedRE futPred  futRE  = futC
-    putStrLn $ "Pre:    [" ++ show prePred  ++ "]  " ++ show (normalize preRE)
-    putStrLn $ "Post:   [" ++ show postPred ++ "]  " ++ show (normalize postRE)
-    putStrLn $ "Future: [" ++ show futPred  ++ "]  " ++ show (normalize futRE)
+    putStrLn $ "Pre:    " ++ showGuarded preC
+    putStrLn $ "Post:   " ++ showGuarded postC
+    putStrLn $ "Future: " ++ showGuarded futC
     putStrLn ""
+  where
+    showGuarded gre = intercalate " ∨ "
+        [ "[" ++ show p ++ "] " ++ show (normalize r) | (p, r) <- gre ]
 
 main :: IO ()
 main = do

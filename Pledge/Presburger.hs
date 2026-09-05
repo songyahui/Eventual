@@ -14,12 +14,15 @@ module Pledge.Presburger
 import Data.List (nub)
 import Pledge.Event
 
--- | A linear arithmetic expression over heap values.
--- Variables are heap addresses; @'ValAt' a@ dereferences address @a@.
--- Only scalar multiplication is allowed to preserve linearity.
+-- | A linear arithmetic expression over heap values and free variables.
+-- @'ValAt' a@ dereferences heap address @a@; @'Var' x@ is a free-standing
+-- named integer, unconnected to any heap address (e.g.\ a symbolic
+-- parameter used in 'SL').  Only scalar multiplication is allowed to
+-- preserve linearity.
 data PExpr
     = Lit Int         -- ^ integer literal
     | ValAt Addr      -- ^ value at address: @h[a]@
+    | Var String      -- ^ symbolic variable (used in SL)
     | Add PExpr PExpr -- ^ @e1 + e2@
     | Mul Int   PExpr -- ^ @k * e@  (scalar only, preserves linearity)
     deriving (Eq)
@@ -27,6 +30,7 @@ data PExpr
 instance Show PExpr where
     show (Lit n)     = show n
     show (ValAt a)   = "h[" ++ show a ++ "]"
+    show (Var x)     = x
     show (Add e1 e2) = "(" ++ show e1 ++ " + " ++ show e2 ++ ")"
     show (Mul k e)   = show k ++ "*" ++ show e
 
@@ -74,7 +78,7 @@ normalizePExpr (Mul k e) = case normalizePExpr e of
     e'     | k == 1 -> e'
     Lit n           -> Lit (k * n)
     e'              -> Mul k e'
-normalizePExpr e = e   -- Lit, ValAt: already normal
+normalizePExpr e = e   -- Lit, ValAt, Var: already normal
 
 -- | Simplify a 'PPred' by:
 --   * eliminating @PTrue@ from @PAnd@ (identity)
@@ -89,10 +93,21 @@ normalizePPred p =
         deduped   = nub conjuncts
         eqs       = [ (a, k) | PEq (ValAt a) (Lit k) <- deduped ]
                  ++ [ (a, k) | PEq (Lit k) (ValAt a) <- deduped ]
-        subbed    = map (normStep . substEqs eqs) deduped
+        -- Substitute into each conjunct using every *other* known equality.
+        -- Excluding the equality a conjunct states about itself is essential:
+        -- without it, `h[5] = 0` substitutes itself into `Lit 0 = Lit 0`,
+        -- i.e. PTrue, and the constraint is silently lost from the result.
+        eqsFor c  = filter (not . isSelfEq c) eqs
+        subbed    = [ normStep (substEqs (eqsFor c) c) | c <- deduped ]
     in if PFalse `elem` subbed
        then PFalse
        else rebuildAnd (nub (filter (/= PTrue) subbed))
+
+-- Does an (addr, lit) equality coincide with the equality conjunct c itself?
+isSelfEq :: PPred -> (Addr, Int) -> Bool
+isSelfEq (PEq (ValAt a) (Lit k)) (a', k') = a == a' && k == k'
+isSelfEq (PEq (Lit k) (ValAt a)) (a', k') = a == a' && k == k'
+isSelfEq _                       _        = False
 
 -- One-level structural simplification (no flattening).
 normStep :: PPred -> PPred

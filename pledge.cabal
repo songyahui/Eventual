@@ -50,6 +50,7 @@ executable pledge-main
     , QuickCheck
     , sbv
     , random
+    , stm
     , transformers
   other-modules:
       Examples.UnitTest.PledgeTest
@@ -64,6 +65,9 @@ executable pledge-main
       Examples.RE.Capability
       Examples.RE.Sensor
       Examples.RE.Shadow
+      Examples.RE.ConcurrentMutex
+      Examples.RE.TaskMonitor
+      Examples.RE.RetryProtocol
       Examples.SL.HeapMemory
       Examples.SL.BankAccount
       Examples.SL.LinkedList

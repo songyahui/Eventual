@@ -13,6 +13,7 @@ module Pledge.Core
       -- * Safe inspection (run once)
     , PledgeResult(..)
     , inspect
+    , assertState
       -- * Component accessors (pure \/ effect-free @m@ only)
     , getRet
     , getPre
@@ -127,6 +128,9 @@ data PledgeResult eff a = PledgeResult
 inspect :: Functor m => Pledge m eff a -> m (PledgeResult eff a)
 inspect (Pledge ma) =
     fmap (\(a, pre, post, fut) -> PledgeResult a pre post fut) ma
+
+assertState :: (Composable eff, Applicative m) => eff -> eff -> Pledge m eff ()
+assertState post fut = Pledge $ pure ((), universe, post, fut)
 
 -- | Extract the return value.
 -- /Warning/: calls 'runPledge' independently — use 'inspect' when @m@ is 'IO'.

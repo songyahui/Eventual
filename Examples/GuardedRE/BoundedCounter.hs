@@ -7,146 +7,200 @@ import Pledge
 import Pledge.GuardedRE
 
 -- ── Model ─────────────────────────────────────────────────────────────────────
--- A counter stored at heap address `addr` with a compile-time maximum `maxVal`.
+-- A counter with a compile-time lower bound `lo` and upper bound `hi`.
 --
---   Trace constraint (RE):   operations must follow the protocol
---                              init · (inc | dec)* · snapshot
---   Heap constraint (PPred): the counter value satisfies 0 ≤ h[addr] ≤ maxVal
---                            at every step; inc/dec are guarded accordingly.
+-- The state monad `Counter` below *executes* the counter: `getC`/`putC` thread
+-- the concrete value through the computation and never look at the bounds.
 --
--- ⚠ THIS EXAMPLE IS OUTSIDE WHAT GuardedRE CAN EXPRESS, and is kept as a
--- cautionary case rather than a working one.  See Examples/GuardedRE/Memory.hs
--- for the instance used in the paper.
+-- The `Pledge Counter (GuardedRE Term)` layer *enforces* the bounds.  Each
+-- primitive reads the concrete counter out of the state monad, so it can emit a
+-- Presburger guard over *literals* — `n' ≤ hi`, `n' ≥ lo` — that normalises to
+-- `true` or `false` immediately.  A `false` guard collapses its disjunction, and
+-- the collapse propagates through composition, turning the whole program's `pre`
+-- (or `fut`) into the empty disjunction ⊥.
 --
--- A GuardedRE pairs a trace RE with a *static* Presburger predicate: every
--- operation of the algebra conjoins the two predicates and quotients only the
--- two REs, so the predicate is never advanced by an event.  It can therefore
--- state an invariant of the whole run, but not a property that changes as the
--- run proceeds.
+--   Trace constraint (RE):   `start` must precede every `inc` / `dec` / `read`.
+--   Heap constraint (PPred): every step keeps `lo ≤ counter ≤ hi`.
 --
--- A counter is exactly the latter.  `initCounter` posts h[addr] = 0 and
--- `decrement` requires h[addr] > 0; these hold at *different moments*, but
--- composition conjoins them into h[addr] = 0 ∧ h[addr] > 0, which is
--- unsatisfiable.  The verdicts consequently invert:
---
---   normalUse  (correct)   ⇒ pre = [false]   -- reported as violating
---   overflow   (incorrect) ⇒ pre = [true]    -- h < 10 never contradicts h = 0
---
--- Expressing state change needs values indexed by trace position, i.e. a
--- Presburger encoding of the trace itself rather than a predicate alongside
--- it.  Neither constraint alone suffices for this problem, but neither does
--- their conjunction in this instance.
+-- This is the same problem the old version of this file flagged as *outside*
+-- what GuardedRE can express.  It was outside only because the counter value
+-- lived nowhere: a GuardedRE predicate is static, so `h[a] = 0` from `init` and
+-- `h[a] > 0` from `dec` were conjoined into `false`.  Giving the value a home —
+-- the state monad — fixes that: the predicate a step emits is already resolved
+-- against the concrete value, so no two steps' predicates ever have to co-hold.
+
+-- ── A tiny state monad ────────────────────────────────────────────────────────
+-- `Counter` threads one mutable integer through a computation.  Ordinary state
+-- monad: `getC` reads it, `putC` writes it, `modifyC` maps over it.
+
+newtype Counter a = Counter { runCounter :: Int -> (a, Int) }
+
+instance Functor Counter where
+    fmap f (Counter g) = Counter $ \s -> let (a, s') = g s in (f a, s')
+
+instance Applicative Counter where
+    pure x = Counter (x,)
+    Counter f <*> Counter g = Counter $ \s ->
+        let (h, s')  = f s
+            (a, s'') = g s'
+        in (h a, s'')
+
+instance Monad Counter where
+    Counter g >>= k = Counter $ \s -> let (a, s') = g s in runCounter (k a) s'
+
+getC :: Counter Int
+getC = Counter $ \s -> (s, s)
+
+putC :: Int -> Counter ()
+putC n = Counter $ const ((), n)
+
+modifyC :: (Int -> Int) -> Counter ()
+modifyC f = Counter $ \s -> ((), f s)
+
+-- ── Bounds and alphabet ───────────────────────────────────────────────────────
+
+data Bounds = Bounds { lo :: Int, hi :: Int }
+
+startE, readE :: Event Term
+startE = Atom "start" (List [])
+readE  = Atom "read"  (List [])
+
+incE, decE :: Int -> Event Term
+incE v = Atom "inc" (List [Num v])
+decE v = Atom "dec" (List [Num v])
+
+-- `lo ≤ v ≤ hi`, as a predicate over the (already concrete) new value.
+inRange :: Bounds -> Int -> PPred
+inRange b v = PAnd (PGe (Lit v) (Lit (lo b))) (PLe (Lit v) (Lit (hi b)))
+
+type CProg a = Pledge Counter (GuardedRE Term) a
 
 -- ── Primitives ────────────────────────────────────────────────────────────────
 
-initCounter :: Addr -> Pledge IO (GuardedRE Term) ()
-initCounter addr = Pledge $ return
+-- Open a session.  Emits `start`; constrains nothing.
+start :: CProg ()
+start = Pledge $ pure
     ( ()
-    , fromRE universe                                   -- pre: no precondition
-    , [ ( PEq (ValAt addr) (Lit 0)                      -- post: heap starts at zero
-        , Single (Atom "init" (List [Num addr]))
-        ) ]
-    , fromRE universe                                   -- future: no obligation
+    , fromRE universe                 -- pre:  none
+    , fromRE (Single startE)          -- post: the `start` event
+    , fromRE universe                 -- fut:  none
     )
 
-increment :: Addr -> Int -> Pledge IO (GuardedRE Term) ()
-increment addr maxVal = Pledge $ return
-    ( ()
-      -- pre: must not already be at the maximum
-    , [ (PLt (ValAt addr) (Lit maxVal), universe) ]
-    , fromRE (Single (Atom "inc" (List [Num addr])))    -- post
-      -- future: value stays non-negative
-    , fromPPred (PGe (ValAt addr) (Lit 0))
-    )
+-- Increment.  The state monad performs the update unconditionally; the pre's
+-- heap half is `n' ≤ hi` (over the concrete `n'`), its trace half is
+-- `previously start`.  The fut records the end-state invariant `lo ≤ n' ≤ hi`.
+increment :: Bounds -> CProg ()
+increment b = Pledge $ do
+    n <- getC
+    let n' = n + 1
+    putC n'
+    pure ( ()
+         , [ (PLe (Lit n') (Lit (hi b)), previously startE) ]   -- pre
+         , fromRE (Single (incE n'))                            -- post
+         , [ (inRange b n', universe) ]                         -- fut
+         )
 
-decrement :: Addr -> Pledge IO (GuardedRE Term) ()
-decrement addr = Pledge $ return
-    ( ()
-      -- pre: must not already be at zero
-    , [ (PGt (ValAt addr) (Lit 0), universe) ]
-    , fromRE (Single (Atom "dec" (List [Num addr])))    -- post
-      -- future: value stays non-negative
-    , fromPPred (PGe (ValAt addr) (Lit 0))
-    )
+-- Decrement.  Mirror image: the heap half of the pre is `n' ≥ lo`.
+decrement :: Bounds -> CProg ()
+decrement b = Pledge $ do
+    n <- getC
+    let n' = n - 1
+    putC n'
+    pure ( ()
+         , [ (PGe (Lit n') (Lit (lo b)), previously startE) ]   -- pre
+         , fromRE (Single (decE n'))                            -- post
+         , [ (inRange b n', universe) ]                         -- fut
+         )
 
-snapshot :: Addr -> Pledge IO (GuardedRE Term) ()
-snapshot addr = Pledge $ return
-    ( ()
-    , fromRE universe                                   -- pre: no precondition
-    , fromRE (Single (Atom "snapshot" (List [Num addr])))
-    , fromRE universe                                   -- future: no obligation
-    )
+-- Read the counter out.  Requires a prior `start`; imposes no bound.
+readCounter :: CProg Int
+readCounter = Pledge $ do
+    n <- getC
+    pure ( n
+         , fromRE (previously startE)     -- pre:  session opened
+         , fromRE (Single readE)          -- post: the `read` event
+         , fromRE universe                -- fut:  none
+         )
+
+-- ── Checking ──────────────────────────────────────────────────────────────────
+
+-- Is a GuardedRE met by the empty preceding / following trace?  True iff, after
+-- normalisation, some disjunct survives (its predicate is satisfiable) with a
+-- nullable RE.  Every predicate we build here is over literals, so
+-- 'normalizeGuarded' has already reduced it to `true` or dropped it — no solver
+-- call is needed.
+metByEmpty :: GuardedRE Term -> Bool
+metByEmpty = any (nullable . snd) . normalizeGuarded
+
+data Verdict = OK | Violation deriving (Eq, Show)
+
+check :: String -> Int -> CProg a -> IO ()
+check name s0 prog = do
+    let ((_, preC, postC, futC), sFinal) = runCounter (runPledge prog) s0
+        verdict | not (metByEmpty preC) = Violation   -- an unmet precondition
+                | not (metByEmpty futC) = Violation   -- an out-of-range end state
+                | otherwise             = OK
+    putStrLn $ "=== " ++ name ++ " ==="
+    putStrLn $ "final counter : " ++ show sFinal
+    putStrLn $ "pre           : " ++ showG preC
+    putStrLn $ "post          : " ++ showG postC
+    putStrLn $ "fut           : " ++ showG futC
+    putStrLn $ "verdict       : " ++ show verdict
+    putStrLn ""
+  where
+    showG gre = case normalizeGuarded gre of
+        [] -> "⊥ (no disjunct — constraint unsatisfiable)"
+        ds -> intercalate "  ∨  "
+                [ "[" ++ show p ++ "] " ++ show (normalize r) | (p, r) <- ds ]
 
 -- ── Programs ──────────────────────────────────────────────────────────────────
 
--- Intended good; reports pre = [false].  See the header note.
-normalUse :: Pledge IO (GuardedRE Term) ()
-normalUse = do
-    initCounter 0
-    increment   0 10
-    increment   0 10
-    decrement   0
-    snapshot    0
+b3 :: Bounds
+b3 = Bounds 0 3
 
--- Reports pre = [true]: no decrement, so no contradiction arises.
-emptyRun :: Pledge IO (GuardedRE Term) ()
-emptyRun = do
-    initCounter 0
-    snapshot    0
+-- Good: the value stays inside 0..3 at every step.
+withinBounds :: CProg Int
+withinBounds = do
+    start
+    increment b3
+    increment b3
+    decrement b3
+    readCounter
 
--- Intended good; reports pre = [false].  See the header note.
-fillAndDrain :: Int -> Pledge IO (GuardedRE Term) ()
-fillAndDrain maxVal = do
-    initCounter 0
-    replicateM_ maxVal (increment 0 maxVal)
-    replicateM_ maxVal (decrement 0)
-    snapshot    0
-
--- Intended bad; reports pre = [true], i.e. NOT caught.  See the header note.
--- The intent was that after 10 increments h[0] = 10 should violate the 11th
--- increment's PLt(h[0], 10).  But the predicate is static: conjoining
--- PLt(h[0],10) with itself eleven times is just PLt(h[0],10), which is
--- satisfiable, and nothing tracks that h[0] has grown.
-overflow :: Pledge IO (GuardedRE Term) ()
+-- Bad: upper bound 2, but three increments push the value to 3.  The third
+-- step's pre predicate `3 ≤ 2` is `false`, collapsing `pre` to ⊥.
+overflow :: CProg ()
 overflow = do
-    initCounter 0
-    replicateM_ 11 (increment 0 10)
-    snapshot    0
+    let b = Bounds 0 2
+    start
+    increment b
+    increment b
+    increment b
 
--- Intended bad; reports pre = [false], and so happens to be flagged -- but
--- for the wrong reason.  It is init's PEq(h[0],0) contradicting decrement's
--- PGt(h[0],0), the same conjunction that also condemns the correct
--- `normalUse` above, not a genuine underflow check.
-underflow :: Pledge IO (GuardedRE Term) ()
+-- Bad: a decrement takes the value to -1, below the lower bound 0.
+underflow :: CProg ()
 underflow = do
-    initCounter 0
-    decrement   0
+    start
+    decrement b3
 
--- Bad: skip init — trace pre of initCounter not satisfied.
-noInit :: Pledge IO (GuardedRE Term) ()
-noInit = do
-    increment 0 10
-    snapshot  0
+-- Good: fill to the ceiling and drain back to the floor, bound = n.
+fillAndDrain :: Int -> CProg Int
+fillAndDrain n = do
+    let b = Bounds 0 n
+    start
+    replicateM_ n (increment b)
+    replicateM_ n (decrement b)
+    readCounter
 
--- ── Display ───────────────────────────────────────────────────────────────────
-
-printResult :: String -> Pledge IO (GuardedRE Term) () -> IO ()
-printResult name prog = do
-    putStrLn $ "=== " ++ name ++ " ==="
-    (_, preC, postC, futC) <- runPledge prog
-    putStrLn $ "Pre:    " ++ showGuarded preC
-    putStrLn $ "Post:   " ++ showGuarded postC
-    putStrLn $ "Future: " ++ showGuarded futC
-    putStrLn ""
-  where
-    showGuarded gre = intercalate " ∨ "
-        [ "[" ++ show p ++ "] " ++ show (normalize r) | (p, r) <- gre ]
+-- Bad: operate without opening a session — the trace pre `previously start`
+-- is not nullable, so `pre` is unmet by the empty preceding trace.
+noStart :: CProg ()
+noStart = increment b3
 
 main :: IO ()
 main = do
-    printResult "normalUse"        normalUse
-    printResult "emptyRun"         emptyRun
-    printResult "fillAndDrain 3"   (fillAndDrain 3)
-    printResult "overflow (bad)"   overflow
-    printResult "underflow (bad)"  underflow
-    printResult "noInit (bad)"     noInit
+    check "withinBounds"     0 withinBounds
+    check "overflow (bad)"   0 overflow
+    check "underflow (bad)"  0 underflow
+    check "fillAndDrain 3"   0 (fillAndDrain 3)
+    check "noStart (bad)"    0 noStart

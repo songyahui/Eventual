@@ -56,7 +56,6 @@ executable pledge-main
       Examples.UnitTest.PledgeTest
       Examples.UnitTest.PresburgerTest
       Examples.RE.Memory
-      Examples.RE.MemorySpec
       Examples.RE.FileHandle
       Examples.RE.Mutex
       Examples.RE.Transaction
@@ -65,9 +64,6 @@ executable pledge-main
       Examples.RE.Capability
       Examples.RE.Sensor
       Examples.RE.Shadow
-      Examples.RE.ConcurrentMutex
-      Examples.RE.TaskMonitor
-      Examples.RE.RetryProtocol
       Examples.SL.HeapMemory
       Examples.SL.BankAccount
       Examples.SL.LinkedList
@@ -88,14 +84,12 @@ test-suite pledge-laws
     , pledge
     , QuickCheck
 
-executable pledge-solver-test
-  hs-source-dirs:   .
-  main-is:          Examples/SL/SolverTest.hs
+executable pledge-wre-monitor
+  hs-source-dirs:   Examples/WeightedRE
+  main-is:          ConcurrentMonitor.hs
   default-language: GHC2021
+  ghc-options:      -threaded
   build-depends:
       base
-    , containers
     , pledge
-    , sbv
-  other-modules:
-      Solver
+    , stm

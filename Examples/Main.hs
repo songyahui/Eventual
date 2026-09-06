@@ -9,9 +9,6 @@ import qualified Examples.RE.NetworkProtocol as RENetworkProtocol
 import qualified Examples.RE.Capability      as RECapability
 import qualified Examples.RE.Sensor          as RESensor
 import qualified Examples.RE.Shadow          as REShadow
-import qualified Examples.RE.ConcurrentMutex as REConcurrentMutex
-import qualified Examples.RE.TaskMonitor     as RETaskMonitor
-import qualified Examples.RE.RetryProtocol   as RERetryProtocol
 import qualified Examples.SL.HeapMemory           as SLHeapMemory
 import qualified Examples.SL.BankAccount          as SLBankAccount
 import qualified Examples.SL.LinkedList            as SLLinkedList
@@ -55,15 +52,6 @@ main = do
 
     section "RE 9. Shadow Approach (spec alongside IO)"
     REShadow.main
-
-    section "RE 10. Concurrent Mutex (live monitor, real forkIO/MVar/STM)"
-    REConcurrentMutex.main
-
-    section "RE 11. Task Monitor (parametric, concurrent producer/consumer)"
-    RETaskMonitor.main
-
-    section "RE 12. Retry Protocol (static, exhaustive: one check, all paths)"
-    RERetryProtocol.main
 
     section "SL 1. Heap Memory (alloc/free/read/write)"
     SLHeapMemory.main

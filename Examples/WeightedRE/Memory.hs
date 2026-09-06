@@ -4,6 +4,7 @@ import Prelude hiding ((<>))
 import Pledge
 import Pledge.Semiring
 import Pledge.WeightedRE
+import System.Random
 
 -- ── Model ─────────────────────────────────────────────────────────────────────
 -- Probabilistic memory management: weights represent the probability that an
@@ -21,13 +22,14 @@ import Pledge.WeightedRE
 
 type PRE = WRE Prob Term   -- weighted RE over the probability semiring
 
-malloc :: Addr -> Pledge IO PRE Addr
-malloc addr = Pledge $ return
-    ( addr
-    , wTop                                                              -- pre: always allowed
-    , WSingle (Prob 0.99) (Atom "malloc" (List [Num addr]))             -- post
-    , wFinally (Prob 0.95) (Atom "free" (List [Num addr]))              -- future
-    )
+malloc :: Pledge IO PRE Addr
+malloc = Pledge $ do
+    addr <- randomRIO (0, 5)
+    return (  addr
+            , wTop                                                              -- pre: always allowed
+            , WSingle (Prob 0.99) (Atom "malloc" (List [Num addr]))             -- post
+            , wFinally (Prob 0.95) (Atom "free" (List [Num addr]))              -- future
+            )
 
 free :: Addr -> Pledge IO PRE ()
 free addr = Pledge $ return
@@ -43,22 +45,22 @@ free addr = Pledge $ return
 -- Good: malloc then free. End-to-end probability = 0.95 (free obligation met).
 mallocThenFree :: Pledge IO PRE ()
 mallocThenFree = do
-    addr <- malloc 1
+    addr <- malloc
     free addr
 
 -- Good: two sequential malloc/free pairs.
 sequential :: Pledge IO PRE ()
 sequential = do
-    a1 <- malloc 1
+    a1 <- malloc
     free a1
-    a2 <- malloc 2
+    a2 <- malloc
     free a2
 
 -- Bad: missing free — future carries wFinally (Prob 0.95) free(1).
 -- wNullable of future = 0  (free obligation not discharged).
 missingFree :: Pledge IO PRE ()
 missingFree = do
-    _ <- malloc 1
+    _ <- malloc
     return ()
 
 -- Bad: free without malloc — pre carries wPreviously (Prob 0.95) malloc(1)
@@ -69,7 +71,7 @@ freeWithoutMalloc = free 1
 -- Bad: free the wrong address — future of malloc(1) = F[0.95](free(1)) remains.
 wrongFree :: Pledge IO PRE ()
 wrongFree = do
-    addr <- malloc 1
+    addr <- malloc
     free (addr + 1)
 
 -- ── Display ───────────────────────────────────────────────────────────────────

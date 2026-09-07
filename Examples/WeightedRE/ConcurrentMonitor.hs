@@ -1,39 +1,46 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | Concurrent runtime monitoring with 'Pledge.WeightedRE'.
+-- | Concurrent runtime monitoring with 'Pledge.WeightedRE', where the lock
+-- discipline is expressed as a __future condition__ installed at the start of
+-- each critical section.
 --
 -- Context
 -- =======
--- A running system has several threads that share one lock.  Every thread is
--- supposed to follow the discipline
+-- Several threads share one lock.  Each thread emits @acquire(t)@, some
+-- @use(t)@ events, then @release(t)@ onto a single shared, totally-ordered log
+-- (a 'TChan').  A monitor thread consumes that interleaved stream online.
 --
--- >   acquire(t) · use(t)* · release(t)
+-- Instead of checking the trace against one global regular expression, the
+-- monitor replays the log through the 'Pledge' bind rule for the
+-- @(post, fut)@ pair:
 --
--- and critical sections must not overlap (mutual exclusion).  Each thread
--- writes its actions to one shared, totally-ordered event log (here a
--- 'TChan'); a dedicated /monitor/ thread consumes that interleaved global
--- stream online, one event at a time, and maintains a residual 'WRE' by
--- Brzozowski derivative.  Nothing about the program is known statically — the
--- monitor only sees the events as they happen.
+-- >   post = postA · postB
+-- >   fut  = (futA ∖ postB) ⊓ futB
 --
--- Two signals come out of the 'WRE' at every step:
+-- (see @Pledge.Core@, the '>>=' definition).  Every event carries a @post@ (the
+-- event itself) and a @fut@ (its future obligation).  Only one event installs a
+-- non-trivial obligation:
 --
---   * __structural verdict__ — @residual == WBot@ means the observed prefix
---     can no longer be completed to a conformant trace: mutual exclusion has
---     been broken, or a @release@ appeared with no matching @acquire@.
+-- >   acquire(t)   ⇒   fut = use(t)* · release(t) · Σ*
 --
---   * __quantitative verdict__ — weights live in the 'Prob' semiring, where
---     each event is only trusted to have been logged faithfully with
---     probability @0.98@ (lossy logging / flaky instrumentation).
---     @wNullable residual@ at a quiescent point is the product of those
---     per-event trusts, i.e. the confidence that the whole log seen so far is
---     a genuine, conformant execution rather than an artefact of dropped or
---     reordered records.
+-- That single future condition, attached at session start, encodes the whole
+-- discipline once the bind rule propagates it:
 --
--- The specification is exactly what the 'Pledge' monad would accumulate as
--- the @post@ of @acquire t >> use t >> release t@ for each thread, starred and
--- unioned over the thread set — so the monitor checks the same contract the
--- library builds compositionally, just against a live trace.
+--   * __matched release__ — the obligation stays non-nullable until
+--     @release(t)@ streams in and the left-quotient @fut ∖ release(t)@ reduces
+--     it to @Σ*@ (discharged).
+--
+--   * __mutual exclusion / atomic section__ — while the obligation is open, the
+--     only events it accepts as a prefix are @use(t)@ and @release(t)@.  Any
+--     other event (another thread's @acquire@, or a stray @use@) makes
+--     @fut ∖ event@ collapse to 'WBot', and @WBot ⊓ _ = WBot@ latches the
+--     violation.
+--
+-- Weights live in the 'Prob' semiring: each event is trusted to have been
+-- logged faithfully with probability 0.98.  @wNullable fut@ at a discharged
+-- point is the product of the trusts of the @use@/@release@ events that
+-- discharged the obligation — the confidence that the discharge is real and
+-- not an artefact of lossy logging.
 module Main (main) where
 
 import Control.Concurrent       (forkIO, threadDelay)
@@ -57,55 +64,59 @@ trust = Prob 0.98
 ev :: String -> Int -> Event Term
 ev act tid = Atom act (List [Num tid])
 
--- | One complete, non-overlapping critical section by thread @t@:
--- @[.98]acquire(t) · ([.98]use(t))* · [.98]release(t)@.
-session :: Int -> PRE
-session t =
-    WSeq (WSingle trust (ev "acquire" t))
-   (WSeq (WStar (WSingle trust (ev "use" t)))
-         (WSingle trust (ev "release" t)))
+-- | The future condition installed when thread @t@ enters its critical
+-- section: the rest of the trace must continue as
+-- @([.98]use(t))* · [.98]release(t)@ — and, because a 'WSeq' only admits a
+-- prefix its left factor accepts, nothing but @use(t)@ / @release(t)@ may
+-- appear before that @release@.  The trailing @Σ*@ (via @(⊤)@) is what lets a
+-- discharged obligation reduce to the '(⊓)' identity instead of a dead @ε@.
+sessionObligation :: Int -> PRE
+sessionObligation t =
+    WSeq (WStar (WSingle trust (ev "use" t)))
+   (WSeq (WSingle trust (ev "release" t))
+         (⊤))
 
--- | Global lock discipline over a fixed thread set: the interleaved log must
--- be a sequence of complete critical sections that never overlap.
+-- | @(post, fut)@ annotation of a single observed event.  @acquire@ is the
+-- only event that installs a real future obligation.
 --
--- Because @session t@ only accepts @use(t)@ / @release(t)@ after @acquire(t)@,
--- an @acquire@ by any /other/ thread while the lock is held drives the
--- derivative straight to 'WBot'.
-lockDiscipline :: [Int] -> PRE
-lockDiscipline ts = WStar (foldr1 WAdd (map session ts))
+-- The @post@ is unit-weight: it is the /divisor/ in @futA ∖ postB@, and the
+-- weighted quantity is the obligation being divided, not the observation
+-- doing the dividing (this also matches what @wLeftQuotient@ is designed for).
+annot :: Event Term -> (PRE, PRE)
+annot e@(Atom "acquire" (List [Num t])) = (WSingle sone e, sessionObligation t)
+annot e                                 = (WSingle sone e, (⊤))
+
+-- | The 'Pledge' '>>=' rule, restricted to the @(post, fut)@ components.
+-- @'(·)'@, @'(∖)'@ and @'(⊓)'@ are the 'Composable' operations of @WRE Prob@.
+bindStep :: (PRE, PRE) -> (PRE, PRE) -> (PRE, PRE)
+bindStep (postA, futA) (postB, futB) =
+    ( postA · postB
+    , (futA ∖ postB) ⊓ futB )
 
 -- ── Monitor ──────────────────────────────────────────────────────────────────
 
-data Verdict
-    = Quiescent Prob   -- ^ at a safe stopping point; confidence the log is genuine
-    | InSection Prob   -- ^ mid critical section; product of trusts consumed so far
-    | Broken           -- ^ residual is WBot: the discipline can no longer hold
-
-verdict :: PRE -> Prob -> Verdict
-verdict r confSoFar
-    | rn == WBot        = Broken
-    | w  /= szero        = Quiescent w
-    | otherwise          = InSection confSoFar
+-- | Replay @n@ events from the shared log through 'bindStep', reporting the
+-- state of the accumulated future condition after each one.
+monitor :: TChan (Event Term) -> Int -> IO ()
+monitor chan n = go n (empty, (⊤))
   where
-    rn = wNormalize r
-    w  = wNullable rn
-
--- | Consume @n@ events from the shared log, folding the residual 'WRE' and a
--- running trust product.  This is the whole monitor: one derivative per event.
-monitor :: [Int] -> TChan (Event Term) -> Int -> IO ()
-monitor threads chan n = go n (lockDiscipline threads) sone
-  where
-    go 0 _ _ = putStrLn "    monitor: end of stream"
-    go k r conf = do
+    go 0 (_, fut) = putStrLn $ "    ── end of stream: " ++ endReport fut
+    go k st = do
         e <- atomically (readTChan chan)
-        let r'    = wNormalize (wDerivative e r)
-            conf' = smul conf trust
-        putStrLn $ "    " ++ pad (show e) ++ report (verdict r' conf')
-        go (k - 1) r' conf'
+        let st'@(_, fut') = bindStep st (annot e)
+        putStrLn $ "    " ++ pad (show e) ++ stepReport fut'
+        go (k - 1) st'
 
-    report (Quiescent p) = "✓ safe point — trace-genuine confidence " ++ show p
-    report (InSection p) = "… in critical section (confidence so far " ++ show p ++ ")"
-    report Broken        = "✗ VIOLATION — mutual exclusion / protocol broken"
+    stepReport fut
+        | fut == WBot            = "✗ VIOLATION — future condition unsatisfiable"
+        | wNullable fut /= szero  = "✓ obligation discharged (wNullable fut = "
+                                        ++ show (wNullable fut) ++ ")"
+        | otherwise              = "… critical section open — obligation pending"
+
+    endReport fut
+        | fut == WBot            = "✗ terminated in violation"
+        | wNullable fut /= szero  = "✓ every session obligation discharged"
+        | otherwise              = "✗ unfinished critical section (leaked lock)"
 
     pad s = s ++ replicate (max 1 (24 - length s)) ' '
 
@@ -144,7 +155,7 @@ scenarioSafe = do
     chan <- newTChanIO
     lock <- newMVar ()
     forM_ [1, 2] $ \tid -> forkIO (safeWorker chan lock tid)
-    monitor [1, 2] chan 6
+    monitor chan 6
     putStrLn ""
 
 scenarioRacy :: IO ()
@@ -155,11 +166,11 @@ scenarioRacy = do
     forM_ [1, 2] $ \tid -> forkIO (racyWorker chan gate tid)
     threadDelay 5000          -- let both acquires land
     putMVar gate ()
-    monitor [1, 2] chan 6
+    monitor chan 6
     putStrLn ""
 
 main :: IO ()
 main = do
-    putStrLn "WRE concurrent runtime monitor\n"
+    putStrLn "WRE monitor — lock discipline as a future condition\n"
     scenarioSafe
     scenarioRacy

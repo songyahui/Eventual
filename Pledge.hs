@@ -4,6 +4,7 @@ module Pledge
     , module Pledge.Presburger
     , module Pledge.Presburger.Solver
     , module Pledge.RE
+    , module Pledge.MTL
     , module Pledge.GuardedRE
     , module Pledge.Semiring
     , module Pledge.WeightedRE
@@ -15,6 +16,7 @@ import Pledge.Event
 import Pledge.Presburger
 import Pledge.Presburger.Solver
 import Pledge.RE
+import Pledge.MTL
 import Pledge.GuardedRE
 import Pledge.Semiring
 import Pledge.WeightedRE

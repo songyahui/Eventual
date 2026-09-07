@@ -841,6 +841,166 @@ test_ltl_to_re counter = do
     check counter "word [b, b, b] ∉ ⟦F a⟧" $
         not (matches reFinallyA [b, b, b])
 
+-- ── mtl_to_re ─────────────────────────────────────────────────────────────────
+-- Bounded (step-metric) MTL over finite traces.  LTL is MTL with every
+-- interval [0, ∞): the two translations must agree there.
+
+test_mtl_to_re :: IORef Int -> IO ()
+test_mtl_to_re counter = do
+    putStrLn "\n── mtl_to_re ────────────────────────────────────────────────────"
+
+    -- Propositional cases coincide with ltl_to_re.
+    check counter "mtl_to_re MTLTrue  = Just Σ*" $
+        mtlToRe (MTLTrue :: MTL Term) == Just (Not Bot)
+
+    check counter "mtl_to_re (MTLAtom a) = Just (Single a)" $
+        mtlToRe (MTLAtom a) == Just (Single a)
+
+    check counter "mtl_to_re (MTLAnd a b) = Just (a ∧ b)" $
+        mtlToRe (MTLAnd (MTLAtom a) (MTLAtom b)) == Just (And (Single a) (Single b))
+
+    -- Next: MTLNext φ ≡ Σ · ⟦φ⟧
+    check counter "mtl_to_re (MTLNext (MTLAtom a)) = Just (_ · a)" $
+        mtlToRe (MTLNext (MTLAtom a)) == Just (Seq (Single Wildcard) (Single a))
+
+    -- exactly n: F_[n,n] φ ≡ Σ^n · ⟦φ⟧  (a holds exactly n steps out)
+    let Just reFex2 = mtlToRe (MTLFinally (exactly 2) (MTLAtom a))
+    check counter "word [b, b, a] ∈ ⟦F_[2,2] a⟧" $ matches reFex2 [b, b, a]
+    check counter "word [b, a] ∉ ⟦F_[2,2] a⟧" $ not (matches reFex2 [b, a])
+    check counter "word [b, b, b, a] ∉ ⟦F_[2,2] a⟧" $ not (matches reFex2 [b, b, b, a])
+
+    -- within n: F_[0,n] φ ≡ ⋃_{k=0}^n Σ^k · ⟦φ⟧
+    let Just reFwithin2 = mtlToRe (MTLFinally (within 2) (MTLAtom a))
+    check counter "word [a] ∈ ⟦F_[0,2] a⟧" $ matches reFwithin2 [a]
+    check counter "word [b, a] ∈ ⟦F_[0,2] a⟧" $ matches reFwithin2 [b, a]
+    check counter "word [b, b, a] ∈ ⟦F_[0,2] a⟧" $ matches reFwithin2 [b, b, a]
+    check counter "word [b, b, b, a] ∉ ⟦F_[0,2] a⟧   (past the deadline)" $
+        not (matches reFwithin2 [b, b, b, a])
+    check counter "word [b, b, b] ∉ ⟦F_[0,2] a⟧" $
+        not (matches reFwithin2 [b, b, b])
+
+    -- fromTo lo hi: F_[1,2] φ excludes k = 0
+    let Just reF12 = mtlToRe (MTLFinally (fromTo 1 2) (MTLAtom a))
+    check counter "word [a] ∉ ⟦F_[1,2] a⟧   (too soon)" $ not (matches reF12 [a])
+    check counter "word [b, a] ∈ ⟦F_[1,2] a⟧" $ matches reF12 [b, a]
+
+    -- atLeast 0 collapses to the LTL translation (modulo normalization).
+    check counter "mtl_to_re (F_atLeast 0 a) ≡ ltlToRe (F a)" $
+        fmap normalize (mtlToRe (MTLFinally (atLeast 0) (MTLAtom a)))
+            == fmap normalize (ltlToRe (LTLFinally (LTLAtom a)))
+
+    check counter "mtl_to_re (a U_atLeast 0 b) ≡ ltlToRe (a U b)" $
+        fmap normalize (mtlToRe (MTLUntil (atLeast 0) (MTLAtom a) (MTLAtom b)))
+            == fmap normalize (ltlToRe (LTLUntil (LTLAtom a) (LTLAtom b)))
+
+    -- Bounded Globally: φ must hold at every step in the interval that exists.
+    let Just reG2a = mtlToRe (MTLGlobally (within 2) (MTLAtom a))
+    check counter "word [a, a, a] ∈ ⟦G_[0,2] a⟧" $ matches reG2a [a, a, a]
+    check counter "word [a, b, a] ∉ ⟦G_[0,2] a⟧" $ not (matches reG2a [a, b, a])
+    check counter "word [a, a, a, b] ∈ ⟦G_[0,2] a⟧   (b is past the window)" $
+        matches reG2a [a, a, a, b]
+    check counter "word [a] ∈ ⟦G_[0,2] a⟧   (steps 1,2 do not exist: vacuous)" $
+        matches reG2a [a]
+
+    let Just reG12a = mtlToRe (MTLGlobally (fromTo 1 2) (MTLAtom a))
+    check counter "word [b, a, a] ∈ ⟦G_[1,2] a⟧   (step 0 unconstrained)" $
+        matches reG12a [b, a, a]
+    check counter "word [a, b, a] ∉ ⟦G_[1,2] a⟧" $ not (matches reG12a [a, b, a])
+
+    check counter "mtl_to_re (G_[0,2] (MTLNext _)) = Nothing   (arg not propositional)" $
+        isNothing (mtlToRe (MTLGlobally (within 2) (MTLNext (MTLAtom a))))
+
+    -- Bounded Until: a U_[0,2] b ≡ ⋃_{k=0}^2 step(a)^k · ⟦b⟧
+    let Just reU2 = mtlToRe (MTLUntil (within 2) (MTLAtom a) (MTLAtom b))
+    check counter "word [b] ∈ ⟦a U_[0,2] b⟧" $ matches reU2 [b]
+    check counter "word [a, a, b] ∈ ⟦a U_[0,2] b⟧" $ matches reU2 [a, a, b]
+    check counter "word [a, a, a, b] ∉ ⟦a U_[0,2] b⟧   (b too late)" $
+        not (matches reU2 [a, a, a, b])
+
+    -- Until left side temporal → no single-step projection → Nothing.
+    check counter "mtl_to_re (MTLNext _ U_[0,2] b) = Nothing" $
+        isNothing (mtlToRe (MTLUntil (within 2) (MTLNext (MTLAtom a)) (MTLAtom b)))
+
+    -- lo < 0 → Nothing; inverted bound → the empty interval (F is ∅).
+    check counter "mtl_to_re (F_[-1,2] a) = Nothing   (lo < 0)" $
+        isNothing (mtlToRe (MTLFinally (fromTo (-1) 2) (MTLAtom a)))
+
+    check counter "mtl_to_re (F_[3,1] a) ≡ ∅   (empty interval)" $
+        fmap normalize (mtlToRe (MTLFinally (fromTo 3 1) (MTLAtom a))) == Just Bot
+
+    check counter "mtl_to_re (G_[3,1] a) ≡ Σ*   (empty interval: vacuous)" $
+        fmap normalize (mtlToRe (MTLGlobally (fromTo 3 1) (MTLAtom a))) == Just (Not Bot)
+
+    -- Event-level deadline helpers now yield MTL; compile then test.
+    let Just reFinW2 = mtlToRe (finallyWithin 2 a)
+    check counter "word [b, a, b] ∈ finallyWithin 2 a" $ matches reFinW2 [b, a, b]
+    check counter "word [b, b, b, a] ∉ finallyWithin 2 a" $
+        not (matches reFinW2 [b, b, b, a])
+
+    let Just reNevW2 = mtlToRe (neverWithin 2 a)
+    check counter "word [b, b, a] ∈ neverWithin 2 a   (a at step 2, outside [0,1])" $
+        matches reNevW2 [b, b, a]
+    check counter "word [b, a, b] ∉ neverWithin 2 a" $ not (matches reNevW2 [b, a, b])
+    let Just reNevW0 = mtlToRe (neverWithin 0 a)
+    check counter "neverWithin 0 a ≡ Σ*   (vacuous)" $ normalize reNevW0 == Not Bot
+
+-- ── Composable (MTL t): the free algebra ──────────────────────────────────────
+-- concatenation/conjunction/quotient are constructors; mtlToRe is the
+-- interpretation homomorphism.  Laws hold under (normalize . mtlToRe), the
+-- same footing as the RE instance under normalize.
+
+test_mtl_composable :: IORef Int -> IO ()
+test_mtl_composable counter = do
+    putStrLn "\n── Composable (MTL t) ───────────────────────────────────────────"
+
+    let re = fmap normalize . mtlToRe
+        aM = MTLAtom a :: MTL Term
+        bM = MTLAtom b
+
+    -- Identity laws hold after interpretation, not syntactically.
+    check counter "empty · a  ≢ a   syntactically" $
+        (concatenation empty aM :: MTL Term) /= aM
+    check counter "⟦empty · a⟧ ≡ ⟦a⟧   (S1)" $ re (concatenation empty aM) == re aM
+    check counter "⟦a · empty⟧ ≡ ⟦a⟧   (S2)" $ re (concatenation aM empty) == re aM
+    check counter "⟦universe ⊓ a⟧ ≡ ⟦a⟧   (C3)" $ re (conjunction universe aM) == re aM
+    -- S3 is a language equality, not syntactic (normalize does not
+    -- re-associate Seq — same as the RE instance).
+    let Just s3l = mtlToRe (concatenation (concatenation aM bM) aM)
+        Just s3r = mtlToRe (concatenation aM (concatenation bM aM))
+    check counter "⟦(a · b) · a⟧ ≡ ⟦a · (b · a)⟧   (S3, as languages)" $
+        and [ matches s3l w == matches s3r w
+            | w <- [[], [a], [a,b], [a,b,a], [a,b,a,b]] ]
+        && matches s3l [a, b, a]
+
+    -- Quotient constructors interpret to the RE quotients.
+    check counter "⟦a ∖ (a · b)⟧ ≡ ⟦b⟧   (leftQuotient = reLeftQuotient)" $
+        re (leftQuotient aM (concatenation aM bM)) == re bM
+    check counter "⟦universe ∖ a⟧ ≡ ⟦universe⟧   (L2)" $
+        re (leftQuotient aM (universe :: MTL Term)) == re (universe :: MTL Term)
+
+    -- A Pledge over MTL specs: two steps, second discharges the first's future.
+    let step1 = Pledge $ return
+            ((), universe, MTLAtom (Atom "open" (List [])),
+                 finallyWithin 2 (Atom "close" (List []))) :: Pledge IO (MTL Term) ()
+        step2 = Pledge $ return
+            ((), universe, MTLAtom (Atom "close" (List [])), universe)
+    (_, _, postC, futC) <- runPledge (step1 >> step2)
+    check counter "Pledge/MTL: post = open · close" $
+        fmap normalize (mtlToRe postC)
+            == Just (normalize (Seq (Single (Atom "open" (List [])))
+                                    (Single (Atom "close" (List [])))))
+    check counter "Pledge/MTL: close within 2 discharges the future (fut ≡ Σ*)" $
+        fmap normalize (mtlToRe futC) == Just (Not Bot)
+
+    -- Missing the deadline leaves an unsatisfiable future.
+    let step2' = Pledge $ return
+            ((), universe, MTLAtom (Atom "x" (List [])), universe)
+                :: Pledge IO (MTL Term) ()
+        late   = step1 >> step2' >> step2' >> step2'   -- 3 non-close events
+    (_, _, _, futLate) <- runPledge late
+    check counter "Pledge/MTL: three steps without close ⇒ fut ≡ ∅" $
+        fmap normalize (mtlToRe futLate) == Just Bot
+
 -- ── Pledge monad: pre field ────────────────────────────────────────────────
 -- The combined precondition uses /\ (intersection), not <> (concatenation):
 --
@@ -1050,6 +1210,8 @@ main = do
     test_reLeftQuotient counter
     test_effectful     counter
     test_ltl_to_re     counter
+    test_mtl_to_re     counter
+    test_mtl_composable counter
     test_effectful_sl  counter
     test_normalizeSL   counter
     n <- readIORef counter

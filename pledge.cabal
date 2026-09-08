@@ -25,6 +25,7 @@ library
       Pledge.Presburger
       Pledge.Presburger.Solver
       Pledge.RE
+      Pledge.LTL
       Pledge.MTL
       Pledge.GuardedRE
       Pledge.Semiring

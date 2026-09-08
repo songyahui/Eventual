@@ -1,168 +1,237 @@
+-- | Linear-arithmetic terms and predicates over heap values, with a purely
+-- structural normaliser (no solver).
 module Pledge.Presburger
-    ( -- * Re-exported from Pledge.Event
-      module Pledge.Event
-      -- * Presburger expressions
-    , PExpr(..)
-    , pNeg
-      -- * Presburger predicates
-    , PPred(..)
-      -- * Normalization
-    , normalizePExpr
-    , normalizePPred
+    ( Values(..)
+    , Term(..)
+    , Pred(..)
+    , normalizePred
     ) where
 
-import Data.List (nub)
-import Pledge.Event
+import Data.List  (nub, delete, sortOn, intercalate)
+import Data.Maybe (mapMaybe)
 
--- | A linear arithmetic expression over heap values and free variables.
--- @'ValAt' a@ dereferences heap address @a@; @'Var' x@ is a free-standing
--- named integer, unconnected to any heap address (e.g.\ a symbolic
--- parameter used in 'SL').  Only scalar multiplication is allowed to
--- preserve linearity.
-data PExpr
-    = Lit Int         -- ^ integer literal
-    | ValAt Addr      -- ^ value at address: @h[a]@
-    | Var String      -- ^ symbolic variable (used in SL)
-    | Add PExpr PExpr -- ^ @e1 + e2@
-    | Mul Int   PExpr -- ^ @k * e@  (scalar only, preserves linearity)
+type Addr = Int
+
+data Values
+    = Var  String
+    | ValAt Addr
+    | Num  Int
+    | Str  String
+    | Bool Bool
+    | Unit
+    | List [Values]
+    deriving (Eq, Ord)
+
+instance Show Values where
+    show (Var s)   = s
+    show (ValAt a) = "h[" ++ show a ++ "]"
+    show (Num n)   = show n
+    show (Str s)   = "\"" ++ s ++ "\""
+    show (Bool b)  = if b then "true" else "false"
+    show Unit      = "()"
+    show (List vs) = "[" ++ intercalate ", " (map show vs) ++ "]"
+
+data Term
+    = Val Values
+    | Add Term Term
+    | Neg Term
     deriving (Eq)
 
-instance Show PExpr where
-    show (Lit n)     = show n
-    show (ValAt a)   = "h[" ++ show a ++ "]"
-    show (Var x)     = x
-    show (Add e1 e2) = "(" ++ show e1 ++ " + " ++ show e2 ++ ")"
-    show (Mul k e)   = show k ++ "*" ++ show e
+instance Show Term where
+    show (Val v) = show v
+    show (Add t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
+    show (Neg t) = "(-" ++ show t ++ ")"
 
--- | Negate a 'PExpr' by scalar multiplication with -1.
-pNeg :: PExpr -> PExpr
-pNeg = Mul (-1)
-
--- | A linear arithmetic predicate over heap values.
--- Used as the Presburger component in 'GuardedRE' and as pure assertions in 'SL'.
--- Satisfiability is discharged to Z3 via 'checkPPred'.
-data PPred
+data Pred
     = PTrue
     | PFalse
-    | PLt  PExpr PExpr  -- ^ @e1 < e2@
-    | PLe  PExpr PExpr  -- ^ @e1 ≤ e2@
-    | PEq  PExpr PExpr  -- ^ @e1 = e2@
-    | PGt  PExpr PExpr  -- ^ @e1 > e2@
-    | PGe  PExpr PExpr  -- ^ @e1 ≥ e2@
-    | PNot PPred
-    | PAnd PPred PPred
+    | PLt  Term Term
+    | PLe  Term Term
+    | PEq  Term Term
+    | PGt  Term Term
+    | PGe  Term Term
+    | PNot Pred
+    | PAnd Pred Pred
+    | POr  Pred Pred
     deriving (Eq)
 
-instance Show PPred where
+instance Show Pred where
     show PTrue        = "true"
     show PFalse       = "false"
     show (PLt  e1 e2) = show e1 ++ " < "  ++ show e2
-    show (PLe  e1 e2) = show e1 ++ " ≤ "  ++ show e2
-    show (PEq  e1 e2) = show e1 ++ " = "  ++ show e2
+    show (PLe  e1 e2) = show e1 ++ " <= " ++ show e2
+    show (PEq  e1 e2) = show e1 ++ " == " ++ show e2
     show (PGt  e1 e2) = show e1 ++ " > "  ++ show e2
-    show (PGe  e1 e2) = show e1 ++ " ≥ "  ++ show e2
+    show (PGe  e1 e2) = show e1 ++ " >= " ++ show e2
     show (PNot p)     = "¬(" ++ show p ++ ")"
-    show (PAnd p q)   = "(" ++ show p ++ " ∧ " ++ show q ++ ")"
+    show (PAnd p q)   = "(" ++ show p ++ ") ∧ (" ++ show q ++ ")"
+    show (POr  p q)   = "(" ++ show p ++ ") ∨ (" ++ show q ++ ")"
 
--- ── Normalization ─────────────────────────────────────────────────────────────
+-- | Constant-fold comparisons, drive negation inward (NNF), flatten and
+-- deduplicate @∧@/@∨@, and propagate @h[a] == k@ equalities into siblings.
+normalizePred :: Pred -> Pred
+normalizePred PTrue      = PTrue
+normalizePred PFalse     = PFalse
+normalizePred (PLt a b)  = ineq True  a b
+normalizePred (PLe a b)  = ineq False a b
+normalizePred (PGt a b)  = ineq True  b a
+normalizePred (PGe a b)  = ineq False b a
+normalizePred (PEq a b)  = eqPred a b
+normalizePred (PNot p)   = nnfNot (normalizePred p)
+normalizePred (PAnd p q) = conj (normalizePred p) (normalizePred q)
+normalizePred (POr  p q) = disj (normalizePred p) (normalizePred q)
 
--- | Simplify a 'PExpr' using arithmetic identities.
-normalizePExpr :: PExpr -> PExpr
-normalizePExpr (Add e1 e2) = case (normalizePExpr e1, normalizePExpr e2) of
-    (Lit 0, e')    -> e'
-    (e',    Lit 0) -> e'
-    (Lit a, Lit b) -> Lit (a + b)
-    (e1',   e2')   -> Add e1' e2'
-normalizePExpr (Mul k e) = case normalizePExpr e of
-    _      | k == 0 -> Lit 0
-    e'     | k == 1 -> e'
-    Lit n           -> Lit (k * n)
-    e'              -> Mul k e'
-normalizePExpr e = e   -- Lit, ValAt, Var: already normal
+-- | A term as a constant plus a sorted atom-to-coefficient map.
+type TermNF = (Int, [(Values, Int)])
 
--- | Simplify a 'PPred' by:
---   * eliminating @PTrue@ from @PAnd@ (identity)
---   * short-circuiting on @PFalse@ (absorbing element)
---   * deduplicating conjuncts (idempotency)
---   * substituting equalities of the form @h[a]=k@ into sibling conjuncts
---   * eliminating double negation
---   * evaluating comparisons between literals
-normalizePPred :: PPred -> PPred
-normalizePPred p =
-    let conjuncts = flattenAnd (normStep p)
-        deduped   = nub conjuncts
-        eqs       = [ (a, k) | PEq (ValAt a) (Lit k) <- deduped ]
-                 ++ [ (a, k) | PEq (Lit k) (ValAt a) <- deduped ]
-        -- Substitute into each conjunct using every *other* known equality.
-        -- Excluding the equality a conjunct states about itself is essential:
-        -- without it, `h[5] = 0` substitutes itself into `Lit 0 = Lit 0`,
-        -- i.e. PTrue, and the constraint is silently lost from the result.
-        eqsFor c  = filter (not . isSelfEq c) eqs
-        subbed    = [ normStep (substEqs (eqsFor c) c) | c <- deduped ]
-    in if PFalse `elem` subbed
-       then PFalse
-       else rebuildAnd (nub (filter (/= PTrue) subbed))
+flattenT :: Bool -> Term -> TermNF
+flattenT neg (Val (Num n)) = (sign neg * n, [])
+flattenT neg (Val v)       = (0, [(v, sign neg)])
+flattenT neg (Neg t)       = flattenT (not neg) t
+flattenT neg (Add s t)     = addNF (flattenT neg s) (flattenT neg t)
 
--- Does an (addr, lit) equality coincide with the equality conjunct c itself?
-isSelfEq :: PPred -> (Addr, Int) -> Bool
-isSelfEq (PEq (ValAt a) (Lit k)) (a', k') = a == a' && k == k'
-isSelfEq (PEq (Lit k) (ValAt a)) (a', k') = a == a' && k == k'
-isSelfEq _                       _        = False
+sign :: Bool -> Int
+sign neg = if neg then -1 else 1
 
--- One-level structural simplification (no flattening).
-normStep :: PPred -> PPred
-normStep (PAnd p q) = case (normStep p, normStep q) of
-    (PFalse, _)          -> PFalse
-    (_, PFalse)          -> PFalse
-    (PTrue, q')          -> q'
-    (p',    PTrue)       -> p'
-    (p',    q') | p'==q' -> p'
-    (p',    q')          -> PAnd p' q'
-normStep (PNot p) = case normStep p of
-    PTrue   -> PFalse
-    PFalse  -> PTrue
-    PNot p' -> p'
-    p'      -> PNot p'
-normStep (PLt  e1 e2) = evalCmp PLt  (<)  e1 e2
-normStep (PLe  e1 e2) = evalCmp PLe  (<=) e1 e2
-normStep (PEq  e1 e2) = evalCmp PEq  (==) e1 e2
-normStep (PGt  e1 e2) = evalCmp PGt  (>)  e1 e2
-normStep (PGe  e1 e2) = evalCmp PGe  (>=) e1 e2
-normStep p            = p
+addNF :: TermNF -> TermNF -> TermNF
+addNF (c1, m1) (c2, m2) = canonNF (c1 + c2, foldr bump m1 m2)
+  where
+    bump (v, k) acc = case span ((/= v) . fst) acc of
+        (pre, (_, k0) : post) -> pre ++ [ (v, k0 + k) | k0 + k /= 0 ] ++ post
+        _                     -> (v, k) : acc
 
--- Flatten a right/left-associated PAnd tree into a list of conjuncts.
-flattenAnd :: PPred -> [PPred]
+canonNF :: TermNF -> TermNF
+canonNF (c, m) = (c, sortOn fst [ p | p@(_, k) <- m, k /= 0 ])
+
+diffNF :: Term -> Term -> TermNF
+diffNF a b = addNF (flattenT False a) (flattenT True b)
+
+sides :: TermNF -> (Term, Term)
+sides (c, m) = (build pos (max c 0), build neg (max (negate c) 0))
+  where
+    pos = [ (v, k)        | (v, k) <- m, k > 0 ]
+    neg = [ (v, negate k) | (v, k) <- m, k < 0 ]
+    build parts k =
+        case concatMap (\(v, n) -> replicate n (Val v)) parts
+               ++ [ Val (Num k) | k /= 0 ] of
+            [] -> Val (Num 0)
+            ts -> foldr1 Add ts
+
+ineq :: Bool -> Term -> Term -> Pred
+ineq strict a b = case diffNF a b of
+    (c, []) -> if test c 0 then PTrue else PFalse
+    nf      -> uncurry con (sides nf)
+  where
+    test = if strict then (<) else (<=)
+    con  = if strict then PLt else PLe
+
+eqPred :: Term -> Term -> Pred
+eqPred a b = case orientNF (diffNF a b) of
+    (0, [])               -> PTrue
+    (_, [])               -> PFalse
+    (0, [(x, 1), (y, -1)])
+        | closed x, closed y -> PFalse
+    nf                    -> uncurry PEq (sides nf)
+  where
+    closed (Var _)   = False
+    closed (ValAt _) = False
+    closed (List vs) = all closed vs
+    closed _         = True
+
+orientNF :: TermNF -> TermNF
+orientNF nf@(c, m)
+    | leadingNegative = (negate c, [ (v, negate k) | (v, k) <- m ])
+    | otherwise       = nf
+  where
+    leadingNegative = case dropWhile (== 0) (map snd m ++ [c]) of
+        k : _ -> k < 0
+        []    -> False
+
+nnfNot :: Pred -> Pred
+nnfNot PTrue      = PFalse
+nnfNot PFalse     = PTrue
+nnfNot (PNot p)   = p
+nnfNot (PLt a b)  = PLe b a
+nnfNot (PLe a b)  = PLt b a
+nnfNot (PAnd p q) = disj (nnfNot p) (nnfNot q)
+nnfNot (POr  p q) = conj (nnfNot p) (nnfNot q)
+nnfNot p          = PNot p
+
+conj :: Pred -> Pred -> Pred
+conj a b = reduceAnd (length cs + 1) cs
+  where cs = nub (filter (/= PTrue) (flattenAnd a ++ flattenAnd b))
+
+reduceAnd :: Int -> [Pred] -> Pred
+reduceAnd fuel cs
+    | PFalse `elem` cs || anyComplement cs = PFalse
+    | fuel <= 0 || cs' == cs               = rebuild PAnd PTrue (dropAbsorbed flattenOr cs)
+    | PFalse `elem` cs'                    = PFalse
+    | otherwise                            = reduceAnd (fuel - 1) cs'
+  where
+    eqs     = mapMaybe asHeapEq cs
+    subst c = normalizePred
+                (substHeapEqs (maybe eqs (`delete` eqs) (asHeapEq c)) c)
+    cs'     = nub (concatMap (filter (/= PTrue) . flattenAnd . subst) cs)
+
+disj :: Pred -> Pred -> Pred
+disj a b
+    | PTrue `elem` ds || anyComplement ds = PTrue
+    | otherwise = rebuild POr PFalse (dropAbsorbed flattenAnd ds)
+  where ds = nub (filter (/= PFalse) (flattenOr a ++ flattenOr b))
+
+dropAbsorbed :: (Pred -> [Pred]) -> [Pred] -> [Pred]
+dropAbsorbed split cls = filter keep cls
+  where
+    keep c = case split c of
+        parts@(_ : _ : _) -> not (any (`elem` cls) parts)
+        _                 -> True
+
+anyComplement :: [Pred] -> Bool
+anyComplement xs = or [ negatesTo x == Just y | x <- xs, y <- xs ]
+
+negatesTo :: Pred -> Maybe Pred
+negatesTo (PLt a b) = Just (PLe b a)
+negatesTo (PLe a b) = Just (PLt b a)
+negatesTo (PEq a b) = Just (PNot (PEq a b))
+negatesTo (PNot p)  = Just p
+negatesTo _         = Nothing
+
+flattenAnd :: Pred -> [Pred]
 flattenAnd (PAnd p q) = flattenAnd p ++ flattenAnd q
 flattenAnd PTrue      = []
 flattenAnd p          = [p]
 
--- Rebuild a flat list of conjuncts back into a PAnd tree ([] → PTrue).
-rebuildAnd :: [PPred] -> PPred
-rebuildAnd []     = PTrue
-rebuildAnd [p]    = p
-rebuildAnd (p:ps) = PAnd p (rebuildAnd ps)
+flattenOr :: Pred -> [Pred]
+flattenOr (POr p q) = flattenOr p ++ flattenOr q
+flattenOr PFalse    = []
+flattenOr p         = [p]
 
--- Substitute a list of (addr → literal) equalities into a PPred.
-substEqs :: [(Addr, Int)] -> PPred -> PPred
-substEqs eqs = goP
+rebuild :: (Pred -> Pred -> Pred) -> Pred -> [Pred] -> Pred
+rebuild _  z [] = z
+rebuild op _ xs = foldr1 op xs
+
+asHeapEq :: Pred -> Maybe (Addr, Int)
+asHeapEq (PEq a b) = case diffNF a b of
+    (c, [(ValAt addr,  1)]) -> Just (addr, negate c)
+    (c, [(ValAt addr, -1)]) -> Just (addr, c)
+    _                       -> Nothing
+asHeapEq _ = Nothing
+
+substHeapEqs :: [(Addr, Int)] -> Pred -> Pred
+substHeapEqs eqs = onTerms go
   where
-    goE (ValAt a)   = maybe (ValAt a) Lit (lookup a eqs)
-    goE (Add e1 e2) = normalizePExpr (Add (goE e1) (goE e2))
-    goE (Mul k e)   = normalizePExpr (Mul k (goE e))
-    goE e           = e
+    go (Val (ValAt a)) = maybe (Val (ValAt a)) (Val . Num) (lookup a eqs)
+    go (Val v)         = Val v
+    go (Neg t)         = Neg (go t)
+    go (Add s t)       = Add (go s) (go t)
 
-    goP (PLt  e1 e2) = normStep (PLt  (goE e1) (goE e2))
-    goP (PLe  e1 e2) = normStep (PLe  (goE e1) (goE e2))
-    goP (PEq  e1 e2) = normStep (PEq  (goE e1) (goE e2))
-    goP (PGt  e1 e2) = normStep (PGt  (goE e1) (goE e2))
-    goP (PGe  e1 e2) = normStep (PGe  (goE e1) (goE e2))
-    goP (PNot q)     = normStep (PNot (goP q))
-    goP (PAnd p q)   = normStep (PAnd (goP p) (goP q))
-    goP p            = p
-
--- Normalize subexpressions and fold literal comparisons to PTrue/PFalse.
-evalCmp :: (PExpr -> PExpr -> PPred) -> (Int -> Int -> Bool) -> PExpr -> PExpr -> PPred
-evalCmp con op e1 e2 =
-    case (normalizePExpr e1, normalizePExpr e2) of
-        (Lit a, Lit b) -> if op a b then PTrue else PFalse
-        (e1',  e2')    -> con e1' e2'
+onTerms :: (Term -> Term) -> Pred -> Pred
+onTerms f = go
+  where
+    go (PLt a b)  = PLt (f a) (f b)
+    go (PLe a b)  = PLe (f a) (f b)
+    go (PEq a b)  = PEq (f a) (f b)
+    go (PNot p)   = PNot (go p)
+    go (PAnd p q) = PAnd (go p) (go q)
+    go (POr  p q) = POr  (go p) (go q)
+    go p          = p
